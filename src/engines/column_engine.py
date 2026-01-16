@@ -360,3 +360,67 @@ class ColumnEngine:
         )
 
         return utilization_simple
+
+    def check_combined_load(
+        self, P_axial: float, M_lateral: float, h: int, fcu: int
+    ) -> Tuple[float, str, List[str]]:
+        """
+        Check column under combined axial + bending moment (P+M interaction).
+        Used for moment frame system where columns resist lateral loads.
+
+        Args:
+            P_axial: Axial load in kN (gravity)
+            M_lateral: Lateral moment in kNm (from wind)
+            h: Column dimension in mm (square column)
+            fcu: Concrete compressive strength in MPa
+
+        Returns:
+            Tuple of (utilization, status, warnings)
+        """
+        # Cross-sectional properties
+        A_column = (h / 1000) ** 2  # m² (convert mm to m)
+        I_column = (h / 1000) ** 4 / 12  # m⁴ (square section)
+        y_max = (h / 1000) / 2  # m (distance to extreme fiber)
+
+        # Stress calculation
+        # σ_axial = P / A (in MPa)
+        # σ_bending = M × y / I (in MPa)
+        sigma_axial = (P_axial * 1000) / (A_column * 1e6)  # kN→N, m²→mm² gives MPa
+        sigma_bending = (M_lateral * y_max) / (I_column * 1000)  # (kNm×m)/m⁴÷1000 = MPa
+        sigma_total = sigma_axial + sigma_bending
+
+        # Allowable stress
+        sigma_allow = 0.45 * fcu
+
+        # Utilization
+        utilization = sigma_total / sigma_allow
+
+        # Status and warnings
+        if utilization > 1.0:
+            status = "FAIL"
+            warnings = [
+                f"Combined P+M utilization {utilization:.2f} > 1.0",
+                "Column overstressed under lateral loads",
+                "Increase column dimensions"
+            ]
+        elif utilization > 0.8:
+            status = "OK"
+            warnings = [f"High utilization {utilization:.2f} - consider larger column"]
+        else:
+            status = "OK"
+            warnings = []
+
+        self._add_calc_step(
+            "Combined P+M interaction check (MOMENT FRAME)",
+            f"Column size: {h} × {h} mm\n"
+            f"A = {A_column:.3f} m², I = {I_column:.6f} m⁴\n"
+            f"σ_axial = P/A = {P_axial:.0f}kN / ({A_column:.3f}m² × 10⁶) = {sigma_axial:.2f} MPa\n"
+            f"σ_bending = M×y/I = {M_lateral:.0f}kNm × {y_max:.3f}m / ({I_column:.6f}m⁴ × 1000) = {sigma_bending:.2f} MPa\n"
+            f"σ_total = {sigma_axial:.2f} + {sigma_bending:.2f} = {sigma_total:.2f} MPa\n"
+            f"σ_allow = 0.45 × fcu = 0.45 × {fcu} = {sigma_allow:.2f} MPa\n"
+            f"Utilization = {sigma_total:.2f} / {sigma_allow:.2f} = {utilization:.3f}\n"
+            f"Status: {status}",
+            "Combined axial + bending for lateral loads"
+        )
+
+        return utilization, status, warnings

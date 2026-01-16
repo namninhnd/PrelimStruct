@@ -73,23 +73,42 @@ Status: [X] COMPLETED
 - Implement calculate_wind_hk2019(height, width, depth, terrain_type)
 - Reference wind pressure (q_ref) calculation
 - Topography (Sa) and Exposure (Sd) factors
+- Terrain categories: OPEN_SEA, OPEN_COUNTRY, URBAN, CITY_CENTRE
 - Output: Base Shear (V_wind) and Overturning Moment (M_wind)
+- Automatic lateral system detection (CORE_WALL vs MOMENT_FRAME)
 Files: src/engines/wind_engine.py (WindEngine class)
 
 ### Task 2.2: Core Wall Checker
 Status: [X] COMPLETED
 - Implement check_core_wall(core_dim_x, core_dim_y, thickness, M_wind)
-- Max compression check: P/A + My/I < 0.45fcu
+- Model core as hollow tube (default 500mm wall thickness)
+- Core location options: CENTER, SIDE, CORNER with eccentricity effects
+- Max compression check: P/A + My/I < 0.45fcu (MPa)
 - Tension uplift check: P/A - My/I < 0 (flag tension piles)
 - Shear check: 1.5V/A_shear < 0.8*sqrt(fcu)
+- Eccentricity moment: M_torsion = V_wind × e (for non-central cores)
 Files: src/engines/wind_engine.py (CoreWallEngine class)
 
-### Task 2.3: Building Drift Check (Enhancement)
+### Task 2.3: Building Drift Check
 Status: [X] COMPLETED
-- Implement drift index calculation
+- Implement drift index calculation (Δ/H)
+- Cantilever deflection: Δ = (V×H³)/(3×E×I)
 - Check Delta/H < 1/500 (serviceability limit)
+- Output drift in mm for user readability
 - Flag undersized core early
 Files: src/engines/wind_engine.py (DriftEngine class)
+
+### Task 2.4: Moment Frame System (Enhancement)
+Status: [X] COMPLETED
+- Automatic detection when no core defined (core_dim_x = 0, core_dim_y = 0)
+- Lateral load distribution to columns via tributary area method
+- Combined P+M interaction check: σ_total = P/A + M×y/I < 0.45fcu
+- All columns participate in lateral resistance (moment-connected)
+- Warning system for overstressed columns (no auto-resize)
+- Comprehensive test suite for moment frame workflow
+Files: src/engines/wind_engine.py (distribute_lateral_to_columns)
+      src/engines/column_engine.py (check_combined_load)
+      tests/test_moment_frame.py
 
 --------------------------------------------------------------------------------
 
@@ -229,5 +248,10 @@ Status: [ ] Not Started
 #
 # COMPLETED:
 # - Feature 1 - Python Engineering Core (All 5 Tasks)
-# - Feature 2 - Lateral Stability Module (All 3 Tasks)
+# - Feature 2 - Lateral Stability Module (All 4 Tasks)
+#   • Wind Load Calculator with HK Wind Code 2019 compliance
+#   • Core Wall Checker with hollow tube modeling and eccentricity effects
+#   • Building Drift Check with mm output
+#   • Moment Frame System for buildings without core walls
+#   • Comprehensive test coverage (test_feature2.py, test_moment_frame.py)
 ================================================================================

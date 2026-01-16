@@ -35,17 +35,52 @@
 ### 1.3 Lateral Stability Module (HK Wind Code 2019)
 * **Action:** Implement `calculate_wind_hk2019(height, width, depth, terrain_type)`.
 * **Physics:**
-    * Determine **Reference Wind Pressure ($q_{ref}$)**.
-    * Apply **Topography ($S_a$)** and **Exposure ($S_d$)** factors based on height.
+    * Determine **Reference Wind Pressure ($q_{ref}$)** = 0.7 kPa (HK Wind Code 2019).
+    * Apply **Topography ($S_a$)** (default = 1.0) and **Exposure ($S_d$)** factors based on height and terrain.
+    * **Terrain Categories:** OPEN_SEA (A), OPEN_COUNTRY (B), URBAN (C), CITY_CENTRE (D).
     * **Output:** Total Base Shear ($V_{wind}$) and Overturning Moment ($M_{wind}$) using the Static Method.
+* **Lateral System Detection:**
+    * **CORE_WALL:** Automatically detected when core dimensions are defined (core_dim_x > 0, core_dim_y > 0).
+    * **MOMENT_FRAME:** Automatically detected when no core is defined (core_dim_x = 0, core_dim_y = 0).
+* **Building Drift Check:**
+    * Calculate cantilever deflection: $\Delta = \frac{V_{wind} \times H^3}{3 \times E \times I}$.
+    * Check serviceability limit: $\frac{\Delta}{H} < \frac{1}{500}$.
+    * **Output:** Drift in mm for user readability, drift index (Δ/H), and pass/fail status.
 
-### 1.4 Core Wall Module
+### 1.4 Core Wall Module (CORE_WALL System)
 * **Action:** Implement `check_core_wall(core_dim_x, core_dim_y, thickness, M_wind)`.
-* **Physics:** Treat the core as a hollow cantilever tube.
-* **Checks:**
-    * **Max Compression:** $\frac{P}{A} + \frac{M_{wind}y}{I} < 0.45f_{cu}$.
-    * **Tension Uplift:** Check if $\frac{P}{A} - \frac{M_{wind}y}{I} < 0$ (Requires tension piles).
-    * **Shear:** Simplified stress check $\frac{1.5V}{A_{shear}} < 0.8\sqrt{f_{cu}}$.
+* **Physics:** Treat the core as a **hollow rectangular tube** (default wall thickness = 500mm).
+* **Section Properties:**
+    * Gross Area: $A_{gross} = L_x \times L_y - L_{x,inner} \times L_{y,inner}$ (hollow section).
+    * Moment of Inertia: $I_{yy} = \frac{L_y \times L_x^3 - L_{y,inner} \times L_{x,inner}^3}{12}$.
+* **Core Location Options:**
+    * **CENTER:** Core at building center (e = 0, symmetric loading).
+    * **SIDE:** Core at building side (one-way eccentricity: $e_x = \frac{B}{2} - \frac{L_x}{2}$).
+    * **CORNER:** Core at building corner (two-way eccentricity: $e_x, e_y$ both non-zero).
+    * **Eccentricity Effect:** Torsional moment $M_{torsion} = V_{wind} \times e$ added to base overturning moment.
+* **Stress Checks:**
+    * **Max Compression:** $\sigma_{compression} = \frac{P}{A} + \frac{M_{wind} \times y_{max}}{I} < 0.45f_{cu}$ (MPa).
+    * **Tension Uplift:** Check if $\sigma_{tension} = \frac{P}{A} - \frac{M_{wind} \times y_{max}}{I} < 0$ (Requires tension piles).
+    * **Shear:** Simplified stress check $\frac{1.5V}{A_{shear}} < 0.8\sqrt{f_{cu}}$ (MPa).
+* **Unit Conversion:** All stresses calculated in MPa (1 MPa = 1 N/mm² = 1000 kN/m²).
+
+### 1.5 Moment Frame Module (MOMENT_FRAME System)
+* **Action:** Implement lateral load distribution to columns when no core is defined.
+* **Physics:** Simple tributary area method for preliminary design.
+* **Distribution Method:**
+    * Calculate tributary area for each column: $A_{trib} = bay_x \times bay_y$.
+    * Load ratio: $\eta = \frac{A_{trib}}{A_{total}}$.
+    * Column shear: $V_{column} = V_{wind} \times \eta$.
+    * Column moment: $M_{column} = V_{column} \times 0.6H$ (simplified moment arm).
+* **Assumptions:**
+    * All columns participate in lateral resistance (not just perimeter).
+    * All columns assumed moment-connected to beams (rigid frame).
+    * No arbitrary height limits for system applicability.
+* **Combined P+M Interaction Check:**
+    * Total stress: $\sigma_{total} = \frac{P_{axial}}{A_{column}} + \frac{M_{lateral} \times y_{max}}{I_{column}}$ (MPa).
+    * Check: $\sigma_{total} < 0.45f_{cu}$ (allowable stress).
+    * **Warning System:** Flag overstressed columns without automatic resizing.
+* **Output:** Dictionary of (V_shear, M_moment) pairs for each column in the grid.
 
 ---
 

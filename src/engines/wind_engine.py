@@ -117,12 +117,16 @@ class WindEngine:
             "HK Wind Code 2019 - Simplified method"
         )
 
+        # Detect lateral system type
+        lateral_system = self._detect_lateral_system()
+
         return WindResult(
             base_shear=round(V_wind, 1),
             overturning_moment=round(M_wind, 1),
             reference_pressure=round(q_ref, 3),
             drift_index=0.0,  # Will be calculated in drift check
             drift_ok=True,
+            lateral_system=lateral_system,
         )
 
     def _calculate_reference_pressure(self) -> float:
@@ -217,6 +221,82 @@ class WindEngine:
         )
 
         return Cf
+
+    def _detect_lateral_system(self) -> str:
+        """
+        Detect lateral load resisting system based on core wall presence.
+        Returns "CORE_WALL" if core is defined, "MOMENT_FRAME" otherwise.
+        """
+        lateral = self.project.lateral
+
+        if lateral.core_dim_x > 0 and lateral.core_dim_y > 0:
+            return "CORE_WALL"
+        else:
+            return "MOMENT_FRAME"
+
+    def distribute_lateral_to_columns(self, wind_result: WindResult) -> Dict[str, Tuple[float, float]]:
+        """
+        Distribute lateral loads to columns using tributary area method.
+        Only applicable for MOMENT_FRAME system (no core wall).
+
+        Returns:
+            Dict mapping column ID to (V_shear, M_moment) in kN and kNm
+        """
+        if wind_result.lateral_system != "MOMENT_FRAME":
+            # Core wall system - columns don't take lateral loads
+            return {}
+
+        geometry = self.project.geometry
+        lateral = self.project.lateral
+
+        # Building dimensions
+        building_width = lateral.building_width if lateral.building_width > 0 else geometry.bay_x * 3
+        building_depth = lateral.building_depth if lateral.building_depth > 0 else geometry.bay_y * 3
+        total_area = building_width * building_depth
+
+        # Total wind shear
+        V_total = wind_result.base_shear
+
+        # Simplified: assume regular grid of columns
+        # Each column gets load proportional to its tributary area
+        num_bays_x = max(1, round(building_width / geometry.bay_x))
+        num_bays_y = max(1, round(building_depth / geometry.bay_y))
+
+        # Tributary area per column (regular grid assumption)
+        tributary_area = geometry.bay_x * geometry.bay_y
+
+        # Load per column
+        load_ratio = tributary_area / total_area
+        V_column = V_total * load_ratio
+
+        # Moment at column base (simplified: accumulated shear × weighted height)
+        height = geometry.floors * geometry.story_height
+        moment_arm = 0.6 * height  # Approximate centroid
+        M_column = V_column * moment_arm
+
+        # Create result dict for all columns
+        # For now, assume uniform distribution
+        # In a more sophisticated implementation, this would vary by column location
+        column_loads = {}
+        num_columns = (num_bays_x + 1) * (num_bays_y + 1)
+
+        for i in range(num_columns):
+            column_id = f"col_{i+1}"
+            column_loads[column_id] = (V_column, M_column)
+
+        self._add_calc_step(
+            "Lateral load distribution to columns (MOMENT FRAME)",
+            f"Total wind shear: {V_total:.1f} kN\n"
+            f"Building footprint: {building_width:.1f} × {building_depth:.1f} = {total_area:.1f} m²\n"
+            f"Number of columns: {num_columns}\n"
+            f"Tributary area per column: {tributary_area:.1f} m²\n"
+            f"Load ratio: {load_ratio:.3f}\n"
+            f"Shear per column: {V_column:.1f} kN\n"
+            f"Moment per column: {M_column:.1f} kNm",
+            "Tributary area method - all columns moment-connected"
+        )
+
+        return column_loads
 
 
 class CoreWallEngine:

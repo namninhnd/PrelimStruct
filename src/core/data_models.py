@@ -195,9 +195,14 @@ class ColumnResult(DesignResult):
     """Column design results"""
     dimension: int = 0          # mm (square column)
     axial_load: float = 0.0     # kN
-    moment: float = 0.0         # kNm
+    moment: float = 0.0         # kNm (gravity moment if any)
     is_slender: bool = False
     slenderness: float = 0.0
+    # Lateral load fields (for moment frame system)
+    lateral_shear: float = 0.0  # kN (wind shear at column)
+    lateral_moment: float = 0.0 # kNm (moment at column base from wind)
+    has_lateral_loads: bool = False  # True if moment frame system
+    combined_utilization: float = 0.0  # P/A + M×y/I utilization
 
 
 @dataclass
@@ -218,6 +223,7 @@ class WindResult:
     drift_mm: float = 0.0            # mm (lateral drift at top)
     drift_index: float = 0.0         # Drift ratio (Δ/H)
     drift_ok: bool = True
+    lateral_system: str = "CORE_WALL"  # "CORE_WALL" or "MOMENT_FRAME"
 
 
 @dataclass
