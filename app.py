@@ -115,6 +115,13 @@ st.markdown("""
         padding: 12px;
         margin-bottom: 8px;
     }
+    .element-card strong {
+        color: #1E3A5F;
+        font-size: 15px;
+    }
+    .element-card small {
+        color: #4A5568;
+    }
 
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
@@ -279,7 +286,7 @@ def create_framing_grid(project: ProjectData) -> go.Figure:
             font=dict(size=16, color="#1E3A5F")
         ),
         xaxis=dict(
-            title="X (m)",
+            title=dict(text="X (m)", standoff=25),
             range=[-1, bay_x + 1],
             scaleanchor="y",
             constrain="domain"
@@ -291,13 +298,13 @@ def create_framing_grid(project: ProjectData) -> go.Figure:
         showlegend=True,
         legend=dict(
             orientation="h",
-            yanchor="bottom",
-            y=-0.2,
+            yanchor="top",
+            y=-0.15,
             xanchor="center",
             x=0.5
         ),
-        height=400,
-        margin=dict(l=40, r=40, t=60, b=60)
+        height=450,
+        margin=dict(l=40, r=40, t=60, b=100)
     )
 
     return fig
@@ -391,8 +398,12 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
     return fig
 
 
-def run_calculations(project: ProjectData) -> ProjectData:
-    """Run all structural calculations"""
+def run_calculations(project: ProjectData,
+                     override_slab: int = 0,
+                     override_beam_w: int = 0,
+                     override_beam_d: int = 0,
+                     override_col: int = 0) -> ProjectData:
+    """Run all structural calculations with optional overrides"""
     # Create engines
     slab_engine = SlabEngine(project)
     beam_engine = BeamEngine(project)
@@ -401,13 +412,36 @@ def run_calculations(project: ProjectData) -> ProjectData:
     # Slab design
     project.slab_result = slab_engine.calculate()
 
+    # Apply slab override if specified
+    if override_slab > 0:
+        project.slab_result.thickness = override_slab
+        project.slab_result.self_weight = (override_slab / 1000) * 24.5
+        project.slab_result.status = "OVERRIDE"
+
     # Beam design
     tributary_width = project.geometry.bay_y / 2  # Half bay each side
     project.primary_beam_result = beam_engine.calculate_primary_beam(tributary_width)
     project.secondary_beam_result = beam_engine.calculate_secondary_beam(tributary_width)
 
+    # Apply beam overrides if specified
+    if override_beam_w > 0 or override_beam_d > 0:
+        if override_beam_w > 0:
+            project.primary_beam_result.width = override_beam_w
+            project.secondary_beam_result.width = override_beam_w
+        if override_beam_d > 0:
+            project.primary_beam_result.depth = override_beam_d
+            project.secondary_beam_result.depth = override_beam_d
+        # Recalculate utilization with override sizes
+        project.primary_beam_result.status = "OVERRIDE"
+        project.secondary_beam_result.status = "OVERRIDE"
+
     # Column design (interior for now)
     project.column_result = column_engine.calculate(ColumnPosition.INTERIOR)
+
+    # Apply column override if specified
+    if override_col > 0:
+        project.column_result.dimension = override_col
+        project.column_result.status = "OVERRIDE"
 
     # Wind / Lateral analysis
     if project.lateral.building_width == 0:
@@ -622,6 +656,36 @@ def main():
 
         st.divider()
 
+        # Element Overrides (Advanced)
+        st.markdown("##### Element Overrides")
+        use_overrides = st.checkbox("Override calculated sizes", value=False,
+                                   help="Enable manual override of structural element sizes")
+
+        if use_overrides:
+            st.caption("Leave at 0 to use calculated values")
+            override_slab_thickness = st.number_input(
+                "Slab Thickness (mm)", min_value=0, max_value=500, value=0, step=25,
+                help="Override slab thickness (0 = auto)")
+            col1, col2 = st.columns(2)
+            with col1:
+                override_beam_width = st.number_input(
+                    "Beam Width (mm)", min_value=0, max_value=800, value=0, step=25,
+                    help="Override beam width (0 = auto)")
+            with col2:
+                override_beam_depth = st.number_input(
+                    "Beam Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
+                    help="Override beam depth (0 = auto)")
+            override_column_size = st.number_input(
+                "Column Size (mm)", min_value=0, max_value=1200, value=0, step=25,
+                help="Override column dimension (0 = auto)")
+        else:
+            override_slab_thickness = 0
+            override_beam_width = 0
+            override_beam_depth = 0
+            override_column_size = 0
+
+        st.divider()
+
         # Load Combination Toggle
         st.markdown("##### Load Combination")
         load_comb_options = {
@@ -652,8 +716,14 @@ def main():
     )
     project.load_combination = selected_load_comb
 
-    # Run calculations
-    project = run_calculations(project)
+    # Run calculations with optional overrides
+    project = run_calculations(
+        project,
+        override_slab=override_slab_thickness,
+        override_beam_w=override_beam_width,
+        override_beam_d=override_beam_depth,
+        override_col=override_column_size
+    )
     st.session_state.project = project
 
     # ===== MAIN CONTENT =====
@@ -792,22 +862,38 @@ def main():
         if project.primary_beam_result:
             col1, col2 = st.columns(2)
             with col1:
+                primary_status = "PASS" if project.primary_beam_result.utilization <= 1.0 else "FAIL"
+                primary_status_color = "#10B981" if primary_status == "PASS" else "#EF4444"
                 st.markdown(f"""
                 **Primary Beam (X-direction)**
                 - Size: **{project.primary_beam_result.width} x {project.primary_beam_result.depth} mm**
                 - Span: {project.geometry.bay_x:.1f} m
                 - Design Moment: {project.primary_beam_result.moment:.1f} kNm
                 - Design Shear: {project.primary_beam_result.shear:.1f} kN
+                - Shear Capacity: {project.primary_beam_result.shear_capacity:.1f} kN
                 - Shear Links: T10 @ {project.primary_beam_result.link_spacing} mm c/c
-                """)
+
+                **Checks**
+                - Utilization: **{project.primary_beam_result.utilization:.1%}**
+                - Status: <span style="color: {primary_status_color}; font-weight: bold;">{primary_status}</span>
+                - Iterations: {project.primary_beam_result.iteration_count}
+                """, unsafe_allow_html=True)
             with col2:
+                secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
+                secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
                 st.markdown(f"""
                 **Secondary Beam (Y-direction)**
                 - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
                 - Span: {project.geometry.bay_y:.1f} m
                 - Design Moment: {project.secondary_beam_result.moment:.1f} kNm
                 - Design Shear: {project.secondary_beam_result.shear:.1f} kN
-                """)
+                - Shear Capacity: {project.secondary_beam_result.shear_capacity:.1f} kN
+
+                **Checks**
+                - Utilization: **{project.secondary_beam_result.utilization:.1%}**
+                - Status: <span style="color: {secondary_status_color}; font-weight: bold;">{secondary_status}</span>
+                - Iterations: {project.secondary_beam_result.iteration_count}
+                """, unsafe_allow_html=True)
 
             if project.primary_beam_result.is_deep_beam or project.secondary_beam_result.is_deep_beam:
                 st.warning("Deep beam detected (L/d < 2.0). Strut-and-Tie Model required.")

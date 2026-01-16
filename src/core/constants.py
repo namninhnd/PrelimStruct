@@ -43,8 +43,8 @@ MIN_BEAM_DEPTH = 300
 MIN_COLUMN_SIZE = 200
 
 # Maximum Practical Dimensions (mm)
-MAX_BEAM_DEPTH = 1200
-MAX_BEAM_WIDTH = 600
+MAX_BEAM_DEPTH = 1500  # Increased to accommodate larger spans
+MAX_BEAM_WIDTH = 800   # Increased to accommodate heavier loads
 
 # Deep Beam Threshold
 DEEP_BEAM_RATIO = 2.0  # L/d < 2.0 triggers deep beam warning

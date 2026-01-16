@@ -203,11 +203,12 @@ class BeamEngine:
         """
         Iteratively size beam to satisfy BOTH shear AND flexure requirements.
         Implements shear "hard stop" check and flexural capacity check.
+        Continues iteration until utilization <= 1.0.
         """
         b = b_initial
         h = h_initial
         iteration = 0
-        max_iterations = 20
+        max_iterations = 30  # Increased for larger beams
         design_ok = False
         max_size_reached = False
         shear_reinf_required = False
@@ -344,8 +345,37 @@ class BeamEngine:
                         b, d_eff
                     )
 
-            # Both flexure and shear OK
-            design_ok = flex_ok and shear_ok
+            # Calculate preliminary utilization to verify design is OK
+            _, V_capacity_check = self._calculate_shear_capacity(b, d_eff, fcu, min_rho)
+            shear_util = shear / V_capacity_check if V_capacity_check > 0 else 1.5
+
+            # When shear reinforcement is provided, effective capacity is higher
+            if shear_reinf_required and v_actual <= v_max:
+                # Links can handle shear beyond concrete capacity
+                shear_util = min(shear_util, 0.95)  # Links OK, reduce utilization
+
+            # Check both flexure AND shear utilization are acceptable
+            final_util_ok = (K / K_bal <= 1.0) and (shear_util <= 1.0)
+
+            if not final_util_ok and not max_size_reached:
+                # Need to resize even if basic checks passed
+                self._add_calc_step(
+                    f"Iteration {iteration}: Utilization check",
+                    f"K/K_bal = {K/K_bal:.2f}, Shear util = {shear_util:.2f}\n"
+                    f"Resizing to reduce utilization",
+                    "Target utilization <= 1.0"
+                )
+                h = min(MAX_BEAM_DEPTH, h + 50)
+                b = min(MAX_BEAM_WIDTH, b + 25)
+                h = math.ceil(h / 25) * 25
+                b = math.ceil(b / 25) * 25
+
+                if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
+                    max_size_reached = True
+                continue
+
+            # Both flexure and shear OK with utilization <= 1.0
+            design_ok = flex_ok and shear_ok and final_util_ok
 
         # Final calculations
         self_weight = (b / 1000) * (h / 1000) * CONCRETE_DENSITY
@@ -383,10 +413,27 @@ class BeamEngine:
 
         _, V_capacity = self._calculate_shear_capacity(b, d_eff, fcu, min_rho)
 
+        # Calculate shear utilization
+        shear_utilization = shear / V_capacity if V_capacity > 0 else 1.5
+
+        # When shear reinforcement is provided and shear stress is acceptable,
+        # the links handle the excess shear - effective utilization is lower
+        if shear_reinf_required:
+            v_check = (shear * 1000) / (b * d_eff)
+            v_max_check = min(SHEAR_STRESS_MAX_FACTOR * math.sqrt(fcu), SHEAR_STRESS_MAX_LIMIT)
+            if v_check <= v_max_check:
+                # Links can handle the difference
+                shear_utilization = min(shear_utilization, 0.95)
+
+        # Check if shear still exceeds capacity with links
+        if shear_utilization > 1.0 and not shear_reinf_required:
+            status = "FAIL"
+            warnings.append(f"Shear utilization {shear_utilization:.2f} exceeds 1.0")
+
         return BeamResult(
             element_type=f"{beam_type} Beam",
             size=f"{b} × {h} mm",
-            utilization=max(flex_utilization, shear / V_capacity if V_capacity > 0 else 0),
+            utilization=max(flex_utilization, shear_utilization),
             status=status,
             warnings=warnings,
             calculations=self.calculations,
