@@ -194,30 +194,39 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
     # Create figure
     fig = go.Figure()
 
-    # Determine primary and secondary beam directions based on configuration
-    # Primary beams are on the PERIMETER, secondary beams are INTERNAL
+    # Colors based on utilization
     pri_color = "#EF4444" if (project.primary_beam_result and
                              project.primary_beam_result.utilization > 1.0) else "#2D5A87"
     sec_color = "#EF4444" if (project.secondary_beam_result and
                              project.secondary_beam_result.utilization > 1.0) else "#4CAF50"
 
+    # All 4 perimeter beams (primary beams enclose the slab)
+    # Horizontal perimeter beams at y=0 and y=bay_y
+    for i, y in enumerate([0, bay_y]):
+        fig.add_trace(go.Scatter(
+            x=[0, bay_x], y=[y, y],
+            mode='lines',
+            line=dict(color=pri_color, width=6),
+            name='Primary Beam',
+            showlegend=(i == 0),
+            hovertemplate=f"Primary Beam<br>Span: {bay_x:.1f}m<extra></extra>"
+        ))
+
+    # Vertical perimeter beams at x=0 and x=bay_x
+    for i, x in enumerate([0, bay_x]):
+        fig.add_trace(go.Scatter(
+            x=[x, x], y=[0, bay_y],
+            mode='lines',
+            line=dict(color=pri_color, width=6),
+            name='Primary Beam',
+            showlegend=False,
+            hovertemplate=f"Primary Beam<br>Span: {bay_y:.1f}m<extra></extra>"
+        ))
+
+    # Secondary beams - internal beams based on direction selection
     if secondary_along_x:
-        # Secondary beams along X (internal horizontal), Primary beams along Y (perimeter vertical)
-        primary_span = bay_y
+        # Secondary beams along X (internal horizontal beams)
         secondary_span = bay_x
-
-        # Primary beams - vertical perimeter beams at x=0 and x=bay_x
-        for i, x in enumerate([0, bay_x]):
-            fig.add_trace(go.Scatter(
-                x=[x, x], y=[0, bay_y],
-                mode='lines',
-                line=dict(color=pri_color, width=6),
-                name='Primary Beam',
-                showlegend=(i == 0),
-                hovertemplate=f"Primary Beam<br>Span: {primary_span:.1f}m<extra></extra>"
-            ))
-
-        # Secondary beams - internal horizontal beams equally spaced
         if num_secondary_beams > 0:
             spacing = bay_y / (num_secondary_beams + 1)
             for i in range(num_secondary_beams):
@@ -231,22 +240,8 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
                     hovertemplate=f"Secondary Beam<br>Span: {secondary_span:.1f}m<extra></extra>"
                 ))
     else:
-        # Secondary beams along Y (internal vertical), Primary beams along X (perimeter horizontal)
-        primary_span = bay_x
+        # Secondary beams along Y (internal vertical beams)
         secondary_span = bay_y
-
-        # Primary beams - horizontal perimeter beams at y=0 and y=bay_y
-        for i, y in enumerate([0, bay_y]):
-            fig.add_trace(go.Scatter(
-                x=[0, bay_x], y=[y, y],
-                mode='lines',
-                line=dict(color=pri_color, width=6),
-                name='Primary Beam',
-                showlegend=(i == 0),
-                hovertemplate=f"Primary Beam<br>Span: {primary_span:.1f}m<extra></extra>"
-            ))
-
-        # Secondary beams - internal vertical beams equally spaced
         if num_secondary_beams > 0:
             spacing = bay_x / (num_secondary_beams + 1)
             for i in range(num_secondary_beams):
