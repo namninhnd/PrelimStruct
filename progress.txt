@@ -1,0 +1,228 @@
+# PrelimStruct - AI-Assisted Preliminary Structural Platform
+# Progress Tracker
+# =============================================================================
+
+## IDEA
+Build a robust, Python-powered preliminary structural design platform with
+rigorous HK Code compliance, integrated lateral stability checks, and a
+"Magazine-Style" automated report with AI-assisted design review.
+
+--------------------------------------------------------------------------------
+
+## PRD (Product Requirements Document)
+- Migrate legacy HTML/JS calculator to Python
+- Implement HK Code 2013 compliant gravity design (slabs, beams, columns)
+- Add lateral stability module (HK Wind Code 2019)
+- Create modern Streamlit dashboard with real-time feedback
+- Generate professional "Magazine-Style" HTML reports
+- Integrate AI design review commentary
+
+--------------------------------------------------------------------------------
+
+## FEATURE 1: Python Engineering Core
+Status: [X] COMPLETED
+
+### Task 1.1: Project Data Structure
+Status: [X] COMPLETED
+- Create ProjectData class with all input attributes
+- Geometry: BayX, BayY, Floors, StoryHeight
+- Loads: LiveLoad (from Code Table 3.1/3.2), DeadLoad
+- Materials: fcu_slab, fcu_beam, fcu_col, fy, fyv
+- Port JS subDivisions object to Python dictionary
+Files: src/core/data_models.py, src/core/constants.py, src/core/load_tables.py
+
+### Task 1.2: Slab Design Module
+Status: [X] COMPLETED
+- Implement span/depth ratio per HK Code Cl 7.3.1.2
+- Calculate Modification Factors based on service stress
+- Output required effective depth with deflection control
+- Add minimum thickness checks
+Files: src/engines/slab_engine.py
+
+### Task 1.3: Beam Design Module
+Status: [X] COMPLETED
+- Implement pattern loading (1.1x magnification factor)
+- Calculate shear stress v = V/(bd)
+- Implement shear "Hard Stop" (v > v_max check)
+- Add deep beam filter (L/d < 2.0 triggers STM warning)
+- Iterative sizing for shear capacity
+Files: src/engines/beam_engine.py
+
+### Task 1.4: Column Design Module
+Status: [X] COMPLETED
+- Load accumulation: N = Area x Floors x (1.4Gk + 1.6Qk)
+- Eccentricity toggle (Interior vs Edge/Corner)
+- Add nominal moment M_min = N x 0.05h for edge columns
+- Slenderness check
+Files: src/engines/column_engine.py
+
+### Task 1.5: Punching Shear Check (Enhancement)
+Status: [X] COMPLETED
+- Implement v_eff = V_eff / (u x d) < v_c
+- Calculate critical perimeter at 1.5d from column face
+- Flag warning for flat slab systems
+Files: src/engines/punching_shear.py
+
+--------------------------------------------------------------------------------
+
+## FEATURE 2: Lateral Stability Module
+Status: [ ] Not Started
+
+### Task 2.1: Wind Load Calculator (HK Wind Code 2019)
+Status: [ ] Not Started
+- Implement calculate_wind_hk2019(height, width, depth, terrain_type)
+- Reference wind pressure (q_ref) calculation
+- Topography (Sa) and Exposure (Sd) factors
+- Output: Base Shear (V_wind) and Overturning Moment (M_wind)
+
+### Task 2.2: Core Wall Checker
+Status: [ ] Not Started
+- Implement check_core_wall(core_dim_x, core_dim_y, thickness, M_wind)
+- Max compression check: P/A + My/I < 0.45fcu
+- Tension uplift check: P/A - My/I < 0 (flag tension piles)
+- Shear check: 1.5V/A_shear < 0.8*sqrt(fcu)
+
+### Task 2.3: Building Drift Check (Enhancement)
+Status: [ ] Not Started
+- Implement drift index calculation
+- Check Delta/H < 1/500 (serviceability limit)
+- Flag undersized core early
+
+--------------------------------------------------------------------------------
+
+## FEATURE 3: Streamlit Dashboard
+Status: [ ] Not Started
+
+### Task 3.1: Layout & Input Controls
+Status: [ ] Not Started
+- Set up Streamlit application structure
+- Sidebar with grouped inputs (Geometry, Loading, Materials)
+- Input validation and error handling
+
+### Task 3.2: Real-time Status Badges
+Status: [ ] Not Started
+- "Pill" indicators for Slab, Beam, Column, Core status
+- Green=Pass, Red=Fail color coding
+- Live update on input change
+
+### Task 3.3: Carbon Estimator
+Status: [ ] Not Started
+- Calculate kgCO2e/m2 based on volume and concrete grade
+- Live display in dashboard
+
+### Task 3.4: Interactive Visualization
+Status: [ ] Not Started
+- Draw framing grid dynamically (Plotly or canvas)
+- Reactive colors (Red if utilization > 1.0)
+- Core wall representation
+
+### Task 3.5: Load Combination Toggle (Enhancement)
+Status: [ ] Not Started
+- ULS: 1.4Gk + 1.6Qk (gravity)
+- ULS: 1.0Gk + 1.4Wk (wind dominant)
+- SLS: 1.0Gk + 1.0Qk (deflection)
+
+### Task 3.6: Quick Scheme Presets (Enhancement)
+Status: [ ] Not Started
+- Dropdown for common building types
+- Residential, Office, Carpark presets
+
+--------------------------------------------------------------------------------
+
+## FEATURE 4: Magazine-Style Report Generator
+Status: [ ] Not Started
+
+### Task 4.1: Template Setup
+Status: [ ] Not Started
+- Set up Jinja2 templating
+- CSS Grid layout structure
+- Embed Aileron font (Base64)
+- SVG icons for concrete, steel, wind, warning, checkmarks
+
+### Task 4.2: Report Page 1 - Gravity Scheme
+Status: [ ] Not Started
+- Hero section with project title & key metrics
+- Framing plan SVG export
+- Element table with status badges
+
+### Task 4.3: Report Page 2 - Stability & Summary
+Status: [ ] Not Started
+- Lateral diagram (Wind Load vs Core Wall)
+- AI Design Review placeholder block
+
+### Task 4.4: Assumptions Page (Enhancement)
+Status: [ ] Not Started
+- Basis of Design section
+- Code edition references
+- Material partial factors (gamma_c=1.5, gamma_s=1.15)
+- Load factors applied
+
+--------------------------------------------------------------------------------
+
+## FEATURE 5: Debug & Integration Testing
+Status: [ ] Not Started
+
+### Task 5.1: Data Pipeline Verification
+Status: [ ] Not Started
+- Trace values through Streamlit -> Python -> HTML
+- Verify no floating-point/rounding errors
+- Test Material Grade slider -> Carbon Estimate update
+
+### Task 5.2: Engineering Logic Stress Test
+Status: [ ] Not Started
+- Test impossible geometry (Beam Width > Column Width)
+- Test failure cases (20m span with 300mm depth)
+- Test edge cases (0m core thickness)
+
+### Task 5.3: Visual Regression Testing
+Status: [ ] Not Started
+- Check HTML Report on A4 PDF export
+- Verify CSS Grid with long data strings
+- Test SVG/font rendering in Chrome and Edge
+
+--------------------------------------------------------------------------------
+
+## FEATURE 6: AI Design Director
+Status: [ ] Not Started
+
+### Task 6.1: Prompt Engineering
+Status: [ ] Not Started
+- Design system prompt for Senior Structural Engineer role
+- Define critique areas (efficiency, constructability, sustainability)
+- Set 150-word limit constraint
+
+### Task 6.2: API Integration
+Status: [ ] Not Started
+- Connect to OpenAI (GPT-4o) or DeepSeek API
+- Handle API responses and errors
+- Inject text into Design Review block
+
+### Task 6.3: Structured JSON Output (Enhancement)
+Status: [ ] Not Started
+- Request structured response format
+- Parse efficiency_score, risks, suggestions, carbon_comment
+- Enable programmatic handling
+
+--------------------------------------------------------------------------------
+
+## FEATURE 7: Final Validation & QA
+Status: [ ] Not Started
+
+### Task 7.1: Benchmark Comparisons
+Status: [ ] Not Started
+- Run 3 standard textbook cases
+- Short span, Long span, High-rise scenarios
+- Compare against manual calculations
+
+### Task 7.2: Final Deliverable
+Status: [ ] Not Started
+- Package as standalone Python application
+- PDF-ready HTML report generation
+- Documentation and user guide
+
+================================================================================
+# CURRENT FOCUS: Feature 2 - Lateral Stability Module
+# NEXT ACTION: Task 2.1 - Wind Load Calculator (HK Wind Code 2019)
+#
+# COMPLETED: Feature 1 - Python Engineering Core (All 5 Tasks)
+================================================================================
