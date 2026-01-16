@@ -113,41 +113,51 @@ Files: src/engines/wind_engine.py (distribute_lateral_to_columns)
 --------------------------------------------------------------------------------
 
 ## FEATURE 3: Streamlit Dashboard
-Status: [ ] Not Started
+Status: [X] COMPLETED
 
 ### Task 3.1: Layout & Input Controls
-Status: [ ] Not Started
-- Set up Streamlit application structure
+Status: [X] COMPLETED
+- Set up Streamlit application structure (app.py)
 - Sidebar with grouped inputs (Geometry, Loading, Materials)
 - Input validation and error handling
+- Responsive wide layout with custom CSS styling
+Files: app.py, requirements.txt
 
 ### Task 3.2: Real-time Status Badges
-Status: [ ] Not Started
-- "Pill" indicators for Slab, Beam, Column, Core status
-- Green=Pass, Red=Fail color coding
-- Live update on input change
+Status: [X] COMPLETED
+- "Pill" indicators for Slab, Beam, Column, Core, Drift status
+- Green=Pass, Amber=Warning, Red=Fail color coding
+- Live update on any input change (Streamlit reactive)
+Files: app.py (get_status_badge function)
 
 ### Task 3.3: Carbon Estimator
-Status: [ ] Not Started
-- Calculate kgCO2e/m2 based on volume and concrete grade
-- Live display in dashboard
+Status: [X] COMPLETED
+- Calculate kgCO2e/m² based on concrete volume and grade
+- Live display in Key Metrics section
+- Uses CARBON_FACTORS from constants.py (280-450 kgCO2e/m³)
+Files: app.py (calculate_carbon_emission function)
 
 ### Task 3.4: Interactive Visualization
-Status: [ ] Not Started
-- Draw framing grid dynamically (Plotly or canvas)
+Status: [X] COMPLETED
+- Framing grid drawn dynamically with Plotly
 - Reactive colors (Red if utilization > 1.0)
-- Core wall representation
+- Core wall representation with location-based positioning
+- Lateral load diagram with wind arrows and drift indicator
+Files: app.py (create_framing_grid, create_lateral_diagram functions)
 
 ### Task 3.5: Load Combination Toggle (Enhancement)
-Status: [ ] Not Started
-- ULS: 1.4Gk + 1.6Qk (gravity)
+Status: [X] COMPLETED
+- ULS: 1.4Gk + 1.6Qk (gravity dominant)
 - ULS: 1.0Gk + 1.4Wk (wind dominant)
-- SLS: 1.0Gk + 1.0Qk (deflection)
+- SLS: 1.0Gk + 1.0Qk (deflection serviceability)
+Files: app.py (sidebar Load Combination section)
 
 ### Task 3.6: Quick Scheme Presets (Enhancement)
-Status: [ ] Not Started
-- Dropdown for common building types
-- Residential, Office, Carpark presets
+Status: [X] COMPLETED
+- Dropdown for common building types (Residential, Office, Retail, Carpark, Plant Room)
+- Auto-fills load classes and material grades from PRESETS
+- Apply Preset button for immediate configuration
+Files: app.py (sidebar Quick Presets section)
 
 --------------------------------------------------------------------------------
 
@@ -243,8 +253,8 @@ Status: [ ] Not Started
 - Documentation and user guide
 
 ================================================================================
-# CURRENT FOCUS: Feature 3 - Streamlit Dashboard
-# NEXT ACTION: Task 3.1 - Layout & Input Controls
+# CURRENT FOCUS: Feature 4 - Magazine-Style Report Generator
+# NEXT ACTION: Task 4.1 - Template Setup
 #
 # COMPLETED:
 # - Feature 1 - Python Engineering Core (All 5 Tasks)
@@ -254,4 +264,13 @@ Status: [ ] Not Started
 #   • Building Drift Check with mm output
 #   • Moment Frame System for buildings without core walls
 #   • Comprehensive test coverage (test_feature2.py, test_moment_frame.py)
+# - Feature 3 - Streamlit Dashboard (All 6 Tasks)
+#   • Streamlit app with responsive layout (app.py)
+#   • Sidebar with grouped inputs (Geometry, Loading, Materials, Lateral)
+#   • Real-time status badges (Slab, Beam, Column, Core, Drift)
+#   • Carbon estimator (kgCO2e/m²)
+#   • Interactive Plotly visualizations (Framing Grid, Lateral Diagram)
+#   • Load combination toggle (ULS Gravity, ULS Wind, SLS)
+#   • Quick scheme presets (Residential, Office, Retail, Carpark, Plant Room)
+#   • Dashboard integration tests (tests/test_dashboard.py)
 ================================================================================

@@ -1,0 +1,19 @@
+# PrelimStruct - Preliminary Structural Design Platform
+# Dependencies
+
+# Web Dashboard
+streamlit>=1.30.0
+
+# Data Visualization
+plotly>=5.18.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Testing
+pytest>=7.4.0
+
+# Future Features (Report Generation)
+# jinja2>=3.1.0
+# weasyprint>=60.0
