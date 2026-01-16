@@ -71,11 +71,23 @@ class GeometryInput:
     bay_y: float            # Bay size in Y direction (m)
     floors: int             # Number of floors
     story_height: float = 3.0  # Story height (m)
+    num_bays_x: int = 1     # Number of bays in X direction
+    num_bays_y: int = 1     # Number of bays in Y direction
     max_slab_span: Optional[float] = None  # Maximum slab span (m)
 
     def __post_init__(self):
         if self.max_slab_span is None:
             self.max_slab_span = min(self.bay_x, self.bay_y)
+
+    @property
+    def total_width_x(self) -> float:
+        """Total building width in X direction"""
+        return self.bay_x * self.num_bays_x
+
+    @property
+    def total_width_y(self) -> float:
+        """Total building width in Y direction"""
+        return self.bay_y * self.num_bays_y
 
 
 @dataclass

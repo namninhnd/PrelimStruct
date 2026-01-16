@@ -187,9 +187,13 @@ def calculate_carbon_emission(project: ProjectData) -> Tuple[float, float]:
 
 
 def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, num_secondary_beams: int = 3) -> go.Figure:
-    """Create interactive framing grid visualization with internal secondary beams"""
+    """Create interactive framing grid visualization with multi-bay support"""
     bay_x = project.geometry.bay_x
     bay_y = project.geometry.bay_y
+    num_bays_x = project.geometry.num_bays_x
+    num_bays_y = project.geometry.num_bays_y
+    total_x = bay_x * num_bays_x
+    total_y = bay_y * num_bays_y
 
     # Create figure
     fig = go.Figure()
@@ -200,22 +204,47 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
     sec_color = "#EF4444" if (project.secondary_beam_result and
                              project.secondary_beam_result.utilization > 1.0) else "#4CAF50"
 
-    # All 4 perimeter beams (primary beams enclose the slab)
-    # Horizontal perimeter beams at y=0 and y=bay_y
-    for i, y in enumerate([0, bay_y]):
+    # Draw slab fills for each bay first (so they're behind beams)
+    slab_color = "rgba(45, 90, 135, 0.1)"
+    if project.slab_result and project.slab_result.utilization > 1.0:
+        slab_color = "rgba(239, 68, 68, 0.2)"
+
+    first_slab = True
+    for ix in range(num_bays_x):
+        for iy in range(num_bays_y):
+            x0 = ix * bay_x
+            y0 = iy * bay_y
+            fig.add_trace(go.Scatter(
+                x=[x0, x0 + bay_x, x0 + bay_x, x0, x0],
+                y=[y0, y0, y0 + bay_y, y0 + bay_y, y0],
+                fill="toself",
+                fillcolor=slab_color,
+                line=dict(color="rgba(0,0,0,0)"),
+                name='Slab',
+                showlegend=first_slab,
+                hovertemplate=f"Slab<br>Thickness: {project.slab_result.thickness if project.slab_result else 'TBD'}mm<extra></extra>"
+            ))
+            first_slab = False
+
+    # Primary beams - horizontal gridlines (at all y positions)
+    first_pri = True
+    for iy in range(num_bays_y + 1):
+        y_pos = iy * bay_y
         fig.add_trace(go.Scatter(
-            x=[0, bay_x], y=[y, y],
+            x=[0, total_x], y=[y_pos, y_pos],
             mode='lines',
             line=dict(color=pri_color, width=6),
             name='Primary Beam',
-            showlegend=(i == 0),
+            showlegend=first_pri,
             hovertemplate=f"Primary Beam<br>Span: {bay_x:.1f}m<extra></extra>"
         ))
+        first_pri = False
 
-    # Vertical perimeter beams at x=0 and x=bay_x
-    for i, x in enumerate([0, bay_x]):
+    # Primary beams - vertical gridlines (at all x positions)
+    for ix in range(num_bays_x + 1):
+        x_pos = ix * bay_x
         fig.add_trace(go.Scatter(
-            x=[x, x], y=[0, bay_y],
+            x=[x_pos, x_pos], y=[0, total_y],
             mode='lines',
             line=dict(color=pri_color, width=6),
             name='Primary Beam',
@@ -223,85 +252,78 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
             hovertemplate=f"Primary Beam<br>Span: {bay_y:.1f}m<extra></extra>"
         ))
 
-    # Secondary beams - internal beams based on direction selection
-    if secondary_along_x:
-        # Secondary beams along X (internal horizontal beams)
-        secondary_span = bay_x
-        if num_secondary_beams > 0:
-            spacing = bay_y / (num_secondary_beams + 1)
-            for i in range(num_secondary_beams):
-                y_pos = spacing * (i + 1)
-                fig.add_trace(go.Scatter(
-                    x=[0, bay_x], y=[y_pos, y_pos],
-                    mode='lines',
-                    line=dict(color=sec_color, width=4),
-                    name='Secondary Beam',
-                    showlegend=(i == 0),
-                    hovertemplate=f"Secondary Beam<br>Span: {secondary_span:.1f}m<extra></extra>"
-                ))
-    else:
-        # Secondary beams along Y (internal vertical beams)
-        secondary_span = bay_y
-        if num_secondary_beams > 0:
-            spacing = bay_x / (num_secondary_beams + 1)
-            for i in range(num_secondary_beams):
-                x_pos = spacing * (i + 1)
-                fig.add_trace(go.Scatter(
-                    x=[x_pos, x_pos], y=[0, bay_y],
-                    mode='lines',
-                    line=dict(color=sec_color, width=4),
-                    name='Secondary Beam',
-                    showlegend=(i == 0),
-                    hovertemplate=f"Secondary Beam<br>Span: {secondary_span:.1f}m<extra></extra>"
-                ))
+    # Secondary beams - internal beams in each bay
+    first_sec = True
+    for ix in range(num_bays_x):
+        for iy in range(num_bays_y):
+            x0 = ix * bay_x
+            y0 = iy * bay_y
 
-    # Columns (at corners)
-    col_positions = [(0, 0), (bay_x, 0), (0, bay_y), (bay_x, bay_y)]
-    col_labels = ['Corner', 'Corner', 'Corner', 'Corner']
+            if secondary_along_x:
+                # Secondary beams along X (internal horizontal beams)
+                if num_secondary_beams > 0:
+                    spacing = bay_y / (num_secondary_beams + 1)
+                    for i in range(num_secondary_beams):
+                        y_pos = y0 + spacing * (i + 1)
+                        fig.add_trace(go.Scatter(
+                            x=[x0, x0 + bay_x], y=[y_pos, y_pos],
+                            mode='lines',
+                            line=dict(color=sec_color, width=4),
+                            name='Secondary Beam',
+                            showlegend=first_sec,
+                            hovertemplate=f"Secondary Beam<br>Span: {bay_x:.1f}m<extra></extra>"
+                        ))
+                        first_sec = False
+            else:
+                # Secondary beams along Y (internal vertical beams)
+                if num_secondary_beams > 0:
+                    spacing = bay_x / (num_secondary_beams + 1)
+                    for i in range(num_secondary_beams):
+                        x_pos = x0 + spacing * (i + 1)
+                        fig.add_trace(go.Scatter(
+                            x=[x_pos, x_pos], y=[y0, y0 + bay_y],
+                            mode='lines',
+                            line=dict(color=sec_color, width=4),
+                            name='Secondary Beam',
+                            showlegend=first_sec,
+                            hovertemplate=f"Secondary Beam<br>Span: {bay_y:.1f}m<extra></extra>"
+                        ))
+                        first_sec = False
 
-    for (x, y), label in zip(col_positions, col_labels):
-        color = "#EF4444" if (project.column_result and
-                             project.column_result.utilization > 1.0) else "#1E3A5F"
-        size_text = f"{project.column_result.dimension}mm" if project.column_result else "TBD"
-        fig.add_trace(go.Scatter(
-            x=[x], y=[y],
-            mode='markers',
-            marker=dict(size=20, color=color, symbol='square'),
-            name='Column',
-            showlegend=(x == 0 and y == 0),
-            hovertemplate=f"Column ({label})<br>Size: {size_text}<extra></extra>"
-        ))
+    # Columns at all grid intersections
+    first_col = True
+    for ix in range(num_bays_x + 1):
+        for iy in range(num_bays_y + 1):
+            x_pos = ix * bay_x
+            y_pos = iy * bay_y
+            color = "#EF4444" if (project.column_result and
+                                 project.column_result.utilization > 1.0) else "#1E3A5F"
+            size_text = f"{project.column_result.dimension}mm" if project.column_result else "TBD"
+            fig.add_trace(go.Scatter(
+                x=[x_pos], y=[y_pos],
+                mode='markers',
+                marker=dict(size=20, color=color, symbol='square'),
+                name='Column',
+                showlegend=first_col,
+                hovertemplate=f"Column<br>Size: {size_text}<extra></extra>"
+            ))
+            first_col = False
 
-    # Slab hatch (fill area)
-    slab_color = "rgba(45, 90, 135, 0.1)"
-    if project.slab_result and project.slab_result.utilization > 1.0:
-        slab_color = "rgba(239, 68, 68, 0.2)"
-
-    fig.add_trace(go.Scatter(
-        x=[0, bay_x, bay_x, 0, 0],
-        y=[0, 0, bay_y, bay_y, 0],
-        fill="toself",
-        fillcolor=slab_color,
-        line=dict(color="rgba(0,0,0,0)"),
-        name='Slab',
-        hovertemplate=f"Slab<br>Thickness: {project.slab_result.thickness if project.slab_result else 'TBD'}mm<extra></extra>"
-    ))
-
-    # Core wall (if defined)
+    # Core wall (if defined) - positioned relative to full building
     if project.lateral.core_dim_x > 0 and project.lateral.core_dim_y > 0:
         core_x = project.lateral.core_dim_x
         core_y = project.lateral.core_dim_y
 
-        # Position based on core location
+        # Position based on core location (relative to total building)
         if project.lateral.core_location == CoreLocation.CENTER:
-            cx = (bay_x - core_x) / 2
-            cy = (bay_y - core_y) / 2
+            cx = (total_x - core_x) / 2
+            cy = (total_y - core_y) / 2
         elif project.lateral.core_location == CoreLocation.SIDE:
-            cx = bay_x - core_x - 0.5
-            cy = (bay_y - core_y) / 2
+            cx = total_x - core_x - 0.5
+            cy = (total_y - core_y) / 2
         else:  # CORNER
-            cx = bay_x - core_x - 0.5
-            cy = bay_y - core_y - 0.5
+            cx = total_x - core_x - 0.5
+            cy = total_y - core_y - 0.5
 
         fig.add_trace(go.Scatter(
             x=[cx, cx + core_x, cx + core_x, cx, cx],
@@ -314,20 +336,21 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
         ))
 
     # Layout
+    title_text = f"Framing Plan ({num_bays_x}×{num_bays_y} bays)" if num_bays_x > 1 or num_bays_y > 1 else "Framing Plan (Single Bay)"
     fig.update_layout(
         title=dict(
-            text="Framing Plan (Single Bay)",
+            text=title_text,
             font=dict(size=16, color="#1E3A5F")
         ),
         xaxis=dict(
             title=dict(text="X (m)", standoff=25),
-            range=[-1, bay_x + 1],
+            range=[-1, total_x + 1],
             scaleanchor="y",
             constrain="domain"
         ),
         yaxis=dict(
             title="Y (m)",
-            range=[-1, bay_y + 1],
+            range=[-1, total_y + 1],
         ),
         showlegend=True,
         legend=dict(
@@ -455,6 +478,10 @@ def run_calculations(project: ProjectData,
         project.slab_result.thickness = override_slab
         project.slab_result.self_weight = (override_slab / 1000) * 24.5
         project.slab_result.status = "OVERRIDE"
+        # Recalculate utilization: compare to minimum required thickness
+        min_span = min(project.geometry.bay_x, project.geometry.bay_y)
+        min_required = (min_span * 1000) / 26  # Basic span/depth ratio
+        project.slab_result.utilization = min_required / override_slab if override_slab > 0 else 1.0
 
     # Beam design - determine spans based on secondary beam direction
     # Secondary beams are INTERNAL to the bay, primary beams are on the perimeter
@@ -493,6 +520,21 @@ def run_calculations(project: ProjectData,
         if override_pri_beam_d > 0:
             project.primary_beam_result.depth = override_pri_beam_d
         project.primary_beam_result.status = "OVERRIDE"
+        # Recalculate utilization based on moment capacity
+        width = project.primary_beam_result.width
+        depth = project.primary_beam_result.depth
+        d_eff = depth - 50  # effective depth
+        if d_eff > 0 and width > 0:
+            # Moment capacity: M_cap = 0.156 * fcu * b * d^2
+            fcu = project.materials.fcu_beam
+            M_cap = 0.156 * fcu * width * (d_eff ** 2) / 1e6  # kNm
+            moment = project.primary_beam_result.moment
+            # Shear capacity check
+            v = project.primary_beam_result.shear * 1000 / (width * d_eff)
+            v_max = 0.8 * (fcu ** 0.5)
+            shear_util = v / v_max if v_max > 0 else 0
+            moment_util = moment / M_cap if M_cap > 0 else 1.0
+            project.primary_beam_result.utilization = max(moment_util, shear_util)
 
     # Apply secondary beam overrides if specified
     if override_sec_beam_w > 0 or override_sec_beam_d > 0:
@@ -501,6 +543,19 @@ def run_calculations(project: ProjectData,
         if override_sec_beam_d > 0:
             project.secondary_beam_result.depth = override_sec_beam_d
         project.secondary_beam_result.status = "OVERRIDE"
+        # Recalculate utilization based on moment capacity
+        width = project.secondary_beam_result.width
+        depth = project.secondary_beam_result.depth
+        d_eff = depth - 50  # effective depth
+        if d_eff > 0 and width > 0:
+            fcu = project.materials.fcu_beam
+            M_cap = 0.156 * fcu * width * (d_eff ** 2) / 1e6  # kNm
+            moment = project.secondary_beam_result.moment
+            v = project.secondary_beam_result.shear * 1000 / (width * d_eff)
+            v_max = 0.8 * (fcu ** 0.5)
+            shear_util = v / v_max if v_max > 0 else 0
+            moment_util = moment / M_cap if M_cap > 0 else 1.0
+            project.secondary_beam_result.utilization = max(moment_util, shear_util)
 
     # Column design (interior for now)
     project.column_result = column_engine.calculate(ColumnPosition.INTERIOR)
@@ -509,6 +564,14 @@ def run_calculations(project: ProjectData,
     if override_col > 0:
         project.column_result.dimension = override_col
         project.column_result.status = "OVERRIDE"
+        # Recalculate utilization based on axial capacity
+        fcu = project.materials.fcu_column
+        fy = 500  # Steel yield strength
+        Ac = override_col * override_col  # Column area mm²
+        # Axial capacity: N_cap = 0.35 * fcu * Ac + 0.67 * fy * 0.02 * Ac (2% steel)
+        N_cap = (0.35 * fcu * Ac + 0.67 * fy * 0.02 * Ac) / 1000  # kN
+        axial_load = project.column_result.axial_load
+        project.column_result.utilization = axial_load / N_cap if N_cap > 0 else 1.0
 
     # Wind / Lateral analysis
     if project.lateral.building_width == 0:
@@ -597,6 +660,16 @@ def main():
         with col2:
             bay_y = st.number_input("Bay Y (m)", min_value=3.0, max_value=15.0,
                                    value=float(st.session_state.project.geometry.bay_y), step=0.5)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            num_bays_x = st.number_input("Bays in X", min_value=1, max_value=10,
+                                        value=st.session_state.project.geometry.num_bays_x, step=1,
+                                        help="Number of bays in X direction")
+        with col2:
+            num_bays_y = st.number_input("Bays in Y", min_value=1, max_value=10,
+                                        value=st.session_state.project.geometry.num_bays_y, step=1,
+                                        help="Number of bays in Y direction")
 
         col1, col2 = st.columns(2)
         with col1:
@@ -804,16 +877,19 @@ def main():
 
     # Update project data
     project = st.session_state.project
-    project.geometry = GeometryInput(bay_x, bay_y, floors, story_height)
+    project.geometry = GeometryInput(bay_x, bay_y, floors, story_height, num_bays_x, num_bays_y)
     project.loads = LoadInput(selected_class, selected_sub, dead_load)
     project.materials = MaterialInput(fcu_slab, fcu_beam, fcu_column, exposure=selected_exposure)
+    # Use total building dimensions for lateral analysis
+    total_width_x = bay_x * num_bays_x
+    total_width_y = bay_y * num_bays_y
     project.lateral = LateralInput(
         core_dim_x=core_x,
         core_dim_y=core_y,
         core_location=selected_core_location,
         terrain=selected_terrain,
-        building_width=bay_x,  # Single bay for now
-        building_depth=bay_y
+        building_width=total_width_x,
+        building_depth=total_width_y
     )
     project.load_combination = selected_load_comb
 
