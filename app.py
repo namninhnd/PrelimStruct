@@ -7,6 +7,7 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+from datetime import datetime
 from typing import Dict, Any, Tuple, Optional
 
 # Import core modules
@@ -24,6 +25,9 @@ from src.engines.slab_engine import SlabEngine
 from src.engines.beam_engine import BeamEngine
 from src.engines.column_engine import ColumnEngine
 from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
+
+# Import report generator
+from src.report.report_generator import ReportGenerator
 
 
 # Page Configuration
@@ -856,6 +860,61 @@ def main():
                 - Shear Utilization: {project.core_wall_result.shear_check:.2%}
                 - Tension Piles Required: {'Yes' if project.core_wall_result.requires_tension_piles else 'No'}
                 """)
+
+    # ===== REPORT GENERATION SECTION =====
+    st.markdown("### Generate Report")
+    st.markdown("""
+    <p style="color: #64748B; font-size: 14px;">
+        Generate a professional Magazine-Style HTML report with your design results.
+    </p>
+    """, unsafe_allow_html=True)
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        ai_review_text = st.text_area(
+            "AI Design Review (Optional)",
+            placeholder="Enter design review commentary here, or leave blank for placeholder text...",
+            height=100,
+            help="This text will appear in the AI Design Review section of the report. Future versions will integrate AI-generated commentary."
+        )
+
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        # Project info for report
+        report_project_name = st.text_input("Project Name", value=project.project_name or "Untitled Project")
+        report_project_number = st.text_input("Project Number", value=project.project_number or "PROJ-001")
+        report_engineer = st.text_input("Engineer", value=project.engineer or "Design Engineer")
+
+    # Update project metadata
+    project.project_name = report_project_name
+    project.project_number = report_project_number
+    project.engineer = report_engineer
+    project.date = datetime.now().strftime("%Y-%m-%d")
+
+    # Generate Report Button
+    if st.button("Generate HTML Report", type="primary", use_container_width=True):
+        with st.spinner("Generating report..."):
+            # Generate the report
+            generator = ReportGenerator(project)
+            ai_review = ai_review_text if ai_review_text.strip() else None
+            html_content = generator.generate(ai_review=ai_review)
+
+            # Create download button
+            st.download_button(
+                label="Download Report (HTML)",
+                data=html_content,
+                file_name=f"{report_project_name.replace(' ', '_')}_Report.html",
+                mime="text/html",
+                use_container_width=True
+            )
+
+            st.success("Report generated successfully! Click the download button above to save.")
+
+            # Show preview in expander
+            with st.expander("Preview Report"):
+                st.components.v1.html(html_content, height=800, scrolling=True)
 
     # Footer
     st.divider()
