@@ -628,4 +628,4 @@ class TestReportIntegration:
 
         # Footer
         assert "PrelimStruct" in html
-        assert "Page 1 of 3" in html
+        assert "Page 1 of 4" in html

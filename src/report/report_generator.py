@@ -633,6 +633,88 @@ body {
 }
 
 /* ============================================
+   CALCULATION STEPS
+   ============================================ */
+
+.calc-section {
+    background: var(--gray-100);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
+}
+
+.calc-section h3 {
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--primary);
+    margin-bottom: var(--spacing-md);
+    padding-bottom: var(--spacing-sm);
+    border-bottom: 1px solid var(--gray-300);
+}
+
+.calc-step {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--spacing-sm) var(--spacing-md);
+    margin-bottom: var(--spacing-sm);
+    padding: var(--spacing-sm);
+    background: white;
+    border-radius: 4px;
+    border-left: 3px solid var(--accent);
+}
+
+.calc-step .step-num {
+    font-weight: 700;
+    color: var(--accent);
+    font-size: 0.85rem;
+}
+
+.calc-step .step-desc {
+    font-size: 0.85rem;
+    color: var(--gray-700);
+}
+
+.calc-step .step-formula {
+    grid-column: 2;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--primary);
+    background: var(--gray-100);
+    padding: var(--spacing-xs) var(--spacing-sm);
+    border-radius: 4px;
+}
+
+.calc-result {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--spacing-md);
+    background: white;
+    border-radius: 4px;
+    margin-top: var(--spacing-md);
+    border: 2px solid var(--accent);
+}
+
+.calc-result .label {
+    font-weight: 600;
+    color: var(--gray-700);
+}
+
+.calc-result .value {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+.calc-result.pass { border-color: var(--success); }
+.calc-result.pass .value { color: var(--success); }
+.calc-result.warn { border-color: var(--warning); }
+.calc-result.warn .value { color: var(--warning); }
+.calc-result.fail { border-color: var(--danger); }
+.calc-result.fail .value { color: var(--danger); }
+
+/* ============================================
    PRINT STYLES
    ============================================ */
 
@@ -649,7 +731,8 @@ body {
 
     .report-header,
     .ai-review-section,
-    .carbon-dashboard {
+    .carbon-dashboard,
+    .calc-section {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -769,12 +852,200 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 1 of 3 | Generated {{ generation_date }}</span>
+        <span>Page 1 of 4 | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
 <!-- ============================================
-     PAGE 2: STABILITY & SUMMARY
+     PAGE 2: STEP-BY-STEP DESIGN CALCULATIONS
+     ============================================ -->
+<div class="page" id="page-calculations">
+
+    <h2 class="section-title">
+        <span class="icon">{{ icons.ruler | safe }}</span>
+        Step-by-Step Design Calculations
+    </h2>
+
+    <!-- Slab Design Calculations -->
+    <div class="calc-section">
+        <h3>{{ icons.concrete | safe }} Slab Design (HK Code Cl 7.3.1.2)</h3>
+
+        <div class="calc-step">
+            <span class="step-num">1</span>
+            <span class="step-desc">Determine slab span and support conditions</span>
+            <div class="step-formula">Span = {{ calc.slab.span }} m | Type: {{ calc.slab.slab_type }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">2</span>
+            <span class="step-desc">Calculate total factored load (ULS)</span>
+            <div class="step-formula">w = γ<sub>G</sub>×Gk + γ<sub>Q</sub>×Qk = {{ calc.slab.load_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">3</span>
+            <span class="step-desc">Apply span/depth ratio from HK Code Table 7.4</span>
+            <div class="step-formula">Basic ratio = {{ calc.slab.basic_ratio }} ({{ calc.slab.slab_type }})</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">4</span>
+            <span class="step-desc">Calculate modification factor for service stress</span>
+            <div class="step-formula">MF = {{ calc.slab.mod_factor }} → Modified ratio = {{ calc.slab.modified_ratio }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">5</span>
+            <span class="step-desc">Calculate required effective depth</span>
+            <div class="step-formula">d = Span / Modified ratio = {{ calc.slab.span }}m / {{ calc.slab.modified_ratio }} = {{ calc.slab.eff_depth }} mm</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">6</span>
+            <span class="step-desc">Add cover and bar diameter to get total thickness</span>
+            <div class="step-formula">h = d + cover + φ/2 = {{ calc.slab.eff_depth }} + 25 + 6 = {{ calc.slab.thickness }} mm</div>
+        </div>
+
+        <div class="calc-result {{ calc.slab.status_class }}">
+            <span class="label">Slab Thickness Adopted</span>
+            <span class="value">{{ calc.slab.thickness }} mm (Utilization: {{ calc.slab.utilization }}%)</span>
+        </div>
+    </div>
+
+    <!-- Primary Beam Design Calculations -->
+    <div class="calc-section">
+        <h3>{{ icons.steel | safe }} Primary Beam Design (HK Code)</h3>
+
+        <div class="calc-step">
+            <span class="step-num">1</span>
+            <span class="step-desc">Determine beam span and tributary width</span>
+            <div class="step-formula">Span = {{ calc.pri_beam.span }} m | Tributary width = {{ calc.pri_beam.trib_width }} m</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">2</span>
+            <span class="step-desc">Calculate uniformly distributed load on beam</span>
+            <div class="step-formula">w = {{ calc.pri_beam.load_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">3</span>
+            <span class="step-desc">Calculate design moment (with pattern loading factor)</span>
+            <div class="step-formula">M = {{ calc.pri_beam.moment_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">4</span>
+            <span class="step-desc">Calculate design shear</span>
+            <div class="step-formula">V = {{ calc.pri_beam.shear_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">5</span>
+            <span class="step-desc">Size beam for flexure and check shear stress</span>
+            <div class="step-formula">b × d = {{ calc.pri_beam.width }} × {{ calc.pri_beam.depth }} mm | v = V/(bd) = {{ calc.pri_beam.shear_stress }} MPa</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">6</span>
+            <span class="step-desc">Check deep beam (L/d > 2.0) and shear capacity</span>
+            <div class="step-formula">L/d = {{ calc.pri_beam.span_depth_ratio }} | v<sub>max</sub> = 0.8√f<sub>cu</sub> = {{ calc.pri_beam.v_max }} MPa</div>
+        </div>
+
+        <div class="calc-result {{ calc.pri_beam.status_class }}">
+            <span class="label">Primary Beam Size Adopted</span>
+            <span class="value">{{ calc.pri_beam.width }} × {{ calc.pri_beam.depth }} mm (Utilization: {{ calc.pri_beam.utilization }}%)</span>
+        </div>
+    </div>
+
+    <!-- Secondary Beam Design Calculations -->
+    <div class="calc-section">
+        <h3>{{ icons.steel | safe }} Secondary Beam Design (HK Code)</h3>
+
+        <div class="calc-step">
+            <span class="step-num">1</span>
+            <span class="step-desc">Determine beam span and tributary width</span>
+            <div class="step-formula">Span = {{ calc.sec_beam.span }} m | Tributary width = {{ calc.sec_beam.trib_width }} m</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">2</span>
+            <span class="step-desc">Calculate uniformly distributed load on beam</span>
+            <div class="step-formula">w = {{ calc.sec_beam.load_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">3</span>
+            <span class="step-desc">Calculate design moment (with pattern loading factor)</span>
+            <div class="step-formula">M = {{ calc.sec_beam.moment_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">4</span>
+            <span class="step-desc">Calculate design shear</span>
+            <div class="step-formula">V = {{ calc.sec_beam.shear_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">5</span>
+            <span class="step-desc">Size beam for flexure and check shear stress</span>
+            <div class="step-formula">b × d = {{ calc.sec_beam.width }} × {{ calc.sec_beam.depth }} mm | v = V/(bd) = {{ calc.sec_beam.shear_stress }} MPa</div>
+        </div>
+
+        <div class="calc-result {{ calc.sec_beam.status_class }}">
+            <span class="label">Secondary Beam Size Adopted</span>
+            <span class="value">{{ calc.sec_beam.width }} × {{ calc.sec_beam.depth }} mm (Utilization: {{ calc.sec_beam.utilization }}%)</span>
+        </div>
+    </div>
+
+    <!-- Column Design Calculations -->
+    <div class="calc-section">
+        <h3>{{ icons.building | safe }} Column Design (HK Code)</h3>
+
+        <div class="calc-step">
+            <span class="step-num">1</span>
+            <span class="step-desc">Calculate tributary area and number of floors</span>
+            <div class="step-formula">A<sub>trib</sub> = {{ calc.column.trib_area }} m² | Floors = {{ calc.column.floors }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">2</span>
+            <span class="step-desc">Calculate total factored axial load</span>
+            <div class="step-formula">N = {{ calc.column.load_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">3</span>
+            <span class="step-desc">Check eccentricity for edge/corner columns</span>
+            <div class="step-formula">{{ calc.column.ecc_check }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">4</span>
+            <span class="step-desc">Size column section (assuming 2% reinforcement)</span>
+            <div class="step-formula">N = 0.35×f<sub>cu</sub>×A<sub>c</sub> + 0.67×f<sub>y</sub>×A<sub>s</sub> → {{ calc.column.size_calc }}</div>
+        </div>
+
+        <div class="calc-step">
+            <span class="step-num">5</span>
+            <span class="step-desc">Check slenderness ratio</span>
+            <div class="step-formula">λ = L<sub>e</sub>/b = {{ calc.column.slenderness_calc }}</div>
+        </div>
+
+        <div class="calc-result {{ calc.column.status_class }}">
+            <span class="label">Column Size Adopted</span>
+            <span class="value">{{ calc.column.size }} mm (Utilization: {{ calc.column.utilization }}%)</span>
+        </div>
+    </div>
+
+    <footer class="report-footer">
+        <span class="footer-logo">PrelimStruct</span>
+        <span>Page 2 of 4 | Generated {{ generation_date }}</span>
+    </footer>
+</div>
+
+<!-- ============================================
+     PAGE 3: STABILITY & SUMMARY
      ============================================ -->
 <div class="page" id="page-stability">
 
@@ -917,7 +1188,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 2 of 3 | Generated {{ generation_date }}</span>
+        <span>Page 3 of 4 | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
@@ -1133,7 +1404,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 3 of 3 | Generated {{ generation_date }}</span>
+        <span>Page 4 of 4 | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
@@ -1530,6 +1801,153 @@ class ReportGenerator:
             return "SLS Deflection (1.0Gk + 1.0Qk)"
         return "ULS Gravity"
 
+    def _build_calc_data(self) -> dict:
+        """Build step-by-step calculation data for template."""
+        p = self.project
+        g = p.geometry
+        l = p.loads
+        m = p.materials
+
+        # Calculate design load
+        gk = p.total_dead_load
+        qk = l.live_load
+        design_load = GAMMA_G * gk + GAMMA_Q * qk
+
+        # Slab calculations
+        slab_span = min(g.bay_x, g.bay_y)
+        slab_data = {
+            'span': f'{slab_span:.1f}',
+            'slab_type': 'Continuous' if g.bay_x != g.bay_y else 'Two-way',
+            'load_calc': f'{GAMMA_G:.1f}×{gk:.1f} + {GAMMA_Q:.1f}×{qk:.1f} = {design_load:.1f} kPa',
+            'basic_ratio': '26',
+            'mod_factor': '1.0',
+            'modified_ratio': '26.0',
+            'eff_depth': '--',
+            'thickness': '--',
+            'utilization': '--',
+            'status_class': 'pass'
+        }
+        if p.slab_result:
+            sr = p.slab_result
+            # Calculate effective depth from thickness (h - cover - bar/2)
+            cover = p.materials.cover_slab if hasattr(p.materials, 'cover_slab') else 25
+            eff_depth = sr.thickness - cover - 6  # T12 bar = 12mm/2 = 6mm
+            slab_data['eff_depth'] = f'{eff_depth:.0f}'
+            slab_data['thickness'] = f'{sr.thickness}'
+            slab_data['utilization'] = f'{sr.utilization * 100:.0f}'
+            slab_data['status_class'] = self._get_status_class(sr.utilization)
+            # Estimate modification factor from deflection ratio
+            if sr.deflection_ratio > 0:
+                mod_factor = (slab_span * 1000 / sr.thickness) / 26
+                slab_data['mod_factor'] = f'{mod_factor:.2f}'
+                slab_data['modified_ratio'] = f'{26 * mod_factor:.1f}'
+
+        # Primary beam calculations
+        pri_beam_data = {
+            'span': '--',
+            'trib_width': '--',
+            'load_calc': '--',
+            'moment_calc': '--',
+            'shear_calc': '--',
+            'width': '--',
+            'depth': '--',
+            'shear_stress': '--',
+            'span_depth_ratio': '--',
+            'v_max': f'{0.8 * (m.fcu_beam ** 0.5):.2f}',
+            'utilization': '--',
+            'status_class': 'pass'
+        }
+        if p.primary_beam_result:
+            br = p.primary_beam_result
+            # Determine primary beam span and tributary based on layout
+            trib_w = g.bay_y / 2
+            udl = design_load * trib_w
+            moment = br.moment
+            shear = br.shear
+
+            pri_beam_data['span'] = f'{g.bay_x:.1f}'  # Assuming primary along X
+            pri_beam_data['trib_width'] = f'{trib_w:.1f}'
+            pri_beam_data['load_calc'] = f'{design_load:.1f} kPa × {trib_w:.1f} m = {udl:.1f} kN/m'
+            pri_beam_data['moment_calc'] = f'1.1 × wL²/8 = 1.1 × {udl:.1f} × {g.bay_x:.1f}² / 8 = {moment:.0f} kNm'
+            pri_beam_data['shear_calc'] = f'wL/2 = {udl:.1f} × {g.bay_x:.1f} / 2 = {shear:.0f} kN'
+            pri_beam_data['width'] = f'{br.width}'
+            pri_beam_data['depth'] = f'{br.depth}'
+            d_eff = br.depth - 50  # effective depth
+            shear_stress = br.shear * 1000 / (br.width * d_eff) if d_eff > 0 else 0
+            pri_beam_data['shear_stress'] = f'{shear_stress:.2f}'
+            pri_beam_data['span_depth_ratio'] = f'{g.bay_x * 1000 / br.depth:.1f}'
+            pri_beam_data['utilization'] = f'{br.utilization * 100:.0f}'
+            pri_beam_data['status_class'] = self._get_status_class(br.utilization)
+
+        # Secondary beam calculations
+        sec_beam_data = {
+            'span': '--',
+            'trib_width': '--',
+            'load_calc': '--',
+            'moment_calc': '--',
+            'shear_calc': '--',
+            'width': '--',
+            'depth': '--',
+            'shear_stress': '--',
+            'utilization': '--',
+            'status_class': 'pass'
+        }
+        if p.secondary_beam_result:
+            sbr = p.secondary_beam_result
+            sec_span = g.bay_y
+            sec_trib = g.bay_x / 4  # Typical with 3 secondary beams
+            sec_udl = design_load * sec_trib
+
+            sec_beam_data['span'] = f'{sec_span:.1f}'
+            sec_beam_data['trib_width'] = f'{sec_trib:.1f}'
+            sec_beam_data['load_calc'] = f'{design_load:.1f} kPa × {sec_trib:.1f} m = {sec_udl:.1f} kN/m'
+            sec_beam_data['moment_calc'] = f'1.1 × wL²/8 = 1.1 × {sec_udl:.1f} × {sec_span:.1f}² / 8 = {sbr.moment:.0f} kNm'
+            sec_beam_data['shear_calc'] = f'wL/2 = {sec_udl:.1f} × {sec_span:.1f} / 2 = {sbr.shear:.0f} kN'
+            sec_beam_data['width'] = f'{sbr.width}'
+            sec_beam_data['depth'] = f'{sbr.depth}'
+            sec_d_eff = sbr.depth - 50  # effective depth
+            sec_shear_stress = sbr.shear * 1000 / (sbr.width * sec_d_eff) if sec_d_eff > 0 else 0
+            sec_beam_data['shear_stress'] = f'{sec_shear_stress:.2f}'
+            sec_beam_data['utilization'] = f'{sbr.utilization * 100:.0f}'
+            sec_beam_data['status_class'] = self._get_status_class(sbr.utilization)
+
+        # Column calculations
+        column_data = {
+            'trib_area': f'{g.bay_x * g.bay_y:.1f}',
+            'floors': f'{g.floors}',
+            'load_calc': '--',
+            'ecc_check': 'Interior column - no eccentricity applied',
+            'size_calc': '--',
+            'slenderness_calc': '--',
+            'size': '--',
+            'utilization': '--',
+            'status_class': 'pass'
+        }
+        if p.column_result:
+            cr = p.column_result
+            trib_area = g.bay_x * g.bay_y
+            total_load = design_load * trib_area * g.floors
+
+            column_data['load_calc'] = f'{design_load:.1f} kPa × {trib_area:.1f} m² × {g.floors} floors = {total_load:.0f} kN'
+            # Check if lateral loads apply
+            if cr.has_lateral_loads:
+                column_data['ecc_check'] = f'Moment frame system - lateral moment = {cr.lateral_moment:.0f} kNm'
+            else:
+                column_data['ecc_check'] = 'Interior column - no eccentricity applied'
+            column_data['size_calc'] = f'Required A_c = {cr.dimension}² = {cr.dimension * cr.dimension / 1e6:.3f} m²'
+            slenderness = g.story_height * 1000 / cr.dimension if cr.dimension > 0 else 0
+            column_data['slenderness_calc'] = f'{g.story_height:.1f} m × 1000 / {cr.dimension} mm = {slenderness:.1f}'
+            column_data['size'] = f'{cr.dimension}'
+            column_data['utilization'] = f'{cr.utilization * 100:.0f}'
+            column_data['status_class'] = self._get_status_class(cr.utilization)
+
+        return {
+            'slab': slab_data,
+            'pri_beam': pri_beam_data,
+            'sec_beam': sec_beam_data,
+            'column': column_data
+        }
+
     def generate(self, ai_review: Optional[str] = None) -> str:
         """
         Generate the complete HTML report.
@@ -1557,6 +1975,7 @@ class ReportGenerator:
             'lateral': self._build_lateral_data(),
             'drift': self._build_drift_data(),
             'carbon': self._build_carbon_data(),
+            'calc': self._build_calc_data(),
             'ai_review': ai_review,
             'materials': {
                 'fcu_slab': self.project.materials.fcu_slab,

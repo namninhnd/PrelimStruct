@@ -186,40 +186,79 @@ def calculate_carbon_emission(project: ProjectData) -> Tuple[float, float]:
     return total_volume, carbon_emission
 
 
-def create_framing_grid(project: ProjectData) -> go.Figure:
-    """Create interactive framing grid visualization"""
+def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, num_secondary_beams: int = 3) -> go.Figure:
+    """Create interactive framing grid visualization with internal secondary beams"""
     bay_x = project.geometry.bay_x
     bay_y = project.geometry.bay_y
 
     # Create figure
     fig = go.Figure()
 
-    # Grid lines (beams)
-    # Primary beams (horizontal)
-    for y in [0, bay_y]:
-        color = "#EF4444" if (project.primary_beam_result and
+    # Determine primary and secondary beam directions based on configuration
+    # Primary beams are on the PERIMETER, secondary beams are INTERNAL
+    pri_color = "#EF4444" if (project.primary_beam_result and
                              project.primary_beam_result.utilization > 1.0) else "#2D5A87"
-        fig.add_trace(go.Scatter(
-            x=[0, bay_x], y=[y, y],
-            mode='lines',
-            line=dict(color=color, width=6),
-            name='Primary Beam',
-            showlegend=(y == 0),
-            hovertemplate=f"Primary Beam<br>Span: {bay_x:.1f}m<extra></extra>"
-        ))
-
-    # Secondary beams (vertical)
-    for x in [0, bay_x]:
-        color = "#EF4444" if (project.secondary_beam_result and
+    sec_color = "#EF4444" if (project.secondary_beam_result and
                              project.secondary_beam_result.utilization > 1.0) else "#4CAF50"
-        fig.add_trace(go.Scatter(
-            x=[x, x], y=[0, bay_y],
-            mode='lines',
-            line=dict(color=color, width=4),
-            name='Secondary Beam',
-            showlegend=(x == 0),
-            hovertemplate=f"Secondary Beam<br>Span: {bay_y:.1f}m<extra></extra>"
-        ))
+
+    if secondary_along_x:
+        # Secondary beams along X (internal horizontal), Primary beams along Y (perimeter vertical)
+        primary_span = bay_y
+        secondary_span = bay_x
+
+        # Primary beams - vertical perimeter beams at x=0 and x=bay_x
+        for i, x in enumerate([0, bay_x]):
+            fig.add_trace(go.Scatter(
+                x=[x, x], y=[0, bay_y],
+                mode='lines',
+                line=dict(color=pri_color, width=6),
+                name='Primary Beam',
+                showlegend=(i == 0),
+                hovertemplate=f"Primary Beam<br>Span: {primary_span:.1f}m<extra></extra>"
+            ))
+
+        # Secondary beams - internal horizontal beams equally spaced
+        if num_secondary_beams > 0:
+            spacing = bay_y / (num_secondary_beams + 1)
+            for i in range(num_secondary_beams):
+                y_pos = spacing * (i + 1)
+                fig.add_trace(go.Scatter(
+                    x=[0, bay_x], y=[y_pos, y_pos],
+                    mode='lines',
+                    line=dict(color=sec_color, width=4),
+                    name='Secondary Beam',
+                    showlegend=(i == 0),
+                    hovertemplate=f"Secondary Beam<br>Span: {secondary_span:.1f}m<extra></extra>"
+                ))
+    else:
+        # Secondary beams along Y (internal vertical), Primary beams along X (perimeter horizontal)
+        primary_span = bay_x
+        secondary_span = bay_y
+
+        # Primary beams - horizontal perimeter beams at y=0 and y=bay_y
+        for i, y in enumerate([0, bay_y]):
+            fig.add_trace(go.Scatter(
+                x=[0, bay_x], y=[y, y],
+                mode='lines',
+                line=dict(color=pri_color, width=6),
+                name='Primary Beam',
+                showlegend=(i == 0),
+                hovertemplate=f"Primary Beam<br>Span: {primary_span:.1f}m<extra></extra>"
+            ))
+
+        # Secondary beams - internal vertical beams equally spaced
+        if num_secondary_beams > 0:
+            spacing = bay_x / (num_secondary_beams + 1)
+            for i in range(num_secondary_beams):
+                x_pos = spacing * (i + 1)
+                fig.add_trace(go.Scatter(
+                    x=[x_pos, x_pos], y=[0, bay_y],
+                    mode='lines',
+                    line=dict(color=sec_color, width=4),
+                    name='Secondary Beam',
+                    showlegend=(i == 0),
+                    hovertemplate=f"Secondary Beam<br>Span: {secondary_span:.1f}m<extra></extra>"
+                ))
 
     # Columns (at corners)
     col_positions = [(0, 0), (bay_x, 0), (0, bay_y), (bay_x, bay_y)]
@@ -405,7 +444,8 @@ def run_calculations(project: ProjectData,
                      override_sec_beam_w: int = 0,
                      override_sec_beam_d: int = 0,
                      override_col: int = 0,
-                     secondary_along_x: bool = False) -> ProjectData:
+                     secondary_along_x: bool = False,
+                     num_secondary_beams: int = 3) -> ProjectData:
     """Run all structural calculations with optional overrides"""
     # Create engines
     slab_engine = SlabEngine(project)
@@ -422,19 +462,34 @@ def run_calculations(project: ProjectData,
         project.slab_result.status = "OVERRIDE"
 
     # Beam design - determine spans based on secondary beam direction
+    # Secondary beams are INTERNAL to the bay, primary beams are on the perimeter
     if secondary_along_x:
-        # Secondary beams along X, primary beams along Y
-        primary_span = project.geometry.bay_y
+        # Secondary beams along X (internal), Primary beams along Y (perimeter)
+        # Secondary beams span in X-direction, supported by primary beams at Y=0 and Y=bay_y
         secondary_span = project.geometry.bay_x
-        tributary_width = project.geometry.bay_x / 2
+        primary_span = project.geometry.bay_y
+        # Tributary width for secondary beam = spacing between secondary beams
+        if num_secondary_beams > 0:
+            secondary_tributary = project.geometry.bay_y / (num_secondary_beams + 1)
+        else:
+            secondary_tributary = project.geometry.bay_y / 2
+        # Primary beam carries load from secondary beams
+        primary_tributary = project.geometry.bay_y / 2
     else:
-        # Secondary beams along Y (default), primary beams along X
-        primary_span = project.geometry.bay_x
+        # Secondary beams along Y (internal), Primary beams along X (perimeter)
+        # Secondary beams span in Y-direction, supported by primary beams at X=0 and X=bay_x
         secondary_span = project.geometry.bay_y
-        tributary_width = project.geometry.bay_y / 2
+        primary_span = project.geometry.bay_x
+        # Tributary width for secondary beam
+        if num_secondary_beams > 0:
+            secondary_tributary = project.geometry.bay_x / (num_secondary_beams + 1)
+        else:
+            secondary_tributary = project.geometry.bay_x / 2
+        # Primary beam carries load from secondary beams
+        primary_tributary = project.geometry.bay_x / 2
 
-    project.primary_beam_result = beam_engine.calculate_primary_beam(tributary_width)
-    project.secondary_beam_result = beam_engine.calculate_secondary_beam(tributary_width)
+    project.primary_beam_result = beam_engine.calculate_primary_beam(primary_tributary)
+    project.secondary_beam_result = beam_engine.calculate_secondary_beam(secondary_tributary)
 
     # Apply primary beam overrides if specified
     if override_pri_beam_w > 0 or override_pri_beam_d > 0:
@@ -632,9 +687,15 @@ def main():
             "Secondary Beam Direction",
             options=["Along Y (default)", "Along X"],
             index=0,
-            help="Direction of secondary beams. Primary beams span perpendicular to this."
+            help="Direction of secondary beams (internal beams). Primary beams are on the perimeter."
         )
         secondary_along_x = secondary_beam_dir == "Along X"
+
+        num_secondary_beams = st.number_input(
+            "Number of Secondary Beams",
+            min_value=0, max_value=10, value=3, step=1,
+            help="Number of internal secondary beams equally spaced within the bay (0 = no secondary beams)"
+        )
 
         st.divider()
 
@@ -770,7 +831,8 @@ def main():
         override_sec_beam_w=override_sec_beam_width,
         override_sec_beam_d=override_sec_beam_depth,
         override_col=override_column_size,
-        secondary_along_x=secondary_along_x
+        secondary_along_x=secondary_along_x,
+        num_secondary_beams=num_secondary_beams
     )
     st.session_state.project = project
 
@@ -874,7 +936,7 @@ def main():
     col1, col2 = st.columns(2)
 
     with col1:
-        grid_fig = create_framing_grid(project)
+        grid_fig = create_framing_grid(project, secondary_along_x, num_secondary_beams)
         st.plotly_chart(grid_fig, use_container_width=True)
 
     with col2:
