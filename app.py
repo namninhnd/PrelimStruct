@@ -822,33 +822,33 @@ def main():
         if use_overrides:
             st.caption("Leave at 0 to use calculated values")
             override_slab_thickness = st.number_input(
-                "Slab Thickness (mm)", min_value=0, max_value=500, value=0, step=25,
+                "Slab Thickness (mm)", min_value=0, value=0, step=25,
                 help="Override slab thickness (0 = auto)")
 
             st.caption("Primary Beam")
             col1, col2 = st.columns(2)
             with col1:
                 override_pri_beam_width = st.number_input(
-                    "Pri. Width (mm)", min_value=0, max_value=800, value=0, step=25,
+                    "Pri. Width (mm)", min_value=0, value=0, step=25,
                     help="Primary beam width (0 = auto)")
             with col2:
                 override_pri_beam_depth = st.number_input(
-                    "Pri. Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
+                    "Pri. Depth (mm)", min_value=0, value=0, step=50,
                     help="Primary beam depth (0 = auto)")
 
             st.caption("Secondary Beam")
             col1, col2 = st.columns(2)
             with col1:
                 override_sec_beam_width = st.number_input(
-                    "Sec. Width (mm)", min_value=0, max_value=800, value=0, step=25,
+                    "Sec. Width (mm)", min_value=0, value=0, step=25,
                     help="Secondary beam width (0 = auto)")
             with col2:
                 override_sec_beam_depth = st.number_input(
-                    "Sec. Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
+                    "Sec. Depth (mm)", min_value=0, value=0, step=50,
                     help="Secondary beam depth (0 = auto)")
 
             override_column_size = st.number_input(
-                "Column Size (mm)", min_value=0, max_value=1200, value=0, step=25,
+                "Column Size (mm)", min_value=0, value=0, step=25,
                 help="Override column dimension (0 = auto)")
         else:
             override_slab_thickness = 0
