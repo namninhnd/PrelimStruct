@@ -130,6 +130,12 @@ class SlabDesignInput:
 
 
 @dataclass
+class BeamDesignInput:
+    """Beam-specific design inputs"""
+    pattern_load_factor: float = 1.1  # Magnification for alternate span loading (user input)
+
+
+@dataclass
 class LateralInput:
     """Lateral stability inputs"""
     core_dim_x: float = 0       # Core wall dimension in X (m)
@@ -223,6 +229,7 @@ class ProjectData:
     materials: MaterialInput = field(default_factory=MaterialInput)
     reinforcement: ReinforcementInput = field(default_factory=ReinforcementInput)
     slab_design: SlabDesignInput = field(default_factory=SlabDesignInput)
+    beam_design: BeamDesignInput = field(default_factory=BeamDesignInput)
     lateral: LateralInput = field(default_factory=LateralInput)
 
     # Design settings

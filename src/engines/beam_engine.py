@@ -12,7 +12,6 @@ from ..core.constants import (
     LINK_YIELD_STRENGTH,
     GAMMA_C,
     GAMMA_S,
-    PATTERN_LOAD_FACTOR,
     MIN_BEAM_WIDTH,
     MIN_BEAM_DEPTH,
     MAX_BEAM_DEPTH,
@@ -215,6 +214,9 @@ class BeamEngine:
         shear_reinf_area = 0.0
         link_spacing = 0
 
+        # Get pattern load factor from user input
+        pattern_factor = self.project.beam_design.pattern_load_factor
+
         while not design_ok and iteration < max_iterations and not max_size_reached:
             iteration += 1
 
@@ -224,8 +226,8 @@ class BeamEngine:
             # Total load including self-weight
             total_load = line_load + self_weight
 
-            # Apply pattern loading factor (1.1x) for moment
-            moment = PATTERN_LOAD_FACTOR * total_load * (L_beam ** 2) / 8
+            # Apply pattern loading factor for moment (user-defined)
+            moment = pattern_factor * total_load * (L_beam ** 2) / 8
 
             # Shear at support
             shear = total_load * L_beam / 2
@@ -253,11 +255,9 @@ class BeamEngine:
                     "HK Code 2013 - Clause 6.1.2.4"
                 )
 
-                # Increase depth primarily for flexure
-                h = min(MAX_BEAM_DEPTH, h + 75)
-                # Also increase width if aspect ratio too high
-                if h / b > 2.5:
-                    b = min(MAX_BEAM_WIDTH, b + 50)
+                # Increase depth by 50mm, width by 25mm (half)
+                h = min(MAX_BEAM_DEPTH, h + 50)
+                b = min(MAX_BEAM_WIDTH, b + 25)
 
                 h = math.ceil(h / 25) * 25
                 b = math.ceil(b / 25) * 25
@@ -284,11 +284,11 @@ class BeamEngine:
                     "HK Code 2013 - Clause 6.1.2.4 - Cannot design shear links"
                 )
 
-                # Must increase section size
-                if h < MAX_BEAM_DEPTH:
-                    h = min(MAX_BEAM_DEPTH, h + 100)
-                if b < MAX_BEAM_WIDTH and h >= MAX_BEAM_DEPTH:
+                # Increase width by 50mm up to beam height, then increase height by 50mm
+                if b + 50 <= h:
                     b = min(MAX_BEAM_WIDTH, b + 50)
+                else:
+                    h = min(MAX_BEAM_DEPTH, h + 50)
 
                 h = math.ceil(h / 25) * 25
                 b = math.ceil(b / 25) * 25
@@ -350,7 +350,7 @@ class BeamEngine:
         # Final calculations
         self_weight = (b / 1000) * (h / 1000) * CONCRETE_DENSITY
         total_load = line_load + self_weight
-        moment = PATTERN_LOAD_FACTOR * total_load * (L_beam ** 2) / 8
+        moment = pattern_factor * total_load * (L_beam ** 2) / 8
         shear = total_load * L_beam / 2
         d_eff = h - cover - 10 - 16
 
@@ -363,7 +363,7 @@ class BeamEngine:
         self._add_calc_step(
             "Final beam design",
             f"Size: {b} × {h} mm\n"
-            f"Moment: {moment:.2f} kNm (with {PATTERN_LOAD_FACTOR}× pattern factor)\n"
+            f"Moment: {moment:.2f} kNm (with {pattern_factor}× pattern factor)\n"
             f"Shear: {shear:.2f} kN",
             "Design complete"
         )
@@ -372,9 +372,9 @@ class BeamEngine:
         warnings = []
         status = "OK"
 
-        if max_size_reached and not shear_ok:
+        if max_size_reached and not design_ok:
             status = "FAIL"
-            warnings.append("Maximum beam size reached - shear capacity exceeded")
+            warnings.append("Maximum beam size reached - capacity exceeded")
             warnings.append("Consider deeper beam, transfer structure, or reduced span")
 
         if flex_utilization > 1.0:
