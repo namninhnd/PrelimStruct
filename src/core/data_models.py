@@ -43,6 +43,13 @@ class TerrainCategory(Enum):
     CITY_CENTRE = "D"       # City centre with tall buildings
 
 
+class CoreLocation(Enum):
+    """Core wall location in building plan"""
+    CENTER = "center"       # Core at building center (symmetric)
+    SIDE = "side"           # Core at building side (one-way eccentricity)
+    CORNER = "corner"       # Core at building corner (two-way eccentricity)
+
+
 class ColumnPosition(Enum):
     """Column position for eccentricity calculation"""
     INTERIOR = "interior"
@@ -138,9 +145,10 @@ class BeamDesignInput:
 @dataclass
 class LateralInput:
     """Lateral stability inputs"""
-    core_dim_x: float = 0       # Core wall dimension in X (m)
-    core_dim_y: float = 0       # Core wall dimension in Y (m)
-    core_thickness: float = 0.3  # Core wall thickness (m)
+    core_dim_x: float = 0       # Core wall outer dimension in X (m)
+    core_dim_y: float = 0       # Core wall outer dimension in Y (m)
+    core_thickness: float = 0.5  # Core wall thickness (m), default 500mm
+    core_location: CoreLocation = CoreLocation.CENTER  # Core location in plan
     terrain: TerrainCategory = TerrainCategory.URBAN
     building_width: float = 0   # Total building width (m)
     building_depth: float = 0   # Total building depth (m)

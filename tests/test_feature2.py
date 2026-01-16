@@ -16,6 +16,7 @@ from src.core.data_models import (
     MaterialInput,
     LateralInput,
     TerrainCategory,
+    CoreLocation,
 )
 from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
 
@@ -137,7 +138,8 @@ class TestCoreWallEngine:
                 terrain=TerrainCategory.URBAN,
                 core_dim_x=8.0,
                 core_dim_y=8.0,
-                core_thickness=0.35,
+                core_thickness=0.5,  # 500mm walls (hollow tube)
+                core_location=CoreLocation.CENTER,
             ),
         )
 
@@ -214,6 +216,45 @@ class TestCoreWallEngine:
 
         print(f"✓ Undefined core wall test passed")
         print(f"  Status: {core_result.status}")
+
+    def test_core_location_effects(self):
+        """Test eccentricity effects for different core locations"""
+        core_locations = [CoreLocation.CENTER, CoreLocation.SIDE, CoreLocation.CORNER]
+        results = {}
+
+        for location in core_locations:
+            project = ProjectData(
+                geometry=GeometryInput(bay_x=8.0, bay_y=8.0, floors=15, story_height=3.5),
+                loads=LoadInput("2", "2.5", 2.0),
+                materials=MaterialInput(fcu_column=45),
+                lateral=LateralInput(
+                    building_width=24.0,
+                    building_depth=24.0,
+                    terrain=TerrainCategory.URBAN,
+                    core_dim_x=8.0,
+                    core_dim_y=8.0,
+                    core_thickness=0.5,
+                    core_location=location,
+                ),
+            )
+
+            wind_engine = WindEngine(project)
+            wind_result = wind_engine.calculate_wind_loads()
+
+            core_engine = CoreWallEngine(project)
+            core_result = core_engine.check_core_wall(wind_result)
+
+            results[location.value] = core_result.compression_check
+
+        # Eccentricity should increase compression for non-center cores
+        # CENTER should have lowest compression
+        assert results["center"] <= results["side"], "Center core should have lower compression than side"
+        assert results["side"] <= results["corner"], "Side core should have lower compression than corner"
+
+        print(f"✓ Core location effects test passed")
+        print(f"  CENTER compression: {results['center']:.4f}")
+        print(f"  SIDE compression: {results['side']:.4f}")
+        print(f"  CORNER compression: {results['corner']:.4f}")
 
 
 class TestDriftEngine:
@@ -422,6 +463,7 @@ if __name__ == "__main__":
     test_core.test_core_wall_adequate()
     test_core.test_core_wall_undersized()
     test_core.test_core_wall_undefined()
+    test_core.test_core_location_effects()
 
     # Run Drift Engine tests
     print("\n[3] DRIFT ENGINE TESTS")

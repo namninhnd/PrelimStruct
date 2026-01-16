@@ -265,21 +265,38 @@ class CoreWallEngine:
                 calculations=self.calculations,
             )
 
+        core_location = lateral.core_location
+
         self._add_calc_step(
             "CORE WALL STRESS CHECK",
-            f"Core dimensions: {L_x:.2f} × {L_y:.2f} m\n"
-            f"Wall thickness: {t:.3f} m\n"
+            f"Core dimensions: {L_x:.2f} × {L_y:.2f} m (outer)\n"
+            f"Wall thickness: {t*1000:.0f} mm\n"
+            f"Core location: {core_location.value}\n"
             f"Concrete grade: fcu = {materials.fcu_column} MPa",
             "HK Code 2013 - Clause 6.2"
         )
 
-        # Calculate core wall properties
-        # Simplified as rectangular hollow section
-        A_gross = L_x * L_y  # Gross area (conservative, doesn't subtract opening)
+        # Calculate core wall properties as HOLLOW TUBE
+        # Outer dimensions: L_x × L_y, Inner dimensions: (L_x - 2t) × (L_y - 2t)
+        L_x_inner = L_x - 2 * t
+        L_y_inner = L_y - 2 * t
 
-        # Second moment of area (assuming symmetric core)
-        I_xx = (L_x * L_y ** 3) / 12  # Bending about X-axis (wind in Y direction)
-        I_yy = (L_y * L_x ** 3) / 12  # Bending about Y-axis (wind in X direction)
+        # Cross-sectional area (walls only)
+        A_gross = L_x * L_y - L_x_inner * L_y_inner  # Hollow section
+
+        # Second moment of area for hollow rectangular section
+        # I = I_outer - I_inner
+        I_xx = (L_x * L_y ** 3 - L_x_inner * L_y_inner ** 3) / 12  # Bending about X-axis
+        I_yy = (L_y * L_x ** 3 - L_y_inner * L_x_inner ** 3) / 12  # Bending about Y-axis
+
+        self._add_calc_step(
+            "Hollow tube section properties",
+            f"Outer: {L_x:.2f} × {L_y:.2f} m\n"
+            f"Inner: {L_x_inner:.2f} × {L_y_inner:.2f} m\n"
+            f"A_walls = {A_gross:.2f} m² (wall area only)\n"
+            f"I_xx = {I_xx:.3f} m⁴, I_yy = {I_yy:.3f} m⁴",
+            "Hollow rectangular tube section"
+        )
 
         # Distance to extreme fiber
         y_max = L_y / 2
@@ -305,11 +322,60 @@ class CoreWallEngine:
         )
 
         # Overturning moment from wind
-        M_wind = wind_result.overturning_moment
+        M_wind_base = wind_result.overturning_moment
+
+        # === ECCENTRICITY EFFECTS DUE TO CORE LOCATION ===
+        # Additional moment due to eccentricity when core is not at center
+        from ..core.data_models import CoreLocation
+
+        building_width = lateral.building_width if lateral.building_width > 0 else geometry.bay_x * 3
+        building_depth = lateral.building_depth if lateral.building_depth > 0 else geometry.bay_y * 3
+
+        # Eccentricity of wind resultant relative to core centroid
+        if core_location == CoreLocation.CENTER:
+            e_x = 0.0  # No eccentricity
+            e_y = 0.0
+        elif core_location == CoreLocation.SIDE:
+            # Core at side: eccentricity = half building width - half core width
+            e_x = (building_width / 2) - (L_x / 2)
+            e_y = 0.0
+        else:  # CORNER
+            # Core at corner: eccentricity in both directions
+            e_x = (building_width / 2) - (L_x / 2)
+            e_y = (building_depth / 2) - (L_y / 2)
+
+        # Additional torsional moment (simplified approach)
+        # When wind acts perpendicular to building, eccentricity causes additional moment
+        V_wind = wind_result.base_shear
+        M_torsion = V_wind * e_x  # Simplified: torsion due to lateral load eccentricity
+
+        # Total moment for design
+        M_wind = M_wind_base + M_torsion
+
+        if M_torsion > 0:
+            self._add_calc_step(
+                "Eccentricity effects (core location)",
+                f"Core location: {core_location.value}\n"
+                f"Building width: {building_width:.2f} m\n"
+                f"Eccentricity e_x: {e_x:.2f} m\n"
+                f"M_torsion = V × e = {V_wind:.1f} × {e_x:.2f} = {M_torsion:.1f} kNm\n"
+                f"M_total = M_base + M_torsion = {M_wind_base:.1f} + {M_torsion:.1f} = {M_wind:.1f} kNm",
+                "Additional moment due to non-central core"
+            )
+        else:
+            self._add_calc_step(
+                "Eccentricity effects (core location)",
+                f"Core location: {core_location.value} (no eccentricity)\n"
+                f"M_wind = {M_wind:.1f} kNm",
+                "Symmetric core layout"
+            )
 
         # === COMPRESSION CHECK ===
         # Maximum compressive stress: σ_max = P/A + M*y/I
-        sigma_compression = (P * 1000) / (A_gross * 1e6) + (M_wind * 1e6 * y_max) / (I_yy * 1e12)
+        # Units: P in kN, A in m², M in kNm, y in m, I in m⁴ → Result in MPa
+        sigma_axial = (P * 1000) / (A_gross * 1e6)  # kN→N, m²→mm² gives N/mm² = MPa
+        sigma_bending = (M_wind * y_max) / (I_yy * 1000)  # (kNm×m)/m⁴ = kN/m² → MPa
+        sigma_compression = sigma_axial + sigma_bending
 
         # Allowable stress: 0.45 × fcu (simplified)
         sigma_allow = 0.45 * materials.fcu_column
@@ -317,26 +383,26 @@ class CoreWallEngine:
 
         self._add_calc_step(
             "Maximum compression check",
-            f"A_gross = {A_gross:.2f} m²\n"
-            f"I_yy = {I_yy:.3f} m⁴\n"
+            f"A_gross = {A_gross:.2f} m² (wall area)\n"
+            f"I_yy = {I_yy:.3f} m⁴ (hollow tube)\n"
             f"σ_max = P/A + M×y/I\n"
-            f"σ_max = {P:.0f}×10³/({A_gross:.2f}×10⁶) + {M_wind:.0f}×10⁶×{y_max:.2f}/({I_yy:.3f}×10¹²)\n"
-            f"σ_max = {sigma_compression:.2f} MPa\n"
+            f"  σ_axial = {P:.0f}kN × 1000 / ({A_gross:.2f}m² × 10⁶) = {sigma_axial:.3f} MPa\n"
+            f"  σ_bending = {M_wind:.0f}kNm × {y_max:.2f}m / ({I_yy:.3f}m⁴ × 1000) = {sigma_bending:.3f} MPa\n"
+            f"  σ_max = {sigma_axial:.3f} + {sigma_bending:.3f} = {sigma_compression:.2f} MPa\n"
             f"σ_allow = 0.45 × fcu = 0.45 × {materials.fcu_column} = {sigma_allow:.2f} MPa\n"
-            f"Utilization = {compression_util:.3f}",
+            f"Utilization = {sigma_compression:.2f}/{sigma_allow:.2f} = {compression_util:.3f}",
             "HK Code 2013 - Clause 6.2.4"
         )
 
         # === TENSION CHECK ===
         # Minimum stress (tension): σ_min = P/A - M*y/I
-        sigma_tension = (P * 1000) / (A_gross * 1e6) - (M_wind * 1e6 * y_max) / (I_yy * 1e12)
+        sigma_tension = sigma_axial - sigma_bending
         requires_tension_piles = sigma_tension < 0
 
         self._add_calc_step(
             "Tension/uplift check",
             f"σ_min = P/A - M×y/I\n"
-            f"σ_min = {P:.0f}×10³/({A_gross:.2f}×10⁶) - {M_wind:.0f}×10⁶×{y_max:.2f}/({I_yy:.3f}×10¹²)\n"
-            f"σ_min = {sigma_tension:.2f} MPa\n"
+            f"  σ_min = {sigma_axial:.3f} - {sigma_bending:.3f} = {sigma_tension:.2f} MPa\n"
             f"{'TENSION - Tension piles required' if requires_tension_piles else 'OK - No uplift'}",
             "Foundation design consideration"
         )
@@ -453,10 +519,13 @@ class DriftEngine:
         # Δ = (V × H³) / (3 × E × I)
 
         # Modulus of elasticity
-        E_c = 4700 * math.sqrt(materials.fcu_column)  # MPa
+        E_c = 4700 * math.sqrt(materials.fcu_column)  # MPa (= N/mm²)
 
-        # Second moment of area (bending about minor axis)
-        I = (L_x * L_y ** 3) / 12  # m⁴
+        # Second moment of area for HOLLOW TUBE (bending about minor axis)
+        t = lateral.core_thickness
+        L_x_inner = L_x - 2 * t
+        L_y_inner = L_y - 2 * t
+        I = (L_x * L_y ** 3 - L_x_inner * L_y_inner ** 3) / 12  # m⁴ (hollow section)
 
         # Use serviceability wind load (unfactored, reduced)
         V_service = wind_result.base_shear / 1.4  # Reduce from ULS to SLS
@@ -478,13 +547,17 @@ class DriftEngine:
 
         self._add_calc_step(
             "Cantilever deflection calculation",
-            f"E_c = 4700√fcu = 4700√{materials.fcu_column} = {E_c:.0f} MPa\n"
-            f"I = (L_x × L_y³) / 12 = ({L_x:.2f} × {L_y:.2f}³) / 12 = {I:.3f} m⁴\n"
-            f"V_service = {V_service:.1f} kN (SLS wind load)\n"
-            f"Δ = (V × H³) / (3 × E × I)\n"
-            f"Δ = ({V_service:.1f}×10³ N × {height:.1f}³ m³) / (3 × {E_c:.0f}×10⁶ Pa × {I:.3f} m⁴)\n"
-            f"Δ = {drift_mm:.1f} mm",
-            "Simplified cantilever beam theory"
+            f"E_c = 4700√fcu = 4700√{materials.fcu_column} = {E_c:.0f} MPa (= N/mm²)\n"
+            f"Hollow tube: Outer {L_x:.2f}×{L_y:.2f}m, Inner {L_x_inner:.2f}×{L_y_inner:.2f}m\n"
+            f"I = (I_outer - I_inner)/12 = {I:.3f} m⁴\n"
+            f"V_service = {V_service:.1f} kN (SLS wind load, V_ULS/1.4)\n"
+            f"\nΔ = (V × H³) / (3 × E × I)\n"
+            f"  V = {V_service:.1f} kN = {V_service*1000:.0f} N\n"
+            f"  E = {E_c:.0f} MPa = {E_c*1e6:.0f} Pa (N/m²)\n"
+            f"  H³ = {height:.1f}³ = {height**3:.0f} m³\n"
+            f"  Δ = ({V_service*1000:.0f} N × {height**3:.0f} m³) / (3 × {E_c*1e6:.0f} Pa × {I:.3f} m⁴)\n"
+            f"  Δ = {drift_mm:.1f} mm",
+            "Cantilever beam deflection (hollow tube)"
         )
 
         self._add_calc_step(
