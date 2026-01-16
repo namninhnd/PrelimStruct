@@ -207,7 +207,8 @@ class WindResult:
     base_shear: float = 0.0         # kN
     overturning_moment: float = 0.0  # kNm
     reference_pressure: float = 0.0  # kPa
-    drift_index: float = 0.0
+    drift_mm: float = 0.0            # mm (lateral drift at top)
+    drift_index: float = 0.0         # Drift ratio (Δ/H)
     drift_ok: bool = True
 
 

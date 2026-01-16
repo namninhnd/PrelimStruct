@@ -436,6 +436,7 @@ class DriftEngine:
 
         if L_x <= 0 or L_y <= 0:
             # Cannot calculate drift without core dimensions
+            wind_result.drift_mm = 0.0
             wind_result.drift_index = 0.0
             wind_result.drift_ok = False
             return wind_result
@@ -465,6 +466,9 @@ class DriftEngine:
         # Units: V in kN, H in m, E in MPa (= N/mm² = 10⁶ N/m²), I in m⁴
         delta = (V_service * 1000 * (height ** 3)) / (3 * E_c * 1e6 * I)
 
+        # Convert to mm for output
+        drift_mm = delta * 1000
+
         # Drift index (Δ/H)
         drift_index = delta / height
 
@@ -478,20 +482,21 @@ class DriftEngine:
             f"I = (L_x × L_y³) / 12 = ({L_x:.2f} × {L_y:.2f}³) / 12 = {I:.3f} m⁴\n"
             f"V_service = {V_service:.1f} kN (SLS wind load)\n"
             f"Δ = (V × H³) / (3 × E × I)\n"
-            f"Δ = ({V_service:.1f}×10³ × {height:.1f}³) / (3 × {E_c:.0f}×10⁶ × {I:.3f})\n"
-            f"Δ = {delta * 1000:.1f} mm",
+            f"Δ = ({V_service:.1f}×10³ N × {height:.1f}³ m³) / (3 × {E_c:.0f}×10⁶ Pa × {I:.3f} m⁴)\n"
+            f"Δ = {drift_mm:.1f} mm",
             "Simplified cantilever beam theory"
         )
 
         self._add_calc_step(
             "Drift index check",
-            f"Drift index = Δ/H = {delta:.4f}/{height:.1f} = {drift_index:.5f}\n"
+            f"Drift index = Δ/H = {drift_mm:.1f}mm / {height*1000:.0f}mm = {drift_index:.5f}\n"
             f"Limit = H/500 = {drift_limit:.5f}\n"
             f"Status: {'OK' if drift_ok else 'FAIL - Increase core stiffness'}",
             "HK Code 2013 - Serviceability (Δ/H < 1/500)"
         )
 
         # Update wind result with drift information
+        wind_result.drift_mm = round(drift_mm, 1)
         wind_result.drift_index = round(drift_index, 5)
         wind_result.drift_ok = drift_ok
 

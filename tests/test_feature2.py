@@ -243,6 +243,7 @@ class TestDriftEngine:
         updated_wind_result = drift_engine.calculate_drift(wind_result)
 
         # Assertions
+        assert updated_wind_result.drift_mm > 0, "Drift should be positive"
         assert updated_wind_result.drift_index > 0, "Drift index should be positive"
         assert updated_wind_result.drift_index < 0.01, "Drift index should be reasonable"
 
@@ -250,6 +251,7 @@ class TestDriftEngine:
         drift_limit = 1.0 / 500.0
 
         print(f"✓ Drift calculation completed")
+        print(f"  Lateral drift: {updated_wind_result.drift_mm:.1f} mm")
         print(f"  Drift index: {updated_wind_result.drift_index:.5f}")
         print(f"  Drift limit: {drift_limit:.5f}")
         print(f"  Status: {'OK' if updated_wind_result.drift_ok else 'FAIL'}")
@@ -286,7 +288,10 @@ class TestDriftEngine:
 
         print(f"✓ Core stiffness effect test passed")
         for i, (core_x, core_y) in enumerate(core_dimensions):
-            print(f"  Core {core_x}×{core_y}m: drift index = {drift_indices[i]:.5f}")
+            # Calculate drift in mm for display
+            height = 20 * 3.5  # floors × story_height
+            drift_mm = drift_indices[i] * height * 1000
+            print(f"  Core {core_x}×{core_y}m: drift = {drift_mm:.1f} mm, index = {drift_indices[i]:.5f}")
 
 
 class TestIntegratedWorkflow:
@@ -344,6 +349,7 @@ class TestIntegratedWorkflow:
         print(f"  Shear Util: {core_result.shear_check:.3f}")
         print(f"  Tension Piles: {'Yes' if core_result.requires_tension_piles else 'No'}")
         print(f"\nDRIFT CHECK:")
+        print(f"  Lateral Drift: {final_wind_result.drift_mm:.1f} mm")
         print(f"  Drift Index: {final_wind_result.drift_index:.5f}")
         print(f"  Limit: 0.00200")
         print(f"  Status: {'OK' if final_wind_result.drift_ok else 'FAIL'}")
@@ -393,7 +399,7 @@ class TestIntegratedWorkflow:
         print(f"  Height: {project.geometry.floors * project.geometry.story_height:.1f} m")
         print(f"  Base shear: {final_result.base_shear:.1f} kN")
         print(f"  Core status: {core_result.status}")
-        print(f"  Drift: {final_result.drift_index:.5f} {'OK' if final_result.drift_ok else 'FAIL'}")
+        print(f"  Drift: {final_result.drift_mm:.1f} mm ({'OK' if final_result.drift_ok else 'FAIL'})")
 
 
 if __name__ == "__main__":
