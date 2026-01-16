@@ -353,9 +353,9 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
             arrowcolor="#F59E0B"
         )
 
-    # Add wind label
+    # Add wind label (positioned further left to avoid arrows)
     fig.add_annotation(
-        x=-3,
+        x=-7,
         y=height / 2,
         text=f"Wind<br>{wind_base_shear:.0f} kN",
         showarrow=False,
@@ -383,7 +383,7 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
         ),
         xaxis=dict(
             title="Width (m)",
-            range=[-5, width + 3],
+            range=[-10, width + 5],  # Expanded range for wind label
             scaleanchor="y"
         ),
         yaxis=dict(
@@ -400,9 +400,12 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
 
 def run_calculations(project: ProjectData,
                      override_slab: int = 0,
-                     override_beam_w: int = 0,
-                     override_beam_d: int = 0,
-                     override_col: int = 0) -> ProjectData:
+                     override_pri_beam_w: int = 0,
+                     override_pri_beam_d: int = 0,
+                     override_sec_beam_w: int = 0,
+                     override_sec_beam_d: int = 0,
+                     override_col: int = 0,
+                     secondary_along_x: bool = False) -> ProjectData:
     """Run all structural calculations with optional overrides"""
     # Create engines
     slab_engine = SlabEngine(project)
@@ -418,21 +421,35 @@ def run_calculations(project: ProjectData,
         project.slab_result.self_weight = (override_slab / 1000) * 24.5
         project.slab_result.status = "OVERRIDE"
 
-    # Beam design
-    tributary_width = project.geometry.bay_y / 2  # Half bay each side
+    # Beam design - determine spans based on secondary beam direction
+    if secondary_along_x:
+        # Secondary beams along X, primary beams along Y
+        primary_span = project.geometry.bay_y
+        secondary_span = project.geometry.bay_x
+        tributary_width = project.geometry.bay_x / 2
+    else:
+        # Secondary beams along Y (default), primary beams along X
+        primary_span = project.geometry.bay_x
+        secondary_span = project.geometry.bay_y
+        tributary_width = project.geometry.bay_y / 2
+
     project.primary_beam_result = beam_engine.calculate_primary_beam(tributary_width)
     project.secondary_beam_result = beam_engine.calculate_secondary_beam(tributary_width)
 
-    # Apply beam overrides if specified
-    if override_beam_w > 0 or override_beam_d > 0:
-        if override_beam_w > 0:
-            project.primary_beam_result.width = override_beam_w
-            project.secondary_beam_result.width = override_beam_w
-        if override_beam_d > 0:
-            project.primary_beam_result.depth = override_beam_d
-            project.secondary_beam_result.depth = override_beam_d
-        # Recalculate utilization with override sizes
+    # Apply primary beam overrides if specified
+    if override_pri_beam_w > 0 or override_pri_beam_d > 0:
+        if override_pri_beam_w > 0:
+            project.primary_beam_result.width = override_pri_beam_w
+        if override_pri_beam_d > 0:
+            project.primary_beam_result.depth = override_pri_beam_d
         project.primary_beam_result.status = "OVERRIDE"
+
+    # Apply secondary beam overrides if specified
+    if override_sec_beam_w > 0 or override_sec_beam_d > 0:
+        if override_sec_beam_w > 0:
+            project.secondary_beam_result.width = override_sec_beam_w
+        if override_sec_beam_d > 0:
+            project.secondary_beam_result.depth = override_sec_beam_d
         project.secondary_beam_result.status = "OVERRIDE"
 
     # Column design (interior for now)
@@ -609,6 +626,18 @@ def main():
 
         st.divider()
 
+        # Beam Configuration
+        st.markdown("##### Beam Configuration")
+        secondary_beam_dir = st.radio(
+            "Secondary Beam Direction",
+            options=["Along Y (default)", "Along X"],
+            index=0,
+            help="Direction of secondary beams. Primary beams span perpendicular to this."
+        )
+        secondary_along_x = secondary_beam_dir == "Along X"
+
+        st.divider()
+
         # Lateral System
         st.markdown("##### Lateral System")
 
@@ -666,22 +695,38 @@ def main():
             override_slab_thickness = st.number_input(
                 "Slab Thickness (mm)", min_value=0, max_value=500, value=0, step=25,
                 help="Override slab thickness (0 = auto)")
+
+            st.caption("Primary Beam")
             col1, col2 = st.columns(2)
             with col1:
-                override_beam_width = st.number_input(
-                    "Beam Width (mm)", min_value=0, max_value=800, value=0, step=25,
-                    help="Override beam width (0 = auto)")
+                override_pri_beam_width = st.number_input(
+                    "Pri. Width (mm)", min_value=0, max_value=800, value=0, step=25,
+                    help="Primary beam width (0 = auto)")
             with col2:
-                override_beam_depth = st.number_input(
-                    "Beam Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
-                    help="Override beam depth (0 = auto)")
+                override_pri_beam_depth = st.number_input(
+                    "Pri. Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
+                    help="Primary beam depth (0 = auto)")
+
+            st.caption("Secondary Beam")
+            col1, col2 = st.columns(2)
+            with col1:
+                override_sec_beam_width = st.number_input(
+                    "Sec. Width (mm)", min_value=0, max_value=800, value=0, step=25,
+                    help="Secondary beam width (0 = auto)")
+            with col2:
+                override_sec_beam_depth = st.number_input(
+                    "Sec. Depth (mm)", min_value=0, max_value=1500, value=0, step=50,
+                    help="Secondary beam depth (0 = auto)")
+
             override_column_size = st.number_input(
                 "Column Size (mm)", min_value=0, max_value=1200, value=0, step=25,
                 help="Override column dimension (0 = auto)")
         else:
             override_slab_thickness = 0
-            override_beam_width = 0
-            override_beam_depth = 0
+            override_pri_beam_width = 0
+            override_pri_beam_depth = 0
+            override_sec_beam_width = 0
+            override_sec_beam_depth = 0
             override_column_size = 0
 
         st.divider()
@@ -720,9 +765,12 @@ def main():
     project = run_calculations(
         project,
         override_slab=override_slab_thickness,
-        override_beam_w=override_beam_width,
-        override_beam_d=override_beam_depth,
-        override_col=override_column_size
+        override_pri_beam_w=override_pri_beam_width,
+        override_pri_beam_d=override_pri_beam_depth,
+        override_sec_beam_w=override_sec_beam_width,
+        override_sec_beam_d=override_sec_beam_depth,
+        override_col=override_column_size,
+        secondary_along_x=secondary_along_x
     )
     st.session_state.project = project
 
@@ -860,14 +908,26 @@ def main():
 
     with tab2:
         if project.primary_beam_result:
+            # Determine beam direction labels based on configuration
+            if secondary_along_x:
+                pri_dir = "Y-direction"
+                sec_dir = "X-direction"
+                pri_span = project.geometry.bay_y
+                sec_span = project.geometry.bay_x
+            else:
+                pri_dir = "X-direction"
+                sec_dir = "Y-direction"
+                pri_span = project.geometry.bay_x
+                sec_span = project.geometry.bay_y
+
             col1, col2 = st.columns(2)
             with col1:
                 primary_status = "PASS" if project.primary_beam_result.utilization <= 1.0 else "FAIL"
                 primary_status_color = "#10B981" if primary_status == "PASS" else "#EF4444"
                 st.markdown(f"""
-                **Primary Beam (X-direction)**
+                **Primary Beam ({pri_dir})**
                 - Size: **{project.primary_beam_result.width} x {project.primary_beam_result.depth} mm**
-                - Span: {project.geometry.bay_x:.1f} m
+                - Span: {pri_span:.1f} m
                 - Design Moment: {project.primary_beam_result.moment:.1f} kNm
                 - Design Shear: {project.primary_beam_result.shear:.1f} kN
                 - Shear Capacity: {project.primary_beam_result.shear_capacity:.1f} kN
@@ -882,9 +942,9 @@ def main():
                 secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
                 secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
                 st.markdown(f"""
-                **Secondary Beam (Y-direction)**
+                **Secondary Beam ({sec_dir})**
                 - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
-                - Span: {project.geometry.bay_y:.1f} m
+                - Span: {sec_span:.1f} m
                 - Design Moment: {project.secondary_beam_result.moment:.1f} kNm
                 - Design Shear: {project.secondary_beam_result.shear:.1f} kN
                 - Shear Capacity: {project.secondary_beam_result.shear_capacity:.1f} kN
