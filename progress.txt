@@ -66,27 +66,30 @@ Files: src/engines/punching_shear.py
 --------------------------------------------------------------------------------
 
 ## FEATURE 2: Lateral Stability Module
-Status: [ ] Not Started
+Status: [X] COMPLETED
 
 ### Task 2.1: Wind Load Calculator (HK Wind Code 2019)
-Status: [ ] Not Started
+Status: [X] COMPLETED
 - Implement calculate_wind_hk2019(height, width, depth, terrain_type)
 - Reference wind pressure (q_ref) calculation
 - Topography (Sa) and Exposure (Sd) factors
 - Output: Base Shear (V_wind) and Overturning Moment (M_wind)
+Files: src/engines/wind_engine.py (WindEngine class)
 
 ### Task 2.2: Core Wall Checker
-Status: [ ] Not Started
+Status: [X] COMPLETED
 - Implement check_core_wall(core_dim_x, core_dim_y, thickness, M_wind)
 - Max compression check: P/A + My/I < 0.45fcu
 - Tension uplift check: P/A - My/I < 0 (flag tension piles)
 - Shear check: 1.5V/A_shear < 0.8*sqrt(fcu)
+Files: src/engines/wind_engine.py (CoreWallEngine class)
 
 ### Task 2.3: Building Drift Check (Enhancement)
-Status: [ ] Not Started
+Status: [X] COMPLETED
 - Implement drift index calculation
 - Check Delta/H < 1/500 (serviceability limit)
 - Flag undersized core early
+Files: src/engines/wind_engine.py (DriftEngine class)
 
 --------------------------------------------------------------------------------
 
@@ -221,8 +224,10 @@ Status: [ ] Not Started
 - Documentation and user guide
 
 ================================================================================
-# CURRENT FOCUS: Feature 2 - Lateral Stability Module
-# NEXT ACTION: Task 2.1 - Wind Load Calculator (HK Wind Code 2019)
+# CURRENT FOCUS: Feature 3 - Streamlit Dashboard
+# NEXT ACTION: Task 3.1 - Layout & Input Controls
 #
-# COMPLETED: Feature 1 - Python Engineering Core (All 5 Tasks)
+# COMPLETED:
+# - Feature 1 - Python Engineering Core (All 5 Tasks)
+# - Feature 2 - Lateral Stability Module (All 3 Tasks)
 ================================================================================
