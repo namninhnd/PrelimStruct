@@ -202,20 +202,20 @@ class BeamEngine:
         beam_type: str
     ) -> BeamResult:
         """
-        Iteratively size beam to satisfy shear requirements.
-        Implements shear "hard stop" check.
+        Iteratively size beam to satisfy BOTH shear AND flexure requirements.
+        Implements shear "hard stop" check and flexural capacity check.
         """
         b = b_initial
         h = h_initial
         iteration = 0
-        max_iterations = 15
-        shear_ok = False
+        max_iterations = 20
+        design_ok = False
         max_size_reached = False
         shear_reinf_required = False
         shear_reinf_area = 0.0
         link_spacing = 0
 
-        while not shear_ok and iteration < max_iterations and not max_size_reached:
+        while not design_ok and iteration < max_iterations and not max_size_reached:
             iteration += 1
 
             # Calculate beam self-weight
@@ -238,6 +238,38 @@ class BeamEngine:
             is_deep, ld_ratio = self._check_deep_beam(L_beam, h)
             if is_deep:
                 return self._create_deep_beam_result(L_beam, beam_type)
+
+            # === FLEXURAL CHECK FIRST ===
+            K = (moment * 1e6) / (b * d_eff ** 2 * fcu)
+            K_bal = 0.156
+            flex_ok = K <= K_bal
+
+            if not flex_ok:
+                self._add_calc_step(
+                    f"Iteration {iteration}: Flexure check",
+                    f"Size: {b}×{h}mm, d_eff={d_eff}mm\n"
+                    f"M = {moment:.1f} kNm\n"
+                    f"K = {K:.4f} > K_bal = {K_bal} - INCREASE SIZE",
+                    "HK Code 2013 - Clause 6.1.2.4"
+                )
+
+                # Increase depth primarily for flexure
+                h = min(MAX_BEAM_DEPTH, h + 75)
+                # Also increase width if aspect ratio too high
+                if h / b > 2.5:
+                    b = min(MAX_BEAM_WIDTH, b + 50)
+
+                h = math.ceil(h / 25) * 25
+                b = math.ceil(b / 25) * 25
+
+                if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
+                    max_size_reached = True
+                    self._add_calc_step(
+                        "Maximum beam size reached",
+                        f"Max size {b}×{h}mm still exceeds flexural capacity",
+                        "Consider compression reinforcement or reduced span"
+                    )
+                continue
 
             # === SHEAR "HARD STOP" CHECK ===
             v_actual = (shear * 1000) / (b * d_eff)
@@ -276,6 +308,8 @@ class BeamEngine:
                 b, d_eff, fcu, min_rho
             )
 
+            shear_ok = True  # Will be set to True with or without reinforcement
+
             if shear > V_capacity:
                 # Check if shear reinforcement can make up the difference
                 if v_actual <= v_max:
@@ -285,7 +319,6 @@ class BeamEngine:
                     shear_reinf_area, link_spacing = self._design_shear_reinforcement(
                         V_s, d_eff, b
                     )
-                    shear_ok = True
 
                     self._add_calc_step(
                         f"Iteration {iteration}: Shear reinforcement required",
@@ -293,18 +326,7 @@ class BeamEngine:
                         f"v = {v_actual:.2f} MPa ≤ v_max = {v_max:.2f} MPa (OK for links)",
                         "HK Code 2013 - Clause 6.1.2.5"
                     )
-                else:
-                    # Increase size
-                    h = min(MAX_BEAM_DEPTH, h + 75)
-                    if h / b > 3:
-                        b = min(MAX_BEAM_WIDTH, b + 25)
-                    h = math.ceil(h / 25) * 25
-                    b = math.ceil(b / 25) * 25
-
-                    if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
-                        max_size_reached = True
             else:
-                shear_ok = True
                 shear_ratio = shear / V_capacity
 
                 self._add_calc_step(
@@ -321,6 +343,9 @@ class BeamEngine:
                     shear_reinf_area, link_spacing = self._design_min_shear_reinforcement(
                         b, d_eff
                     )
+
+            # Both flexure and shear OK
+            design_ok = flex_ok and shear_ok
 
         # Final calculations
         self_weight = (b / 1000) * (h / 1000) * CONCRETE_DENSITY
