@@ -13,7 +13,10 @@ AI assistant for automated modeling, optimization, and results interpretation.
 
 ## PRD (Product Requirements Document)
 - Integrate OpenSeesPy for finite element structural analysis
-- Build HK_ConcreteProperties following HK Code 2013 (2020 edition) and Manual (use ConcreteProperties as reference only)
+- Extend ConcreteProperties library with HK Code 2013 design code (layered approach)
+  - Reference: https://github.com/robbievanleeuwen/concrete-properties
+  - Create HK2013 class extending DesignCode base class
+  - Implement HK Code stress-strain profiles as subclasses
 - Add FEM visualization (Plan View, Elevation View, 3D View) using opsvis/vfo
 - Implement proper core wall modeling with typical tall building configurations:
   - 2 C core walls facing each other
@@ -39,33 +42,150 @@ Status: [ ] Not Started
 
 ### Task 8.1: Core Wall Configuration System (Priority Fix)
 Status: [ ] Not Started
-- Define core wall configuration types (enum):
-  - TWO_C_FACING: 2 C core walls facing each other
-  - TWO_C_BACK_TO_BACK: 2 C core walls back to back
-  - I_SECTION: 2 core walls blended into I section
-  - TUBE_CENTER_OPENING: Tube core wall with opening in middle
-  - TUBE_SIDE_OPENING: Tube core wall with opening in side of flange
-- Create core wall geometry generator for each configuration
-- Add user input for wall thickness (default 500mm) in LateralInput
-- Generate coupling beams at core wall openings:
-  - Deep beam with width = wall thickness
-  - Enclose opening sides with coupling beams
-  - Calculate coupling beam dimensions and reinforcement
-- Calculate core wall section properties (I, A, centroid) for each type
-- Update LateralInput to include core_wall_config and wall_thickness fields
-- Add core wall configuration selector and thickness input in Streamlit dashboard
-Files: src/core/data_models.py (CoreWallConfig enum), src/fem/core_wall_geometry.py, src/fem/coupling_beam.py, app.py
+
+#### Task 8.1.1: Core Wall Data Models and Enum
+Status: [ ] Not Started
+- Define CoreWallConfig enum with all configuration types
+- Create CoreWallGeometry data class (dimensions, openings, wall thickness)
+- Create CoreWallSectionProperties data class (I, A, centroid, J)
+- Update LateralInput with core_wall_config and wall_thickness fields
+Files: src/core/data_models.py
+
+#### Task 8.1.2: I_SECTION Geometry Generator
+Status: [ ] Not Started
+- Implement I-section core wall geometry (2 walls blended)
+- Calculate flange and web dimensions from user inputs
+- Generate coordinate points for section outline
+- Calculate section properties (Ixx, Iyy, A, centroid)
+- Add unit tests with hand calculation verification
+Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+
+#### Task 8.1.3: TWO_C_FACING Geometry Generator
+Status: [ ] Not Started
+- Implement 2 C-shaped walls facing each other
+- Define opening between the two C walls
+- Calculate combined section properties
+- Handle variable opening width
+- Add unit tests
+Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+
+#### Task 8.1.4: TWO_C_BACK_TO_BACK Geometry Generator
+Status: [ ] Not Started
+- Implement 2 C-shaped walls back to back
+- Calculate combined section properties
+- Handle connection between walls
+- Add unit tests
+Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+
+#### Task 8.1.5: TUBE_CENTER_OPENING Geometry Generator
+Status: [ ] Not Started
+- Implement tube/box core wall with center opening
+- Define opening dimensions (door/corridor opening)
+- Calculate reduced section properties accounting for opening
+- Add unit tests
+Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+
+#### Task 8.1.6: TUBE_SIDE_OPENING Geometry Generator
+Status: [ ] Not Started
+- Implement tube/box core wall with side flange opening
+- Define opening location and dimensions
+- Calculate asymmetric section properties
+- Add unit tests
+Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+
+#### Task 8.1.7: Core Wall Section Properties Calculator
+Status: [ ] Not Started
+- Implement general section properties calculator
+- Calculate Ixx, Iyy, Ixy (product of inertia)
+- Calculate torsional constant J
+- Calculate shear center location
+- Validate against known solutions (textbook examples)
+Files: src/fem/core_wall_geometry.py (section_properties module)
+
+#### Task 8.1.8: Core Wall UI Integration
+Status: [ ] Not Started
+- Add core wall configuration dropdown selector
+- Add wall thickness input field (default 500mm)
+- Add opening dimensions inputs where applicable
+- Display calculated section properties
+- Update framing plan to show core wall outline
+Files: app.py
+
+### Task 8.1-CB: Coupling Beam System
+Status: [ ] Not Started
+
+#### Task 8.1-CB.1: Coupling Beam Data Model
+Status: [ ] Not Started
+- Create CouplingBeam data class
+- Define properties: span, depth, width (= wall thickness), location
+- Add reinforcement fields (top, bottom, shear links)
+Files: src/core/data_models.py
+
+#### Task 8.1-CB.2: Coupling Beam Geometry Generator
+Status: [ ] Not Started
+- Detect openings in core wall configurations
+- Generate coupling beams spanning openings
+- Set beam width equal to wall thickness (deep beam)
+- Calculate clear span and support conditions
+Files: src/fem/coupling_beam.py
+
+#### Task 8.1-CB.3: Coupling Beam Design (HK Code)
+Status: [ ] Not Started
+- Implement coupling beam design per HK Code 2013
+- Calculate required reinforcement for shear and flexure
+- Check deep beam provisions where applicable
+- Generate design summary
+Files: src/fem/coupling_beam.py, src/engines/coupling_beam_engine.py
+
+#### Task 8.1-CB.4: Coupling Beam Visualization
+Status: [ ] Not Started
+- Add coupling beams to framing plan visualization
+- Show coupling beam dimensions and labels
+- Display reinforcement details in hover/tooltip
+Files: app.py (create_framing_grid update)
 
 ### Task 8.2: Beam Trimming at Core Wall Edges (Priority Fix)
 Status: [ ] Not Started
-- Detect beam-core wall intersections in plan view
-- Trim beams at external edges of core wall (not overlapping)
-- Calculate trimmed beam lengths and update beam elements
-- Handle beam connections to core wall (moment or pinned connections)
-- Update framing plan visualization to show trimmed beams
-- Apply trimming logic in both simplified design and FEM model
-- Preserve beam loads and moments after trimming
-Files: src/fem/beam_trimmer.py, app.py (update create_framing_grid), src/engines/beam_engine.py
+
+#### Task 8.2.1: Beam-Core Wall Intersection Detection
+Status: [ ] Not Started
+- Implement geometric intersection detection in plan view
+- Identify which beams cross core wall boundaries
+- Calculate intersection points with core wall edges
+- Handle beams that pass through vs. terminate at core wall
+Files: src/fem/beam_trimmer.py
+
+#### Task 8.2.2: Beam Trimming Logic
+Status: [ ] Not Started
+- Trim beams at external edges of core wall (no overlap)
+- Calculate new trimmed beam lengths
+- Preserve beam orientation and grid alignment
+- Handle partial trimming (beam shortened on one or both ends)
+Files: src/fem/beam_trimmer.py
+
+#### Task 8.2.3: Beam Connection Types at Core Wall
+Status: [ ] Not Started
+- Define connection types: MOMENT, PINNED, FIXED
+- Assign appropriate connection based on beam type and location
+- Update beam end conditions for analysis
+- Store connection type in beam data model
+Files: src/fem/beam_trimmer.py, src/core/data_models.py
+
+#### Task 8.2.4: Update Beam Design After Trimming
+Status: [ ] Not Started
+- Recalculate beam loads for trimmed length
+- Update moment and shear diagrams
+- Re-run beam design with new span
+- Preserve original beam properties for comparison
+Files: src/engines/beam_engine.py
+
+#### Task 8.2.5: Beam Trimming Visualization
+Status: [ ] Not Started
+- Update framing plan to show trimmed beams correctly
+- Indicate connection types at core wall (symbol/color)
+- Show original vs. trimmed length in hover tooltip
+- Add legend for connection types
+Files: app.py (create_framing_grid update)
 
 ### Task 8.3: OpenSeesPy Integration
 Status: [ ] Not Started
@@ -76,22 +196,61 @@ Status: [ ] Not Started
 - Create solver interface for linear static analysis
 Files: src/fem/__init__.py, src/fem/fem_engine.py, src/fem/solver.py
 
-### Task 8.4: HK Code 2013 Concrete Properties (HK_ConcreteProperties)
+### Task 8.4: HK Code 2013 ConcreteProperties Integration
 Status: [ ] Not Started
-- Use ConcreteProperties library as reference only (not direct implementation)
-- Build HK_ConcreteProperties following:
-  - "Code of Practice for Structural Use of Concrete 2013 (2020 edition)"
-  - "Manual for Design and Detailing of Reinforced Concrete to the Code of Practice for Structural Use of Concrete 2013"
-- Implement HK Code 2013 material properties:
-  - Concrete grades C25-C60 with HK Code stress-strain relationships
-  - Modulus of elasticity per HK Code Cl 3.1.7
-  - Poisson's ratio per HK Code
-  - Density and other material constants
-  - Reinforcement properties (fy=500MPa, fyv=250MPa)
-- Map HK Code concrete grades to material models
-- Create HK Code compliant stress-strain curves
-- Calculate material properties (E, ν, ρ) per HK Code 2013
-Files: src/fem/hk_concrete_properties.py (reference ConcreteProperties, implement HK Code)
+Reference: https://github.com/robbievanleeuwen/concrete-properties
+Strategy: Extend ConcreteProperties library with HK Code 2013 design code (layered approach)
+
+#### Task 8.4.1: HK2013 Design Code Class
+Status: [ ] Not Started
+- Create HK2013 class extending DesignCode base class
+- Implement assign_concrete_section() with HK Code validation
+- Follow AS3600 implementation pattern as template
+- Add HK Code specific docstrings and references
+Files: src/fem/design_codes/hk2013.py
+
+#### Task 8.4.2: HK Code Concrete Stress-Strain Profiles
+Status: [ ] Not Started
+- Create HKConcreteServiceProfile (linear elastic, no tension)
+- Create HKConcreteUltimateProfile per HK Code Cl 6.1.2.4
+- Implement stress block parameters (alpha, gamma) per HK Code
+- Support concrete grades C25, C30, C35, C40, C45, C50, C55, C60
+Files: src/fem/design_codes/hk2013.py (stress-strain classes)
+
+#### Task 8.4.3: HK Code Steel Stress-Strain Profiles
+Status: [ ] Not Started
+- Create HKSteelProfile for fy=500MPa reinforcement
+- Create HKShearSteelProfile for fyv=250MPa links
+- Implement elastic-plastic with strain hardening option
+- Define fracture strain limits per HK Code
+Files: src/fem/design_codes/hk2013.py (steel classes)
+
+#### Task 8.4.4: HK Material Factory Methods
+Status: [ ] Not Started
+- Implement create_concrete_material(compressive_strength)
+  - Calculate E per HK Code Cl 3.1.7: E = 3.46 * sqrt(fcu) + 3.21 GPa
+  - Calculate flexural tensile strength per HK Code
+  - Set density = 24 kN/m3 (or 25 kN/m3 for reinforced)
+- Implement create_steel_material(yield_strength, ductility_class)
+  - Default fy = 500 MPa, Es = 200 GPa
+  - Define ductility classes per HK Code
+Files: src/fem/design_codes/hk2013.py
+
+#### Task 8.4.5: HK Code Capacity Reduction Factors
+Status: [ ] Not Started
+- Implement partial safety factors per HK Code 2013
+- Concrete: gamma_c = 1.5 (or 1.25 for accidental)
+- Steel: gamma_s = 1.15 (or 1.0 for accidental)
+- Implement phi factors for different failure modes
+Files: src/fem/design_codes/hk2013.py
+
+#### Task 8.4.6: HK Code Integration Tests
+Status: [ ] Not Started
+- Test material property calculations against HK Code tables
+- Verify stress-strain curves match code requirements
+- Test section analysis results against worked examples
+- Compare with hand calculations from HK Code Manual
+Files: tests/test_hk2013_design_code.py
 
 ### Task 8.5: FEM Data Models Extension
 Status: [ ] Not Started
@@ -160,7 +319,7 @@ Status: [ ] Not Started
 - Display both individual and enveloped results
 Files: src/fem/results_processor.py (enveloping functions)
 
-### Task 9.2: Results Processing
+### Task 9.4: Results Processing
 Status: [ ] Not Started
 - Process raw OpenSeesPy solver output
 - Calculate utilization ratios (stress / allowable stress)
@@ -415,9 +574,43 @@ Status: [ ] Not Started
 Files: tests/test_fem_integration.py
 
 ================================================================================
-# CURRENT FOCUS: Feature 8 - FEM Foundation Layer
-# NEXT ACTION: Task 8.1 - Core Wall Configuration System (Priority Fix)
-#              Task 8.2 - Beam Trimming at Core Wall Edges (Priority Fix)
+# IMPLEMENTATION PHASES (v3.0)
+================================================================================
+
+## PHASE 1: FEM Core (Features 8-10) - Foundation
+Milestone: Working FEM analysis with visualization
+- Feature 8: FEM Foundation Layer (OpenSeesPy + ConcreteProperties)
+  - Task 8.1: Core Wall Configuration System (13 subtasks)
+  - Task 8.1-CB: Coupling Beam System (4 subtasks)
+  - Task 8.2: Beam Trimming (5 subtasks)
+  - Task 8.3: OpenSeesPy Integration
+  - Task 8.4: HK Code 2013 ConcreteProperties Integration (6 subtasks)
+  - Task 8.5: FEM Data Models Extension
+  - Task 8.6: Model Builder
+- Feature 9: Linear Static Analysis (5 tasks)
+- Feature 10: FEM Visualization (5 tasks)
+
+## PHASE 2: AI Assistant Basic (Feature 11) - After FEM Stable
+Milestone: AI can interpret FEM results and provide recommendations
+- Feature 11: AI Assistant Core Infrastructure
+  - Task 11.1: DeepSeek API Integration
+  - Task 11.2: Prompt Engineering
+  - Task 11.3: AI Assistant UI Components
+  - Task 11.4: Structured Response Parsing
+
+## PHASE 3: AI Automation (Features 12-14) - After AI Basics Work
+Milestone: AI-assisted modeling and optimization
+- Feature 12: AI-Assisted Mesh Generation
+- Feature 13: AI-Assisted Design Optimization
+- Feature 14: AI Results Interpretation & Recommendations
+
+## PHASE 4: Comprehensive Testing (Feature 15) - Continuous
+- Feature 15: Testing & Validation (run throughout all phases)
+
+================================================================================
+# CURRENT FOCUS: Phase 1 - Feature 8 - FEM Foundation Layer
+# NEXT ACTION: Task 8.1.1 - Core Wall Data Models and Enum
+#              Task 8.4.1 - HK2013 Design Code Class (can run in parallel)
 #
 # COMPLETED (v2.1):
 # - Feature 1 - Python Engineering Core (All 5 Tasks)
@@ -426,13 +619,14 @@ Files: tests/test_fem_integration.py
 # - Feature 4 - Magazine-Style Report Generator (All 5 Tasks)
 # - Feature 5 - Debug & Integration Testing (All 4 Tasks)
 #
-# IN PROGRESS (v3.0):
-# - Feature 8 - FEM Foundation Layer (OpenSeesPy + ConcreteProperties)
-# - Feature 9 - Linear Static Analysis
-# - Feature 10 - FEM Visualization (opsvis/vfo)
-# - Feature 11 - AI Assistant Core (DeepSeek)
-# - Feature 12 - AI-Assisted Mesh Generation
-# - Feature 13 - AI-Assisted Optimization
-# - Feature 14 - AI Results Interpretation
-# - Feature 15 - Testing & Validation
+# TASK COUNT (v3.0):
+# - Feature 8: 6 main tasks, 28 subtasks
+# - Feature 9: 5 tasks
+# - Feature 10: 5 tasks
+# - Feature 11: 4 tasks
+# - Feature 12: 3 tasks
+# - Feature 13: 2 tasks
+# - Feature 14: 2 tasks
+# - Feature 15: 5 tasks
+# - TOTAL: 32 main tasks + 28 subtasks = 60 work items
 ================================================================================
