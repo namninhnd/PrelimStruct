@@ -1,0 +1,438 @@
+# PrelimStruct v3.0 - FEM Analysis & AI Assistant Upgrade
+# Progress Tracker
+# =============================================================================
+
+## IDEA
+Upgrade PrelimStruct from a preliminary design calculator to a comprehensive
+finite element modeling platform with AI-assisted automation. Add linear static
+FEM analysis using OpenSeesPy and ConcreteProperties, integrate visualization
+with opsvis/vfo (Plan, Elevation, 3D views), and implement DeepSeek-powered
+AI assistant for automated modeling, optimization, and results interpretation.
+
+--------------------------------------------------------------------------------
+
+## PRD (Product Requirements Document)
+- Integrate OpenSeesPy for finite element structural analysis
+- Build HK_ConcreteProperties following HK Code 2013 (2020 edition) and Manual (use ConcreteProperties as reference only)
+- Add FEM visualization (Plan View, Elevation View, 3D View) using opsvis/vfo
+- Implement proper core wall modeling with typical tall building configurations:
+  - 2 C core walls facing each other
+  - 2 C core walls back to back
+  - 2 Core walls blended into I section
+  - Tube core wall with opening in middle or side of flange
+- Allow user input for core wall thickness (default 500mm)
+- Generate coupling beams at core wall openings (deep beams with width = wall thickness)
+- Implement beam trimming at core wall edges (beams should not overlap with core walls)
+- Implement full set of ULS and SLS load combinations per HK Code 2013
+- Envelope results across all load combinations (maximum/minimum values, governing load case)
+- Implement AI assistant with DeepSeek API for automated modeling
+- Add automated mesh generation and model setup
+- Implement design optimization with AI guidance
+- Add AI-powered results interpretation and recommendations
+- Extend report generator with FEM results and AI insights
+- Maintain backward compatibility with existing preliminary design features
+
+--------------------------------------------------------------------------------
+
+## FEATURE 8: FEM Foundation Layer (OpenSeesPy + ConcreteProperties)
+Status: [ ] Not Started
+
+### Task 8.1: Core Wall Configuration System (Priority Fix)
+Status: [ ] Not Started
+- Define core wall configuration types (enum):
+  - TWO_C_FACING: 2 C core walls facing each other
+  - TWO_C_BACK_TO_BACK: 2 C core walls back to back
+  - I_SECTION: 2 core walls blended into I section
+  - TUBE_CENTER_OPENING: Tube core wall with opening in middle
+  - TUBE_SIDE_OPENING: Tube core wall with opening in side of flange
+- Create core wall geometry generator for each configuration
+- Add user input for wall thickness (default 500mm) in LateralInput
+- Generate coupling beams at core wall openings:
+  - Deep beam with width = wall thickness
+  - Enclose opening sides with coupling beams
+  - Calculate coupling beam dimensions and reinforcement
+- Calculate core wall section properties (I, A, centroid) for each type
+- Update LateralInput to include core_wall_config and wall_thickness fields
+- Add core wall configuration selector and thickness input in Streamlit dashboard
+Files: src/core/data_models.py (CoreWallConfig enum), src/fem/core_wall_geometry.py, src/fem/coupling_beam.py, app.py
+
+### Task 8.2: Beam Trimming at Core Wall Edges (Priority Fix)
+Status: [ ] Not Started
+- Detect beam-core wall intersections in plan view
+- Trim beams at external edges of core wall (not overlapping)
+- Calculate trimmed beam lengths and update beam elements
+- Handle beam connections to core wall (moment or pinned connections)
+- Update framing plan visualization to show trimmed beams
+- Apply trimming logic in both simplified design and FEM model
+- Preserve beam loads and moments after trimming
+Files: src/fem/beam_trimmer.py, app.py (update create_framing_grid), src/engines/beam_engine.py
+
+### Task 8.3: OpenSeesPy Integration
+Status: [ ] Not Started
+- Set up OpenSeesPy Python wrapper for structural analysis
+- Create abstraction layer for structural engineering use cases
+- Implement 2D/3D frame element support (beams, columns)
+- Map HK Code concrete grades to OpenSeesPy material models
+- Create solver interface for linear static analysis
+Files: src/fem/__init__.py, src/fem/fem_engine.py, src/fem/solver.py
+
+### Task 8.4: HK Code 2013 Concrete Properties (HK_ConcreteProperties)
+Status: [ ] Not Started
+- Use ConcreteProperties library as reference only (not direct implementation)
+- Build HK_ConcreteProperties following:
+  - "Code of Practice for Structural Use of Concrete 2013 (2020 edition)"
+  - "Manual for Design and Detailing of Reinforced Concrete to the Code of Practice for Structural Use of Concrete 2013"
+- Implement HK Code 2013 material properties:
+  - Concrete grades C25-C60 with HK Code stress-strain relationships
+  - Modulus of elasticity per HK Code Cl 3.1.7
+  - Poisson's ratio per HK Code
+  - Density and other material constants
+  - Reinforcement properties (fy=500MPa, fyv=250MPa)
+- Map HK Code concrete grades to material models
+- Create HK Code compliant stress-strain curves
+- Calculate material properties (E, ν, ρ) per HK Code 2013
+Files: src/fem/hk_concrete_properties.py (reference ConcreteProperties, implement HK Code)
+
+### Task 8.5: FEM Data Models Extension
+Status: [ ] Not Started
+- Extend ProjectData with optional fem_model and fem_result fields
+- Create FEMModelInput data class (mesh parameters, element types, analysis settings)
+- Create FEMResult data class (stress, strain, displacement, reaction forces - enveloped)
+- Create LoadCaseResult data class (individual load combination results)
+- Create EnvelopedResult data class (maximum/minimum values across all load combinations)
+- Create MeshData data class (node coordinates, element connectivity, boundary conditions)
+- Define element type enums (beam, plate, solid, coupling_beam)
+- Add boundary condition definitions (supports, loads)
+- Extend LateralInput with core_wall_config and wall_thickness (default 500mm)
+Files: src/core/data_models.py
+
+### Task 8.6: Model Builder (Geometry → FEM Model)
+Status: [ ] Not Started
+- Convert ProjectData geometry to OpenSeesPy nodes/elements
+- Generate beam elements from beam design results (with trimming at core walls)
+- Generate column elements from column design results
+- Generate core wall elements based on configuration type
+- Map column positions to nodes in 3D space
+- Apply boundary conditions (fixed supports at base of columns/core walls)
+- Apply loads from design engines (gravity loads, wind loads)
+- Export to OpenSeesPy model format
+Files: src/fem/model_builder.py
+
+--------------------------------------------------------------------------------
+
+## FEATURE 9: Linear Static Analysis with Load Combinations
+Status: [ ] Not Started
+
+### Task 9.1: Load Combination System (ULS & SLS)
+Status: [ ] Not Started
+- Implement full set of ULS load combinations per HK Code 2013:
+  - ULS: 1.4Gk + 1.6Qk (gravity dominant)
+  - ULS: 1.0Gk + 1.4Wk (wind dominant)
+  - ULS: 1.2Gk + 1.2Qk + 1.2Wk (combined)
+  - ULS: 1.4Gk + 1.6Qk + 0.6Wk (gravity + wind)
+  - Additional combinations as per HK Code
+- Implement full set of SLS load combinations:
+  - SLS: 1.0Gk + 1.0Qk (deflection/serviceability)
+  - SLS: 1.0Gk + 0.5Qk (frequent load)
+  - SLS: 1.0Gk + 0.2Qk (quasi-permanent)
+  - Additional SLS combinations as per HK Code
+- Create load combination manager
+- Apply load combinations to FEM model
+Files: src/fem/load_combinations.py, src/core/data_models.py (extend LoadCombination enum)
+
+### Task 9.2: Solver Implementation
+Status: [ ] Not Started
+- Implement linear static solver wrapper for OpenSeesPy
+- Solve: [K]{u} = {F} for displacements for each load combination
+- Calculate element stresses and strains from displacements
+- Extract reaction forces at supports
+- Post-process results (max stress, max deflection, utilization ratios)
+Files: src/fem/solver.py
+
+### Task 9.3: Result Enveloping
+Status: [ ] Not Started
+- Envelope results across all load combinations:
+  - Maximum and minimum stresses for each element
+  - Maximum and minimum deflections
+  - Maximum and minimum reaction forces
+  - Critical load combination identification
+- Generate enveloped results for design checks
+- Display both individual and enveloped results
+Files: src/fem/results_processor.py (enveloping functions)
+
+### Task 9.2: Results Processing
+Status: [ ] Not Started
+- Process raw OpenSeesPy solver output
+- Calculate utilization ratios (stress / allowable stress)
+- Identify critical elements (high stress, large deflection)
+- Generate stress contour data for visualization
+- Calculate deflected shape coordinates
+- Compare FEM results vs. simplified design calculations
+- Generate summary statistics (max/min values, critical locations)
+Files: src/fem/results_processor.py
+
+### Task 9.5: Integration with Design Engines
+Status: [ ] Not Started
+- Compare FEM beam results (enveloped) with simplified beam design
+- Compare FEM column results (enveloped) with simplified column design
+- Compare FEM core wall results with simplified core wall design
+- Flag discrepancies between FEM and simplified methods
+- Validate simplified design assumptions using FEM
+- Generate comparison reports showing governing load cases
+Files: src/fem/results_processor.py (comparison functions)
+
+--------------------------------------------------------------------------------
+
+## FEATURE 10: FEM Visualization (opsvis/vfo Integration)
+Status: [ ] Not Started
+
+### Task 10.1: Visualization Infrastructure
+Status: [ ] Not Started
+- Integrate opsvis or vfo (Visualization For OpenSees) library
+- Create visualization wrapper module
+- Set up visualization data extraction from OpenSeesPy model
+- Create visualization configuration data structures
+Files: src/fem/visualization.py
+
+### Task 10.2: Plan View Visualization
+Status: [ ] Not Started
+- Create top-down plan view of structure
+- Display beam/column layout in plan
+- Show element labels and dimensions
+- Display stress contours (color-coded by utilization)
+- Show load application points
+- Add interactive element selection
+Files: src/fem/visualization.py (create_plan_view), app.py (Plan View tab)
+
+### Task 10.3: Elevation View Visualization
+Status: [ ] Not Started
+- Create side elevation view showing building height
+- Display multi-story structure with floor levels
+- Show column continuity through floors
+- Display deflected shape (exaggerated for visibility)
+- Show reaction forces at supports
+- Add floor-by-floor stress visualization
+Files: src/fem/visualization.py (create_elevation_view), app.py (Elevation View tab)
+
+### Task 10.4: 3D View Visualization
+Status: [ ] Not Started
+- Create isometric 3D view of structure
+- Enable rotation, zoom, and pan controls
+- Display stress contours on 3D elements
+- Show deflected shape overlay in 3D
+- Display reaction forces as vectors
+- Add element selection for detailed results
+- Export 3D visualization images for reports
+Files: src/fem/visualization.py (create_3d_view), app.py (3D View tab)
+
+### Task 10.5: Visualization Integration in Dashboard
+Status: [ ] Not Started
+- Add "FEM Analysis" section to Streamlit dashboard
+- Create tabs for Plan View, Elevation View, 3D View
+- Add "Run FEM Analysis" button
+- Display analysis progress and status
+- Show FEM vs. Simplified comparison side-by-side
+- Add export functionality for visualization images
+Files: app.py (FEM Analysis section)
+
+--------------------------------------------------------------------------------
+
+## FEATURE 11: AI Assistant - Core Infrastructure (DeepSeek)
+Status: [ ] Not Started
+
+### Task 11.1: DeepSeek API Integration
+Status: [ ] Not Started
+- Create DeepSeek API client wrapper
+- Implement API authentication and configuration
+- Add error handling and retry logic
+- Implement response parsing and validation
+- Add caching for common queries
+- Create abstraction layer for future multi-provider support
+Files: src/ai/__init__.py, src/ai/llm_service.py
+
+### Task 11.2: Prompt Engineering
+Status: [ ] Not Started
+- Design system prompts for Senior Structural Engineer role
+- Create prompt templates for:
+  - Design review and recommendations
+  - Results interpretation
+  - Model setup guidance
+  - Optimization suggestions
+  - Mesh generation recommendations
+- Set response length constraints (150-300 words)
+- Add context injection from ProjectData
+Files: src/ai/prompts.py
+
+### Task 11.3: AI Assistant UI Components
+Status: [ ] Not Started
+- Create chat interface in Streamlit dashboard
+- Add "Ask AI" button and chat panel
+- Display AI recommendations in real-time
+- Add context-aware suggestions (based on current design state)
+- Implement conversation history
+- Add loading states and error messages
+Files: app.py (AI Assistant section)
+
+### Task 11.4: Structured Response Parsing
+Status: [ ] Not Started
+- Request structured JSON output from DeepSeek
+- Parse efficiency_score, risks, suggestions, carbon_comment
+- Validate response structure using Pydantic
+- Enable programmatic handling of AI responses
+- Add fallback for unstructured responses
+Files: src/ai/llm_service.py (response parsing)
+
+--------------------------------------------------------------------------------
+
+## FEATURE 12: AI-Assisted Mesh Generation & Model Setup
+Status: [ ] Not Started
+
+### Task 12.1: Automated Mesh Generation
+Status: [ ] Not Started
+- Implement rule-based mesh generation:
+  - Automatic element sizing based on geometry
+  - Refinement at stress concentrations (columns, supports)
+  - Mesh quality checks (aspect ratio, skewness)
+- Generate mesh from ProjectData automatically
+- Validate mesh quality before analysis
+- Add mesh refinement options
+Files: src/ai/mesh_generator.py
+
+### Task 12.2: ML Mesh Density Prediction (Optional Enhancement)
+Status: [ ] Not Started
+- Create ML model for optimal mesh density prediction
+- Train on geometry → mesh quality dataset
+- Predict required mesh density for accuracy
+- Integrate with rule-based mesh generation
+Files: src/ai/mesh_ml.py
+
+### Task 12.3: Smart Model Setup
+Status: [ ] Not Started
+- Automatically infer boundary conditions from geometry
+- Suggest load application points based on design loads
+- Auto-detect support locations (base of columns)
+- Apply material properties from ProjectData using ConcreteProperties
+- Generate load combinations automatically
+- Validate model setup before solving
+- Use AI (DeepSeek) to suggest model setup improvements
+Files: src/ai/auto_setup.py
+
+--------------------------------------------------------------------------------
+
+## FEATURE 13: AI-Assisted Design Optimization
+Status: [ ] Not Started
+
+### Task 13.1: Design Optimization Engine
+Status: [ ] Not Started
+- Implement gradient-based optimization for element sizing
+- Multi-objective optimization (cost, weight, deflection)
+- Constraint handling (stress limits, deflection limits)
+- Integration with OpenSeesPy solver for iterative optimization
+- Generate optimization reports
+Files: src/ai/optimizer.py
+
+### Task 13.2: AI-Guided Optimization
+Status: [ ] Not Started
+- Use DeepSeek LLM to suggest optimization strategies
+- Interpret optimization results using AI
+- Provide design alternatives with trade-offs
+- Explain optimization recommendations
+- Generate natural language optimization summaries
+Files: src/ai/optimizer.py (AI integration), src/ai/llm_service.py (optimization prompts)
+
+--------------------------------------------------------------------------------
+
+## FEATURE 14: AI Results Interpretation & Recommendations
+Status: [ ] Not Started
+
+### Task 14.1: AI Results Interpreter
+Status: [ ] Not Started
+- Analyze FEM results using DeepSeek LLM
+- Identify critical areas (high stress, large deflection)
+- Compare FEM results with simplified design
+- Flag discrepancies or concerns
+- Suggest design improvements
+- Generate natural language summary of analysis
+Files: src/ai/results_interpreter.py
+
+### Task 14.2: Integration with Report Generator
+Status: [ ] Not Started
+- Add FEM results section to HTML report
+- Include AI-generated interpretation in report
+- Add FEM visualizations (Plan, Elevation, 3D) to report
+- Compare simplified vs. FEM results in report
+- Include optimization recommendations in report
+- Add AI design review with FEM insights
+Files: src/report/report_generator.py (FEM sections)
+
+--------------------------------------------------------------------------------
+
+## FEATURE 15: Testing & Validation
+Status: [ ] Not Started
+
+### Task 15.1: FEM Engine Tests
+Status: [ ] Not Started
+- Test OpenSeesPy model generation from ProjectData
+- Test ConcreteProperties material mapping
+- Test boundary condition application
+- Verify load application
+- Test solver accuracy against known solutions
+Files: tests/test_fem_engine.py, tests/test_fem_solver.py
+
+### Task 15.2: Model Builder Tests
+Status: [ ] Not Started
+- Test geometry to FEM model conversion
+- Test beam/column element generation
+- Test boundary condition inference
+- Test load application from design engines
+Files: tests/test_model_builder.py
+
+### Task 15.3: Visualization Tests
+Status: [ ] Not Started
+- Test Plan View generation
+- Test Elevation View generation
+- Test 3D View generation
+- Test stress contour rendering
+- Test deflected shape visualization
+Files: tests/test_fem_visualization.py
+
+### Task 15.4: AI Assistant Tests
+Status: [ ] Not Started
+- Test DeepSeek API integration
+- Test prompt template generation
+- Test response parsing and validation
+- Test mesh generation quality
+- Test optimization convergence
+- Test results interpretation accuracy
+Files: tests/test_ai_service.py, tests/test_mesh_generator.py, tests/test_optimizer.py
+
+### Task 15.5: Integration Tests
+Status: [ ] Not Started
+- End-to-end test: ProjectData → FEM Model → Analysis → Results → Visualization
+- Test AI assistant workflow (model setup → analysis → interpretation)
+- Test optimization workflow
+- Performance benchmarks (model generation time, solve time, AI response time)
+Files: tests/test_fem_integration.py
+
+================================================================================
+# CURRENT FOCUS: Feature 8 - FEM Foundation Layer
+# NEXT ACTION: Task 8.1 - Core Wall Configuration System (Priority Fix)
+#              Task 8.2 - Beam Trimming at Core Wall Edges (Priority Fix)
+#
+# COMPLETED (v2.1):
+# - Feature 1 - Python Engineering Core (All 5 Tasks)
+# - Feature 2 - Lateral Stability Module (All 4 Tasks)
+# - Feature 3 - Streamlit Dashboard (All 6 Tasks)
+# - Feature 4 - Magazine-Style Report Generator (All 5 Tasks)
+# - Feature 5 - Debug & Integration Testing (All 4 Tasks)
+#
+# IN PROGRESS (v3.0):
+# - Feature 8 - FEM Foundation Layer (OpenSeesPy + ConcreteProperties)
+# - Feature 9 - Linear Static Analysis
+# - Feature 10 - FEM Visualization (opsvis/vfo)
+# - Feature 11 - AI Assistant Core (DeepSeek)
+# - Feature 12 - AI-Assisted Mesh Generation
+# - Feature 13 - AI-Assisted Optimization
+# - Feature 14 - AI Results Interpretation
+# - Feature 15 - Testing & Validation
+================================================================================
