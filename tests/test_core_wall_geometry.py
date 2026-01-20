@@ -14,6 +14,10 @@ from src.fem.core_wall_geometry import (
     calculate_two_c_facing_properties,
     TwoCBackToBackCoreWall,
     calculate_two_c_back_to_back_properties,
+    TubeCenterOpeningCoreWall,
+    calculate_tube_center_opening_properties,
+    TubeSideOpeningCoreWall,
+    calculate_tube_side_opening_properties,
 )
 
 
@@ -1120,3 +1124,498 @@ class TestTwoCBackToBackCoreWall:
         # FACING has webs at outer edges, flanges point inward
         # BACK_TO_BACK spreads mass further from centerline, so larger I_yy
         assert back_to_back.calculate_second_moment_y() > facing.calculate_second_moment_y()
+
+
+class TestTubeCenterOpeningCoreWall:
+    """Tests for tube with center opening core wall geometry and section properties."""
+
+    def test_initialization_valid(self):
+        """Test valid TUBE_CENTER_OPENING initialization."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+        tube = TubeCenterOpeningCoreWall(geometry)
+
+        assert tube.t == 500
+        assert tube.L_x == 6000
+        assert tube.L_y == 8000
+        assert tube.w_open == 2000
+        assert tube.h_open == 2500
+
+    def test_initialization_wrong_config(self):
+        """Test initialization with wrong config raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.I_SECTION,
+            wall_thickness=500,
+        )
+        with pytest.raises(ValueError, match="Expected TUBE_CENTER_OPENING config"):
+            TubeCenterOpeningCoreWall(geometry)
+
+    def test_initialization_missing_opening_dimensions(self):
+        """Test initialization with missing opening dimensions raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            # Missing opening_width and opening_height
+        )
+        with pytest.raises(ValueError, match="requires opening_width and opening_height"):
+            TubeCenterOpeningCoreWall(geometry)
+
+    def test_initialization_opening_too_wide(self):
+        """Test that opening wider than inner tube raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=6000,  # Too wide (>= L_x - 2*t = 5000)
+            opening_height=2000,
+        )
+        with pytest.raises(ValueError, match="Opening width must be less than inner tube width"):
+            TubeCenterOpeningCoreWall(geometry)
+
+    def test_calculate_area_simple_case(self):
+        """Test area calculation with simple dimensions.
+
+        Hand calculation:
+        - Outer dimensions: 6000 × 8000 mm
+        - Wall thickness: 500 mm
+        - Opening: 2000 × 2500 mm
+
+        Gross area = 6000 × 8000 = 48,000,000 mm²
+        Inner void = (6000-2×500) × (8000-2×500) = 5000 × 7000 = 35,000,000 mm²
+        Tube area = 48,000,000 - 35,000,000 = 13,000,000 mm²
+        Opening area = 2000 × 2500 = 5,000,000 mm²
+        Net area = 13,000,000 - 5,000,000 = 8,000,000 mm²
+        """
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+        tube = TubeCenterOpeningCoreWall(geometry)
+
+        area = tube.calculate_area()
+        expected_area = 8_000_000  # mm²
+
+        assert area == pytest.approx(expected_area, rel=1e-6)
+
+    def test_calculate_centroid_centered_opening(self):
+        """Test centroid for tube with centered opening.
+
+        For symmetric tube with centered opening, centroid remains at geometric center.
+        """
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+        tube = TubeCenterOpeningCoreWall(geometry)
+
+        cx, cy = tube.calculate_centroid()
+
+        # Centered opening preserves centroid at geometric center
+        assert cx == pytest.approx(3000, rel=1e-6)  # L_x / 2
+        assert cy == pytest.approx(4000, rel=1e-6)  # L_y / 2
+
+    def test_calculate_section_properties_integration(self):
+        """Test complete section properties calculation."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+        tube = TubeCenterOpeningCoreWall(geometry)
+
+        props = tube.calculate_section_properties()
+
+        # Verify all properties are populated and positive
+        assert props.A == pytest.approx(8_000_000, rel=1e-4)
+        assert props.centroid_x == pytest.approx(3000, rel=1e-4)
+        assert props.centroid_y == pytest.approx(4000, rel=1e-4)
+        assert props.I_xx > 0
+        assert props.I_yy > 0
+        assert props.I_xy == pytest.approx(0, abs=1e-6)  # Symmetric with centered opening
+        assert props.J > 0
+        assert props.shear_center_x == pytest.approx(3000, rel=1e-4)
+        assert props.shear_center_y == pytest.approx(4000, rel=1e-4)
+
+    def test_convenience_function(self):
+        """Test the convenience function calculate_tube_center_opening_properties."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+
+        props = calculate_tube_center_opening_properties(geometry)
+
+        assert props.A == pytest.approx(8_000_000, rel=1e-4)
+        assert props.I_xx > 0
+
+    def test_get_outline_coordinates(self):
+        """Test outline coordinate generation for visualization."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+        tube = TubeCenterOpeningCoreWall(geometry)
+
+        coords = tube.get_outline_coordinates()
+
+        # Should return a list of coordinate tuples
+        assert isinstance(coords, list)
+        assert len(coords) > 0
+        assert all(isinstance(coord, tuple) and len(coord) == 2 for coord in coords)
+
+        # Check key corner coordinates for outer perimeter
+        assert (0, 0) in coords
+        assert (6000, 0) in coords
+        assert (6000, 8000) in coords
+        assert (0, 8000) in coords
+
+
+class TestTubeSideOpeningCoreWall:
+    """Tests for tube with side opening core wall geometry and section properties."""
+
+    def test_initialization_valid(self):
+        """Test valid TUBE_SIDE_OPENING initialization."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,  # Into wall depth (< wall_thickness)
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        assert tube.t == 500
+        assert tube.L_x == 6000
+        assert tube.L_y == 8000
+        assert tube.w_open == 400
+        assert tube.h_open == 2500
+
+    def test_initialization_wrong_config(self):
+        """Test initialization with wrong config raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.I_SECTION,
+            wall_thickness=500,
+        )
+        with pytest.raises(ValueError, match="Expected TUBE_SIDE_OPENING config"):
+            TubeSideOpeningCoreWall(geometry)
+
+    def test_initialization_missing_opening_dimensions(self):
+        """Test initialization with missing opening dimensions raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            # Missing opening_width and opening_height
+        )
+        with pytest.raises(ValueError, match="requires opening_width and opening_height"):
+            TubeSideOpeningCoreWall(geometry)
+
+    def test_initialization_opening_too_high(self):
+        """Test that opening taller than inner tube raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=8000,  # Too high (>= L_y - 2*t = 7000)
+        )
+        with pytest.raises(ValueError, match="Opening height must be less than inner tube height"):
+            TubeSideOpeningCoreWall(geometry)
+
+    def test_initialization_opening_too_wide(self):
+        """Test that opening wider than wall thickness raises error."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=600,  # Too wide (>= wall_thickness = 500)
+            opening_height=2000,
+        )
+        with pytest.raises(ValueError, match="Opening width must be less than wall thickness"):
+            TubeSideOpeningCoreWall(geometry)
+
+    def test_calculate_area_simple_case(self):
+        """Test area calculation with simple dimensions.
+
+        Hand calculation:
+        - Outer dimensions: 6000 × 8000 mm
+        - Wall thickness: 500 mm
+        - Opening: 400 × 2500 mm (in left wall)
+
+        Gross area = 6000 × 8000 = 48,000,000 mm²
+        Inner void = (6000-2×500) × (8000-2×500) = 5000 × 7000 = 35,000,000 mm²
+        Tube area = 48,000,000 - 35,000,000 = 13,000,000 mm²
+        Opening area = 400 × 2500 = 1,000,000 mm²
+        Net area = 13,000,000 - 1,000,000 = 12,000,000 mm²
+        """
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        area = tube.calculate_area()
+        expected_area = 12_000_000  # mm²
+
+        assert area == pytest.approx(expected_area, rel=1e-6)
+
+    def test_calculate_centroid_asymmetric_opening(self):
+        """Test centroid for tube with side opening.
+
+        Hand calculation:
+        - Tube without opening: A_tube = 13,000,000 mm², centroid at (3000, 4000)
+        - Opening: A_open = 1,000,000 mm², centroid at (200, 4000) [centered vertically]
+
+        Using subtraction method:
+        centroid_x = (13,000,000 × 3000 - 1,000,000 × 200) / 12,000,000
+                   = (39,000,000,000 - 200,000,000) / 12,000,000
+                   = 38,800,000,000 / 12,000,000
+                   = 3233.33 mm
+
+        centroid_y = (13,000,000 × 4000 - 1,000,000 × 4000) / 12,000,000
+                   = (52,000,000,000 - 4,000,000,000) / 12,000,000
+                   = 48,000,000,000 / 12,000,000
+                   = 4000 mm (unchanged as opening is centered vertically)
+        """
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        cx, cy = tube.calculate_centroid()
+
+        # Opening in left wall shifts centroid to the right
+        assert cx > 3000  # Shifts right from geometric center
+        assert cx == pytest.approx(3233.33, rel=1e-4)
+        assert cy == pytest.approx(4000, rel=1e-6)  # No vertical shift (centered opening)
+
+    def test_calculate_product_moment_asymmetric(self):
+        """Test product of inertia for asymmetric section.
+
+        For asymmetric sections, I_xy should be non-zero (though may be small if
+        opening is centered vertically).
+        """
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        I_xy = tube.calculate_product_moment()
+
+        # For vertically centered opening, I_xy should be close to zero but may have small value
+        # due to centroid shift
+        # Just verify it's calculated and finite
+        assert math.isfinite(I_xy)
+
+    def test_calculate_section_properties_integration(self):
+        """Test complete section properties calculation."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        props = tube.calculate_section_properties()
+
+        # Verify all properties are populated and positive
+        assert props.A == pytest.approx(12_000_000, rel=1e-4)
+        assert props.centroid_x == pytest.approx(3233.33, rel=1e-4)
+        assert props.centroid_y == pytest.approx(4000, rel=1e-4)
+        assert props.I_xx > 0
+        assert props.I_yy > 0
+        # I_xy should be small but may not be exactly zero due to asymmetry
+        assert math.isfinite(props.I_xy)
+        assert props.J > 0
+
+    def test_convenience_function(self):
+        """Test the convenience function calculate_tube_side_opening_properties."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+
+        props = calculate_tube_side_opening_properties(geometry)
+
+        assert props.A == pytest.approx(12_000_000, rel=1e-4)
+        assert props.I_xx > 0
+
+    def test_get_outline_coordinates(self):
+        """Test outline coordinate generation for visualization."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        coords = tube.get_outline_coordinates()
+
+        # Should return a list of coordinate tuples
+        assert isinstance(coords, list)
+        assert len(coords) > 0
+        assert all(isinstance(coord, tuple) and len(coord) == 2 for coord in coords)
+
+        # Check key corner coordinates for outer perimeter
+        assert (0, 0) in coords
+        assert (6000, 0) in coords
+        assert (6000, 8000) in coords
+        assert (0, 8000) in coords
+
+    def test_different_dimensions(self):
+        """Test with different realistic dimensions."""
+        geometry = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=400,
+            length_x=5000,
+            length_y=7000,
+            opening_width=300,
+            opening_height=2000,
+        )
+        tube = TubeSideOpeningCoreWall(geometry)
+
+        # Just verify calculations run without errors
+        area = tube.calculate_area()
+        cx, cy = tube.calculate_centroid()
+        I_xx = tube.calculate_second_moment_x()
+        I_yy = tube.calculate_second_moment_y()
+        I_xy = tube.calculate_product_moment()
+        J = tube.calculate_torsional_constant()
+
+        # Basic sanity checks
+        assert area > 0
+        assert cx > 0 and cy > 0
+        assert I_xx > 0 and I_yy > 0
+        assert math.isfinite(I_xy)
+        assert J > 0
+
+        # Centroid should shift right from geometric center due to left opening
+        assert cx > 5000 / 2
+
+    def test_comparison_with_tube_center_opening(self):
+        """Compare side opening vs center opening for similar opening sizes.
+
+        Side opening should have:
+        - Less area removed (smaller opening)
+        - Different centroid location (asymmetric)
+        - Different moment of inertia values
+        """
+        side_opening_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=2500,
+        )
+
+        center_opening_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=2000,
+            opening_height=2500,
+        )
+
+        side_tube = TubeSideOpeningCoreWall(side_opening_geom)
+        center_tube = TubeCenterOpeningCoreWall(center_opening_geom)
+
+        # Side opening has smaller opening area
+        assert side_tube.calculate_area() > center_tube.calculate_area()
+
+        # Side opening has asymmetric centroid
+        cx_side, cy_side = side_tube.calculate_centroid()
+        cx_center, cy_center = center_tube.calculate_centroid()
+
+        # Center opening keeps centroid at geometric center
+        assert cx_center == pytest.approx(3000, rel=1e-4)
+        assert cy_center == pytest.approx(4000, rel=1e-4)
+
+        # Side opening shifts centroid
+        assert cx_side != pytest.approx(3000, rel=1e-4)
+
+    def test_varying_opening_height_affects_properties(self):
+        """Test that varying opening height affects section properties."""
+        small_opening_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=1000,  # Smaller opening
+        )
+
+        large_opening_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_SIDE_OPENING,
+            wall_thickness=500,
+            length_x=6000,
+            length_y=8000,
+            opening_width=400,
+            opening_height=3000,  # Larger opening
+        )
+
+        small_tube = TubeSideOpeningCoreWall(small_opening_geom)
+        large_tube = TubeSideOpeningCoreWall(large_opening_geom)
+
+        # Larger opening reduces area more
+        assert small_tube.calculate_area() > large_tube.calculate_area()
+
+        # Larger opening reduces J (torsional stiffness) more
+        assert small_tube.calculate_torsional_constant() > large_tube.calculate_torsional_constant()

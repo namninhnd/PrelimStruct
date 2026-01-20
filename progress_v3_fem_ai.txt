@@ -81,12 +81,13 @@ Status: [ ] Not Started
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
 
 #### Task 8.1.4: TWO_C_BACK_TO_BACK Geometry Generator
-Status: [ ] Not Started
-- Implement 2 C-shaped walls back to back
-- Calculate combined section properties
-- Handle connection between walls
-- Add unit tests
+Status: [X] Completed
+- Implement 2 C-shaped walls back to back ✓
+- Calculate combined section properties ✓
+- Handle connection between walls (optional gap parameter) ✓
+- Add unit tests ✓
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+Commit: 80a87e5 - 19 unit tests passing, hand calculations verified
 
 #### Task 8.1.5: TUBE_CENTER_OPENING Geometry Generator
 Status: [ ] Not Started
@@ -97,12 +98,13 @@ Status: [ ] Not Started
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
 
 #### Task 8.1.6: TUBE_SIDE_OPENING Geometry Generator
-Status: [ ] Not Started
-- Implement tube/box core wall with side flange opening
-- Define opening location and dimensions
-- Calculate asymmetric section properties
-- Add unit tests
+Status: [X] Completed
+- Implement tube/box core wall with side flange opening ✓
+- Define opening location and dimensions ✓
+- Calculate asymmetric section properties (including I_xy) ✓
+- Add unit tests (14 tests, all passing) ✓
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+Commit: [pending] - All 68 unit tests passing (including 14 for TUBE_SIDE_OPENING)
 
 #### Task 8.1.8: Core Wall UI Integration
 

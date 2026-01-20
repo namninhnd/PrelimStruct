@@ -1178,3 +1178,351 @@ def calculate_tube_center_opening_properties(geometry: CoreWallGeometry) -> Core
     """
     tube_opening = TubeCenterOpeningCoreWall(geometry)
     return tube_opening.calculate_section_properties()
+
+
+class TubeSideOpeningCoreWall:
+    """Tube/box core wall with side flange opening geometry generator.
+
+    This represents a rectangular tube (box) core wall with an opening in one of the
+    side flanges (typically left or right wall). This creates an asymmetric section.
+    Common in tall buildings where elevator/stair cores require side access doors.
+
+    Geometry notation:
+    - Tube: Rectangular box formed by 4 walls (left, right, top, bottom)
+    - Opening: Rectangular cutout in one of the side flanges (left or right wall)
+    - Wall thickness: Constant throughout (typically 500mm)
+    - The opening creates asymmetry in one direction
+
+    Coordinate system:
+    - Origin at bottom-left corner of outer bounding box
+    - X-axis horizontal (along tube width)
+    - Y-axis vertical (along tube height)
+
+    Configuration (plan view with opening in left wall):
+        ┌─────────────────────┐
+        │                     │ <- Top wall
+             ┌─────┐
+             │OPEN │          │
+             └─────┘
+        │                     │ <- Bottom wall
+        └─────────────────────┘
+        ^                     ^
+        Left wall          Right wall
+        (with opening)     (solid)
+    """
+
+    def __init__(self, geometry: CoreWallGeometry):
+        """Initialize tube core wall with side opening geometry.
+
+        Args:
+            geometry: CoreWallGeometry with config=TUBE_SIDE_OPENING and required dimensions
+
+        Raises:
+            ValueError: If geometry config is not TUBE_SIDE_OPENING or required dimensions missing
+        """
+        if geometry.config != CoreWallConfig.TUBE_SIDE_OPENING:
+            raise ValueError(f"Expected TUBE_SIDE_OPENING config, got {geometry.config}")
+
+        if geometry.length_x is None or geometry.length_y is None:
+            raise ValueError("TUBE_SIDE_OPENING requires length_x and length_y")
+
+        if geometry.opening_width is None or geometry.opening_height is None:
+            raise ValueError("TUBE_SIDE_OPENING requires opening_width and opening_height")
+
+        # Validate opening is smaller than the wall it's in
+        # Opening is in the vertical wall (running along Y-direction)
+        if geometry.opening_height >= geometry.length_y - 2 * geometry.wall_thickness:
+            raise ValueError("Opening height must be less than inner tube height")
+
+        # Opening width is limited by wall thickness (can't be wider than the wall depth)
+        if geometry.opening_width >= geometry.wall_thickness:
+            raise ValueError("Opening width must be less than wall thickness for side opening")
+
+        self.geometry = geometry
+        self.t = geometry.wall_thickness        # Wall thickness
+        self.L_x = geometry.length_x            # Outer dimension in X
+        self.L_y = geometry.length_y            # Outer dimension in Y
+        self.w_open = geometry.opening_width    # Opening width (into wall depth)
+        self.h_open = geometry.opening_height   # Opening height (vertical extent)
+
+    def calculate_area(self) -> float:
+        """Calculate gross cross-sectional area of tube with side opening.
+
+        The tube section consists of:
+        - Gross rectangular tube: L_x × L_y
+        - Inner void: (L_x - 2×t) × (L_y - 2×t)
+        - Minus side opening: w_open × h_open (cuts through left wall)
+
+        Area = (Gross tube - Inner void) - Opening
+
+        Returns:
+            Cross-sectional area in mm²
+        """
+        # Gross outer rectangle
+        area_gross = self.L_x * self.L_y
+
+        # Inner void (hollow tube interior)
+        area_inner_void = (self.L_x - 2 * self.t) * (self.L_y - 2 * self.t)
+
+        # Tube area (before accounting for opening)
+        area_tube = area_gross - area_inner_void
+
+        # Subtract side opening (cuts through left wall)
+        area_opening = self.w_open * self.h_open
+
+        return area_tube - area_opening
+
+    def calculate_centroid(self) -> Tuple[float, float]:
+        """Calculate centroid location of tube with side opening.
+
+        For a tube with opening in the left wall, the centroid shifts:
+        - X-direction: Shifts right (away from opening) due to material removed from left
+        - Y-direction: May shift depending on opening vertical position (assuming centered)
+
+        Uses first moment of area method:
+        x̄ = (A_total × x_total - A_opening × x_opening) / (A_total - A_opening)
+
+        Assuming opening is centered vertically for this implementation.
+
+        Returns:
+            Tuple of (centroid_x, centroid_y) in mm from bottom-left corner
+        """
+        # For tube without opening, centroid would be at geometric center
+        A_tube = self.L_x * self.L_y - (self.L_x - 2 * self.t) * (self.L_y - 2 * self.t)
+        x_tube = self.L_x / 2
+        y_tube = self.L_y / 2
+
+        # Opening is in left wall (at x = w_open/2 from left edge)
+        # Assuming opening is centered vertically
+        A_opening = self.w_open * self.h_open
+        x_opening = self.w_open / 2
+        y_opening = self.L_y / 2  # Centered vertically
+
+        # Calculate centroid using subtraction method
+        # Q_x = A_tube × x_tube - A_opening × x_opening
+        # Q_y = A_tube × y_tube - A_opening × y_opening
+        A_net = A_tube - A_opening
+
+        centroid_x = (A_tube * x_tube - A_opening * x_opening) / A_net
+        centroid_y = (A_tube * y_tube - A_opening * y_opening) / A_net
+
+        return (centroid_x, centroid_y)
+
+    def calculate_second_moment_x(self) -> float:
+        """Calculate second moment of area about centroidal X-X axis (I_xx).
+
+        This is the moment of inertia about the horizontal axis through centroid,
+        which governs bending resistance in the vertical plane.
+
+        Uses subtraction method with parallel axis theorem:
+        I_xx = I_gross_rectangle - I_inner_void - I_opening (all transferred to section centroid)
+
+        Returns:
+            Second moment of area I_xx in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+
+        # Gross outer rectangle about section centroid
+        I_gross_local = (self.L_x * self.L_y**3) / 12
+        y_gross = self.L_y / 2
+        d_gross = y_gross - cy
+        A_gross = self.L_x * self.L_y
+        I_gross = I_gross_local + A_gross * d_gross**2
+
+        # Inner void about section centroid
+        inner_width = self.L_x - 2 * self.t
+        inner_height = self.L_y - 2 * self.t
+        I_inner_local = (inner_width * inner_height**3) / 12
+        y_inner = self.L_y / 2
+        d_inner = y_inner - cy
+        A_inner = inner_width * inner_height
+        I_inner = I_inner_local + A_inner * d_inner**2
+
+        # Opening about section centroid (assuming centered vertically)
+        I_opening_local = (self.w_open * self.h_open**3) / 12
+        y_opening = self.L_y / 2  # Centered vertically
+        d_opening = y_opening - cy
+        A_opening = self.w_open * self.h_open
+        I_opening = I_opening_local + A_opening * d_opening**2
+
+        return I_gross - I_inner - I_opening
+
+    def calculate_second_moment_y(self) -> float:
+        """Calculate second moment of area about centroidal Y-Y axis (I_yy).
+
+        This is the moment of inertia about the vertical axis through centroid,
+        which governs bending resistance in the horizontal plane.
+
+        The side opening creates asymmetry, affecting I_yy calculation.
+
+        Returns:
+            Second moment of area I_yy in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+
+        # Gross outer rectangle about section centroid
+        I_gross_local = (self.L_y * self.L_x**3) / 12
+        x_gross = self.L_x / 2
+        d_gross = x_gross - cx
+        A_gross = self.L_x * self.L_y
+        I_gross = I_gross_local + A_gross * d_gross**2
+
+        # Inner void about section centroid
+        inner_width = self.L_x - 2 * self.t
+        inner_height = self.L_y - 2 * self.t
+        I_inner_local = (inner_height * inner_width**3) / 12
+        x_inner = self.L_x / 2
+        d_inner = x_inner - cx
+        A_inner = inner_width * inner_height
+        I_inner = I_inner_local + A_inner * d_inner**2
+
+        # Opening about section centroid (in left wall)
+        I_opening_local = (self.h_open * self.w_open**3) / 12
+        x_opening = self.w_open / 2  # Opening starts at left edge
+        d_opening = x_opening - cx
+        A_opening = self.w_open * self.h_open
+        I_opening = I_opening_local + A_opening * d_opening**2
+
+        return I_gross - I_inner - I_opening
+
+    def calculate_product_moment(self) -> float:
+        """Calculate product of inertia I_xy about centroidal axes.
+
+        For asymmetric sections (like tube with side opening), I_xy is generally non-zero.
+
+        I_xy = Σ (I_xy,i + A_i × dx_i × dy_i)
+
+        where dx_i and dy_i are distances from component centroid to section centroid.
+
+        For rectangles aligned with axes, local I_xy = 0, so:
+        I_xy = Σ (A_i × dx_i × dy_i)
+
+        Returns:
+            Product of inertia I_xy in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+
+        # Gross outer rectangle
+        x_gross = self.L_x / 2
+        y_gross = self.L_y / 2
+        dx_gross = x_gross - cx
+        dy_gross = y_gross - cy
+        A_gross = self.L_x * self.L_y
+        I_xy_gross = A_gross * dx_gross * dy_gross
+
+        # Inner void (subtract)
+        inner_width = self.L_x - 2 * self.t
+        inner_height = self.L_y - 2 * self.t
+        x_inner = self.L_x / 2
+        y_inner = self.L_y / 2
+        dx_inner = x_inner - cx
+        dy_inner = y_inner - cy
+        A_inner = inner_width * inner_height
+        I_xy_inner = A_inner * dx_inner * dy_inner
+
+        # Opening (subtract)
+        x_opening = self.w_open / 2
+        y_opening = self.L_y / 2  # Centered vertically
+        dx_opening = x_opening - cx
+        dy_opening = y_opening - cy
+        A_opening = self.w_open * self.h_open
+        I_xy_opening = A_opening * dx_opening * dy_opening
+
+        return I_xy_gross - I_xy_inner - I_xy_opening
+
+    def calculate_torsional_constant(self) -> float:
+        """Calculate torsional constant J for tube with side opening.
+
+        For thin-walled closed sections (tubes), the torsional constant is:
+        J = (4 × A_enclosed²) / (∮ ds/t)
+
+        The side opening disrupts the closed section, significantly reducing torsional stiffness.
+        Use reduction factor based on opening size.
+
+        Returns:
+            Torsional constant J in mm⁴
+        """
+        # Centerline dimensions (midline of wall thickness)
+        b = self.L_x - self.t  # Centerline width
+        h = self.L_y - self.t  # Centerline height
+
+        # Enclosed area by centerline
+        A_enclosed = b * h
+
+        # Perimeter integral for closed tube
+        perimeter_integral = 2 * (b + h) / self.t
+
+        # Torsional constant for closed tube
+        J_tube = (4 * A_enclosed**2) / perimeter_integral
+
+        # Reduction factor for side opening
+        # Side opening disrupts closed section more than center opening
+        # Reduction based on opening height relative to wall height
+        opening_ratio = self.h_open / self.L_y
+        reduction_factor = max(0.2, 1 - 0.8 * opening_ratio)  # Minimum 20% retained
+
+        return J_tube * reduction_factor
+
+    def calculate_section_properties(self) -> CoreWallSectionProperties:
+        """Calculate all section properties for tube with side opening.
+
+        Returns:
+            CoreWallSectionProperties with calculated values
+        """
+        cx, cy = self.calculate_centroid()
+
+        return CoreWallSectionProperties(
+            I_xx=self.calculate_second_moment_x(),
+            I_yy=self.calculate_second_moment_y(),
+            I_xy=self.calculate_product_moment(),  # Non-zero for asymmetric section
+            A=self.calculate_area(),
+            J=self.calculate_torsional_constant(),
+            centroid_x=cx,
+            centroid_y=cy,
+            shear_center_x=cx,  # Approximation - exact calculation requires detailed analysis
+            shear_center_y=cy,
+        )
+
+    def get_outline_coordinates(self) -> List[Tuple[float, float]]:
+        """Get coordinates of tube with side opening outline for visualization.
+
+        Returns coordinates for outer perimeter and opening cutout.
+
+        Returns:
+            List of (x, y) coordinate tuples in mm
+        """
+        # Outer perimeter (counter-clockwise from bottom-left)
+        outer = [
+            (0, 0),
+            (self.L_x, 0),
+            (self.L_x, self.L_y),
+            (0, self.L_y),
+            (0, 0),  # Close outer perimeter
+        ]
+
+        # Side opening in left wall (assuming centered vertically)
+        y_open_start = (self.L_y - self.h_open) / 2
+
+        opening = [
+            (0, y_open_start),
+            (self.w_open, y_open_start),
+            (self.w_open, y_open_start + self.h_open),
+            (0, y_open_start + self.h_open),
+            (0, y_open_start),  # Close opening perimeter
+        ]
+
+        # Combine outer and opening (separate loops for visualization)
+        return outer + opening
+
+
+def calculate_tube_side_opening_properties(geometry: CoreWallGeometry) -> CoreWallSectionProperties:
+    """Convenience function to calculate tube with side opening properties.
+
+    Args:
+        geometry: CoreWallGeometry with config=TUBE_SIDE_OPENING
+
+    Returns:
+        Calculated CoreWallSectionProperties
+    """
+    tube_side_opening = TubeSideOpeningCoreWall(geometry)
+    return tube_side_opening.calculate_section_properties()
