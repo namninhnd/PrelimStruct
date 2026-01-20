@@ -16,3 +16,7 @@ pytest>=7.4.0
 
 # Report Generation
 jinja2>=3.1.0
+
+# FEM Analysis (v3.0)
+openseespy>=3.5.0
+concreteproperties>=0.5.0

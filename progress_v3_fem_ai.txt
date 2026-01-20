@@ -337,20 +337,42 @@ Reference: https://github.com/robbievanleeuwen/concrete-properties
 Strategy: Extend ConcreteProperties library with HK Code 2013 design code (layered approach)
 
 #### Task 8.4.1: HK2013 Design Code Class
-Status: [ ] Not Started
-- Create HK2013 class extending DesignCode base class
-- Implement assign_concrete_section() with HK Code validation
-- Follow AS3600 implementation pattern as template
-- Add HK Code specific docstrings and references
-Files: src/fem/design_codes/hk2013.py
+Status: [X] Completed
+Implementation Date: 2026-01-20
+- ✅ Created src/fem/design_codes/ directory structure
+- ✅ Implemented HK2013 class extending ConcreteProperties DesignCode base class
+- ✅ Implemented create_concrete_material() with HK Code 2013 compliance:
+  - Elastic modulus: E_cm = 3.46√f_cu + 3.21 GPa (Cl 3.1.7)
+  - Flexural tensile strength: f_ct = 0.6√f_cu (Cl 3.1.6.3)
+  - Stress block parameters: α = 0.67, γ = 0.45 for f_cu ≤ 60 MPa (Cl 6.1.2.4)
+  - High strength concrete adjustments for f_cu > 60 MPa (Cl 6.1.2.4(b))
+  - Ultimate strain: ε_cu = 0.0035
+- ✅ Implemented create_steel_material() with ductility classes:
+  - Class A: ε_su ≥ 2.5% (low ductility)
+  - Class B: ε_su ≥ 5.0% (normal ductility) - default
+  - Class C: ε_su ≥ 7.5% (high ductility)
+  - Elastic modulus: E_s = 200 GPa (Cl 3.2.5)
+- ✅ Implemented get_capacity_reduction_factor() for reference
+- ✅ Comprehensive unit tests: 28 tests, all passing
+- ✅ Hand calculation verification for C40 concrete
+Files: src/fem/design_codes/__init__.py, src/fem/design_codes/hk2013.py,
+       tests/test_hk2013_design_code.py
+Commit: [pending]
+
+Note: src/fem/materials.py provides OpenSeesPy helpers (separate from ConcreteProperties).
+Both modules serve different purposes and are kept for compatibility.
 
 #### Task 8.4.2: HK Code Concrete Stress-Strain Profiles
-Status: [ ] Not Started
-- Create HKConcreteServiceProfile (linear elastic, no tension)
-- Create HKConcreteUltimateProfile per HK Code Cl 6.1.2.4
-- Implement stress block parameters (alpha, gamma) per HK Code
-- Support concrete grades C25, C30, C35, C40, C45, C50, C55, C60
-Files: src/fem/design_codes/hk2013.py (stress-strain classes)
+Status: [~] In Progress - CHANGES REQUESTED
+Review: Code Reviewer - 2026-01-20
+- ✅ Stress block parameters (alpha, gamma) implemented in ConcreteProperties
+- ✅ High-strength concrete adjustments per HK Code Cl 6.1.2.4(b)
+- ✅ OpenSeesPy Concrete01 material parameters implemented
+- ⚠️ ISSUE: HKConcreteServiceProfile class not created
+- ⚠️ ISSUE: HKConcreteUltimateProfile class not created
+- ❌ Missing: Stress-strain profile classes for ConcreteProperties integration
+Action Required: Implement profile classes in hk2013.py
+Files: src/fem/materials.py (partial), src/fem/design_codes/hk2013.py (TODO)
 
 #### Task 8.4.3: HK Code Steel Stress-Strain Profiles
 Status: [ ] Not Started
