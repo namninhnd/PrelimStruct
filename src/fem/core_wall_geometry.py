@@ -586,3 +586,595 @@ def calculate_two_c_facing_properties(geometry: CoreWallGeometry) -> CoreWallSec
     """
     two_c_facing = TwoCFacingCoreWall(geometry)
     return two_c_facing.calculate_section_properties()
+
+
+class TwoCBackToBackCoreWall:
+    """Two C-shaped core walls arranged back-to-back geometry generator.
+
+    This configuration represents two C-shaped walls arranged back-to-back,
+    connected along their open sides. This creates a closed rectangular
+    perimeter with two internal corridors running parallel to each other.
+    Common in tall buildings with dual service cores.
+
+    Geometry notation:
+    - Each C-wall consists of: 2 flanges + 1 web
+    - Left C-wall: opens to the right
+    - Right C-wall: opens to the left
+    - Connection: The two C-walls share/touch along their open sides
+    - Wall thickness: Constant throughout (typically 500mm)
+
+    Coordinate system:
+    - Origin at bottom-left corner of bounding box
+    - X-axis horizontal (along total width)
+    - Y-axis vertical (along height)
+
+    Configuration (top view):
+        Left C (opening to right):      Right C (opening to left):
+        ┌──────┐                        ┌──────┐
+        │      │<--shared connection--->│      │
+        │      │                        │      │
+        │      │                        │      │
+        └──────┘                        └──────┘
+
+    The two C-walls are arranged so their webs are adjacent (back-to-back),
+    with a connection/gap width parameter.
+    """
+
+    def __init__(self, geometry: CoreWallGeometry):
+        """Initialize two C-shaped back-to-back core walls geometry.
+
+        Args:
+            geometry: CoreWallGeometry with config=TWO_C_BACK_TO_BACK and required dimensions
+
+        Raises:
+            ValueError: If geometry config is not TWO_C_BACK_TO_BACK or required dimensions missing
+        """
+        if geometry.config != CoreWallConfig.TWO_C_BACK_TO_BACK:
+            raise ValueError(f"Expected TWO_C_BACK_TO_BACK config, got {geometry.config}")
+
+        if geometry.flange_width is None or geometry.web_length is None:
+            raise ValueError("TWO_C_BACK_TO_BACK requires flange_width and web_length")
+
+        # For back-to-back, connection_width represents spacing between the two webs
+        # If not specified, assume webs are adjacent (touching)
+        connection_width = geometry.opening_width if geometry.opening_width is not None else 0.0
+
+        self.geometry = geometry
+        self.t = geometry.wall_thickness       # Wall thickness
+        self.b_f = geometry.flange_width       # Flange width (for each C)
+        self.h_w = geometry.web_length         # Web height/length (vertical dimension)
+        self.connection = connection_width     # Spacing between webs (0 = touching)
+
+    def calculate_area(self) -> float:
+        """Calculate gross cross-sectional area of two C-shaped walls back-to-back.
+
+        Each C-section consists of:
+        - Two flanges (top and bottom): 2 × (b_f × t)
+        - One web (connecting flanges): (h_w - 2×t) × t
+
+        Total area = 2 × (area of one C)
+        Note: Connection width doesn't affect area (it's just spacing)
+
+        Returns:
+            Cross-sectional area in mm²
+        """
+        # One C-section area
+        area_one_c = 2 * self.b_f * self.t + (self.h_w - 2 * self.t) * self.t
+
+        # Two C-sections
+        return 2 * area_one_c
+
+    def calculate_centroid(self) -> Tuple[float, float]:
+        """Calculate centroid location of two C-sections back-to-back.
+
+        For back-to-back arrangement, the two C-sections are symmetric about
+        both horizontal and vertical axes through the geometric center.
+
+        Total width = 2 × b_f + 2 × t + connection_width
+        (Each C extends b_f, plus thickness of web on each side, plus connection gap)
+
+        Total height = h_w
+
+        Returns:
+            Tuple of (centroid_x, centroid_y) in mm from bottom-left corner
+        """
+        # Total bounding box dimensions
+        # Left C: 0 to b_f (with web at right edge extending to b_f + t)
+        # Connection: b_f + t to b_f + t + connection
+        # Right C: b_f + t + connection to 2*b_f + 2*t + connection
+        total_width = 2 * self.b_f + 2 * self.t + self.connection
+
+        # By double symmetry, centroid is at geometric center
+        centroid_x = total_width / 2
+        centroid_y = self.h_w / 2
+
+        return (centroid_x, centroid_y)
+
+    def calculate_second_moment_x(self) -> float:
+        """Calculate second moment of area about centroidal X-X axis (I_xx).
+
+        This is the moment of inertia about the horizontal axis through centroid,
+        which governs bending resistance in the vertical plane.
+
+        Uses parallel axis theorem for each component of both C-sections:
+        I_xx = Σ (I_i + A_i × d_y²)
+
+        Returns:
+            Second moment of area I_xx in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+        I_xx_total = 0.0
+
+        # Process both C-sections (symmetric about horizontal centroidal axis)
+        # Each C has: top flange, web, bottom flange
+
+        # For one C-section (same calculation as I-section):
+        # Top flange
+        A_top = self.b_f * self.t
+        I_top_local = self.b_f * self.t**3 / 12
+        d_top = (self.h_w - self.t / 2) - cy
+        I_top = I_top_local + A_top * d_top**2
+
+        # Web
+        h_web = self.h_w - 2 * self.t
+        A_web = h_web * self.t
+        I_web_local = self.t * h_web**3 / 12
+        d_web = 0  # Web centroid coincides with section centroid (by symmetry)
+        I_web = I_web_local + A_web * d_web**2
+
+        # Bottom flange
+        A_bot = self.b_f * self.t
+        I_bot_local = self.b_f * self.t**3 / 12
+        d_bot = (self.t / 2) - cy
+        I_bot = I_bot_local + A_bot * d_bot**2
+
+        # One C-section contribution
+        I_one_c = I_top + I_web + I_bot
+
+        # Two identical C-sections (symmetric about X-axis, no additional offset)
+        I_xx_total = 2 * I_one_c
+
+        return I_xx_total
+
+    def calculate_second_moment_y(self) -> float:
+        """Calculate second moment of area about centroidal Y-Y axis (I_yy).
+
+        This is the moment of inertia about the vertical axis through centroid,
+        which governs bending resistance in the horizontal plane.
+
+        For back-to-back arrangement, each C is positioned symmetrically about
+        the vertical centroidal axis.
+
+        Returns:
+            Second moment of area I_yy in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+        I_yy_total = 0.0
+
+        # Total width = 2*b_f + 2*t + connection
+        # Left C-section positioned from x=0 to x=(b_f + t)
+        # Left C centroid at x = b_f/2 (centroid of C-shape)
+        x_left_c = self.b_f / 2
+        d_left = x_left_c - cx
+
+        # Right C-section positioned from x=(b_f + t + connection) to x=(2*b_f + 2*t + connection)
+        x_right_c = self.b_f + self.t + self.connection + self.b_f / 2
+        d_right = x_right_c - cx
+
+        # For one C-section about its own centroidal Y-axis:
+        # Top flange (centered on C)
+        A_top = self.b_f * self.t
+        I_top_local = self.t * self.b_f**3 / 12
+
+        # Web (at edge of C, distance from C centroid = b_f/2 - t/2)
+        h_web = self.h_w - 2 * self.t
+        A_web = h_web * self.t
+        I_web_local = h_web * self.t**3 / 12
+        d_web_from_c_center = self.b_f / 2 - self.t / 2  # Web at outer edge
+        I_web_about_c_center = I_web_local + A_web * d_web_from_c_center**2
+
+        # Bottom flange (same as top)
+        A_bot = self.b_f * self.t
+        I_bot_local = self.t * self.b_f**3 / 12
+
+        # One C-section about its own centroidal axis
+        I_one_c_local = I_top_local + I_web_about_c_center + I_bot_local
+
+        # Area of one C-section
+        A_one_c = 2 * self.b_f * self.t + (self.h_w - 2 * self.t) * self.t
+
+        # Apply parallel axis theorem for both C-sections
+        I_left_c = I_one_c_local + A_one_c * d_left**2
+        I_right_c = I_one_c_local + A_one_c * d_right**2
+
+        I_yy_total = I_left_c + I_right_c
+
+        return I_yy_total
+
+    def calculate_torsional_constant(self) -> float:
+        """Calculate torsional constant J for two C-sections back-to-back.
+
+        For thin-walled sections, use approximate formula:
+        J ≈ (1/3) × Σ (b_i × t_i³)
+
+        Sum contributions from all wall segments in both C-sections.
+
+        Returns:
+            Torsional constant J in mm⁴
+        """
+        # Each C-section has:
+        # - 2 flanges of length b_f
+        # - 1 web of length (h_w - 2*t)
+
+        # One C-section contribution
+        J_flange = (1/3) * self.b_f * self.t**3
+        J_web = (1/3) * (self.h_w - 2 * self.t) * self.t**3
+        J_one_c = 2 * J_flange + J_web
+
+        # Two C-sections
+        J_total = 2 * J_one_c
+
+        return J_total
+
+    def calculate_section_properties(self) -> CoreWallSectionProperties:
+        """Calculate all section properties for two C-back-to-back core walls.
+
+        Returns:
+            CoreWallSectionProperties with calculated values
+        """
+        cx, cy = self.calculate_centroid()
+
+        return CoreWallSectionProperties(
+            I_xx=self.calculate_second_moment_x(),
+            I_yy=self.calculate_second_moment_y(),
+            I_xy=0.0,  # Zero for doubly symmetric sections
+            A=self.calculate_area(),
+            J=self.calculate_torsional_constant(),
+            centroid_x=cx,
+            centroid_y=cy,
+            shear_center_x=cx,  # Coincides with centroid for doubly symmetric sections
+            shear_center_y=cy,
+        )
+
+    def get_outline_coordinates(self) -> List[Tuple[float, float]]:
+        """Get coordinates of two C-back-to-back sections outline for visualization.
+
+        Returns coordinates in counter-clockwise order for each C-section.
+
+        Returns:
+            List of (x, y) coordinate tuples in mm
+        """
+        t = self.t
+        b = self.b_f
+        h = self.h_w
+        conn = self.connection
+
+        # Left C-section (opening to the right)
+        # Positioned from x=0 to x=(b + t)
+        left_c = [
+            # Start from bottom-left outer corner, go counter-clockwise
+            (0, 0),
+            (b, 0),
+            (b, t),
+            # Inner edge (right side, at web inner face)
+            (b + t, t),
+            (b + t, h - t),
+            # Top flange
+            (b, h - t),
+            (b, h),
+            (0, h),
+            (0, h - t),
+            # Back to start (outer left edge)
+            (0, t),
+            (0, 0),
+        ]
+
+        # Right C-section (opening to the left, mirror of left C)
+        # Positioned from x=(b + t + conn) to x=(2*b + 2*t + conn)
+        x_offset = b + t + conn
+        right_c = [
+            # Start from bottom-left of right C (inner web face)
+            (x_offset, 0),
+            (x_offset, t),
+            # Bottom flange
+            (x_offset + b, t),
+            (x_offset + b, 0),
+            (x_offset + b + t, 0),
+            (x_offset + b + t, h),
+            # Top flange
+            (x_offset + b, h),
+            (x_offset + b, h - t),
+            # Inner edge
+            (x_offset, h - t),
+            (x_offset, h),
+            (x_offset, 0),
+        ]
+
+        # Combine both C-sections
+        return left_c + right_c
+
+
+def calculate_two_c_back_to_back_properties(geometry: CoreWallGeometry) -> CoreWallSectionProperties:
+    """Convenience function to calculate two C-back-to-back section properties.
+
+    Args:
+        geometry: CoreWallGeometry with config=TWO_C_BACK_TO_BACK
+
+    Returns:
+        Calculated CoreWallSectionProperties
+    """
+    two_c_back_to_back = TwoCBackToBackCoreWall(geometry)
+    return two_c_back_to_back.calculate_section_properties()
+
+
+class TubeCenterOpeningCoreWall:
+    """Tube/box core wall with center opening geometry generator.
+
+    This represents a rectangular tube (box) core wall with an opening in the center,
+    typically for a door or corridor. Common in tall buildings where elevator/stair
+    cores require access openings.
+
+    Geometry notation:
+    - Tube: Rectangular box formed by 4 walls (left, right, top, bottom)
+    - Opening: Rectangular cutout in the center (typically centered)
+    - Wall thickness: Constant throughout (typically 500mm)
+    - The opening creates a frame-like structure
+
+    Coordinate system:
+    - Origin at bottom-left corner of outer bounding box
+    - X-axis horizontal (along tube width)
+    - Y-axis vertical (along tube height)
+    
+    Configuration (plan view):
+        ┌─────────────────────┐
+        │                     │
+        │    ┌─────────┐      │ <- Top wall
+        │    │ OPENING │      │
+        │    └─────────┘      │ <- Bottom wall of opening
+        │                     │
+        └─────────────────────┘
+        ^                     ^
+        Left wall          Right wall
+    """
+
+    def __init__(self, geometry: CoreWallGeometry):
+        """Initialize tube core wall with center opening geometry.
+
+        Args:
+            geometry: CoreWallGeometry with config=TUBE_CENTER_OPENING and required dimensions
+
+        Raises:
+            ValueError: If geometry config is not TUBE_CENTER_OPENING or required dimensions missing
+        """
+        if geometry.config != CoreWallConfig.TUBE_CENTER_OPENING:
+            raise ValueError(f"Expected TUBE_CENTER_OPENING config, got {geometry.config}")
+
+        if geometry.length_x is None or geometry.length_y is None:
+            raise ValueError("TUBE_CENTER_OPENING requires length_x and length_y")
+        
+        if geometry.opening_width is None or geometry.opening_height is None:
+            raise ValueError("TUBE_CENTER_OPENING requires opening_width and opening_height")
+
+        # Validate opening is smaller than tube interior
+        if geometry.opening_width >= geometry.length_x - 2 * geometry.wall_thickness:
+            raise ValueError("Opening width must be less than inner tube width")
+        
+        if geometry.opening_height >= geometry.length_y - 2 * geometry.wall_thickness:
+            raise ValueError("Opening height must be less than inner tube height")
+
+        self.geometry = geometry
+        self.t = geometry.wall_thickness        # Wall thickness
+        self.L_x = geometry.length_x            # Outer dimension in X
+        self.L_y = geometry.length_y            # Outer dimension in Y
+        self.w_open = geometry.opening_width    # Opening width
+        self.h_open = geometry.opening_height   # Opening height
+
+    def calculate_area(self) -> float:
+        """Calculate gross cross-sectional area of tube with center opening.
+
+        The tube section consists of:
+        - Gross rectangular tube: L_x × L_y
+        - Inner void: (L_x - 2×t) × (L_y - 2×t)
+        - Minus center opening: w_open × h_open
+
+        Area = (Gross tube - Inner void) - Opening
+             = 4 wall segments - Opening
+
+        Returns:
+            Cross-sectional area in mm²
+        """
+        # Gross outer rectangle
+        area_gross = self.L_x * self.L_y
+        
+        # Inner void (hollow tube interior)
+        area_inner_void = (self.L_x - 2 * self.t) * (self.L_y - 2 * self.t)
+        
+        # Tube area (before accounting for opening)
+        area_tube = area_gross - area_inner_void
+        
+        # Subtract center opening (cuts through one wall)
+        area_opening = self.w_open * self.h_open
+        
+        return area_tube - area_opening
+
+    def calculate_centroid(self) -> Tuple[float, float]:
+        """Calculate centroid location of tube with center opening.
+
+        For a tube with symmetric opening centered in the plan,
+        the opening reduces material symmetrically, so centroid remains
+        at the geometric center of the outer bounding box.
+
+        If opening is not centered, centroid would shift.
+        Assuming centered opening for this implementation.
+
+        Returns:
+            Tuple of (centroid_x, centroid_y) in mm from bottom-left corner
+        """
+        # For doubly symmetric tube with centered opening
+        # Centroid remains at geometric center
+        centroid_x = self.L_x / 2
+        centroid_y = self.L_y / 2
+        
+        return (centroid_x, centroid_y)
+
+    def calculate_second_moment_x(self) -> float:
+        """Calculate second moment of area about centroidal X-X axis (I_xx).
+
+        This is the moment of inertia about the horizontal axis through centroid,
+        which governs bending resistance in the vertical plane.
+
+        Uses subtraction method:
+        I_xx = I_gross_rectangle - I_inner_void - I_opening
+
+        All components are about the same centroidal axis (centered).
+
+        Returns:
+            Second moment of area I_xx in mm⁴
+        """
+        # Gross outer rectangle about its own centroid
+        I_gross = (self.L_x * self.L_y**3) / 12
+        
+        # Inner void (hollow interior) about tube centroid
+        inner_width = self.L_x - 2 * self.t
+        inner_height = self.L_y - 2 * self.t
+        I_inner = (inner_width * inner_height**3) / 12
+        
+        # Opening (centered) about tube centroid
+        # Opening is centered, so no parallel axis offset
+        I_opening = (self.w_open * self.h_open**3) / 12
+        
+        return I_gross - I_inner - I_opening
+
+    def calculate_second_moment_y(self) -> float:
+        """Calculate second moment of area about centroidal Y-Y axis (I_yy).
+
+        This is the moment of inertia about the vertical axis through centroid,
+        which governs bending resistance in the horizontal plane.
+
+        Uses subtraction method:
+        I_yy = I_gross_rectangle - I_inner_void - I_opening
+
+        Returns:
+            Second moment of area I_yy in mm⁴
+        """
+        # Gross outer rectangle about its own centroid
+        I_gross = (self.L_y * self.L_x**3) / 12
+        
+        # Inner void (hollow interior) about tube centroid
+        inner_width = self.L_x - 2 * self.t
+        inner_height = self.L_y - 2 * self.t
+        I_inner = (inner_height * inner_width**3) / 12
+        
+        # Opening (centered) about tube centroid
+        # Opening is centered, so no parallel axis offset
+        I_opening = (self.h_open * self.w_open**3) / 12
+        
+        return I_gross - I_inner - I_opening
+
+    def calculate_torsional_constant(self) -> float:
+        """Calculate torsional constant J for tube with center opening.
+
+        For thin-walled closed sections (tubes), the torsional constant is:
+        J = (4 × A_enclosed²) / (∮ ds/t)
+
+        Where:
+        - A_enclosed = area enclosed by centerline of walls
+        - ∮ ds/t = perimeter integral (sum of length/thickness for each wall)
+
+        The center opening creates additional complexity. For preliminary design,
+        use thin-walled approximation considering the tube minus opening effect.
+
+        Simplified approach: Use thin-walled formula for rectangular tube,
+        then apply reduction factor for opening.
+
+        Returns:
+            Torsional constant J in mm⁴
+        """
+        # Centerline dimensions (midline of wall thickness)
+        b = self.L_x - self.t  # Centerline width
+        h = self.L_y - self.t  # Centerline height
+        
+        # Enclosed area by centerline
+        A_enclosed = b * h
+        
+        # Perimeter integral: sum of (length / thickness) for each wall
+        # For rectangular tube with constant thickness:
+        # ∮ ds/t = 2(b + h) / t
+        perimeter_integral = 2 * (b + h) / self.t
+        
+        # Torsional constant for closed tube
+        J_tube = (4 * A_enclosed**2) / perimeter_integral
+        
+        # Reduction factor for opening (empirical approximation)
+        # Opening reduces torsional stiffness
+        # Reduction ≈ (1 - A_opening / A_enclosed)
+        opening_ratio = (self.w_open * self.h_open) / A_enclosed
+        reduction_factor = max(0.3, 1 - 0.7 * opening_ratio)  # Minimum 30% retained
+        
+        return J_tube * reduction_factor
+
+    def calculate_section_properties(self) -> CoreWallSectionProperties:
+        """Calculate all section properties for tube with center opening.
+
+        Returns:
+            CoreWallSectionProperties with calculated values
+        """
+        cx, cy = self.calculate_centroid()
+
+        return CoreWallSectionProperties(
+            I_xx=self.calculate_second_moment_x(),
+            I_yy=self.calculate_second_moment_y(),
+            I_xy=0.0,  # Zero for doubly symmetric sections with centered opening
+            A=self.calculate_area(),
+            J=self.calculate_torsional_constant(),
+            centroid_x=cx,
+            centroid_y=cy,
+            shear_center_x=cx,  # Coincides with centroid for doubly symmetric sections
+            shear_center_y=cy,
+        )
+
+    def get_outline_coordinates(self) -> List[Tuple[float, float]]:
+        """Get coordinates of tube with center opening outline for visualization.
+
+        Returns coordinates for outer perimeter and inner opening perimeter.
+
+        Returns:
+            List of (x, y) coordinate tuples in mm
+        """
+        # Outer perimeter (counter-clockwise from bottom-left)
+        outer = [
+            (0, 0),
+            (self.L_x, 0),
+            (self.L_x, self.L_y),
+            (0, self.L_y),
+            (0, 0),  # Close outer perimeter
+        ]
+        
+        # Center opening (assuming centered)
+        # Calculate opening position (centered in tube)
+        x_open_start = (self.L_x - self.w_open) / 2
+        y_open_start = (self.L_y - self.h_open) / 2
+        
+        opening = [
+            (x_open_start, y_open_start),
+            (x_open_start + self.w_open, y_open_start),
+            (x_open_start + self.w_open, y_open_start + self.h_open),
+            (x_open_start, y_open_start + self.h_open),
+            (x_open_start, y_open_start),  # Close opening perimeter
+        ]
+        
+        # Combine outer and opening (separate loops for visualization)
+        return outer + opening
+
+
+def calculate_tube_center_opening_properties(geometry: CoreWallGeometry) -> CoreWallSectionProperties:
+    """Convenience function to calculate tube with center opening properties.
+
+    Args:
+        geometry: CoreWallGeometry with config=TUBE_CENTER_OPENING
+
+    Returns:
+        Calculated CoreWallSectionProperties
+    """
+    tube_opening = TubeCenterOpeningCoreWall(geometry)
+    return tube_opening.calculate_section_properties()
