@@ -50,6 +50,19 @@ class CoreLocation(Enum):
     CORNER = "corner"       # Core at building corner (two-way eccentricity)
 
 
+class CoreWallConfig(Enum):
+    """Core wall configuration types for FEM modeling.
+    
+    These configurations represent typical tall building core wall arrangements
+    commonly used in Hong Kong structural design practice.
+    """
+    I_SECTION = "i_section"                     # 2 walls blended into I-section
+    TWO_C_FACING = "two_c_facing"               # 2 C-shaped walls facing each other
+    TWO_C_BACK_TO_BACK = "two_c_back_to_back"   # 2 C-shaped walls back to back
+    TUBE_CENTER_OPENING = "tube_center_opening" # Tube/box with center opening
+    TUBE_SIDE_OPENING = "tube_side_opening"     # Tube/box with side flange opening
+
+
 class ColumnPosition(Enum):
     """Column position for eccentricity calculation"""
     INTERIOR = "interior"
@@ -142,6 +155,59 @@ class ReinforcementInput:
 
 
 @dataclass
+class CoreWallGeometry:
+    """Core wall geometry parameters for FEM modeling.
+    
+    Attributes:
+        config: Core wall configuration type
+        wall_thickness: Wall thickness in mm (default 500mm per HK practice)
+        length_x: Core wall outer dimension in X direction (mm)
+        length_y: Core wall outer dimension in Y direction (mm)
+        opening_width: Width of opening in core wall (mm), if applicable
+        opening_height: Height of opening in core wall (mm), if applicable
+        flange_width: Flange width for I-section or C-section configurations (mm)
+        web_length: Web length for I-section or C-section configurations (mm)
+    """
+    config: CoreWallConfig
+    wall_thickness: float = 500.0  # mm
+    length_x: float = 6000.0       # mm
+    length_y: float = 6000.0       # mm
+    opening_width: Optional[float] = None   # mm
+    opening_height: Optional[float] = None  # mm
+    flange_width: Optional[float] = None    # mm
+    web_length: Optional[float] = None      # mm
+
+
+@dataclass
+class CoreWallSectionProperties:
+    """Section properties for core wall structural analysis.
+    
+    These properties are used for FEM analysis and lateral stability calculations.
+    All properties are calculated about the centroidal axis.
+    
+    Attributes:
+        I_xx: Second moment of area about X-X axis (mm⁴)
+        I_yy: Second moment of area about Y-Y axis (mm⁴)
+        I_xy: Product of inertia (mm⁴)
+        A: Cross-sectional area (mm²)
+        J: Torsional constant (mm⁴)
+        centroid_x: X-coordinate of centroid from reference point (mm)
+        centroid_y: Y-coordinate of centroid from reference point (mm)
+        shear_center_x: X-coordinate of shear center (mm)
+        shear_center_y: Y-coordinate of shear center (mm)
+    """
+    I_xx: float = 0.0
+    I_yy: float = 0.0
+    I_xy: float = 0.0
+    A: float = 0.0
+    J: float = 0.0
+    centroid_x: float = 0.0
+    centroid_y: float = 0.0
+    shear_center_x: float = 0.0
+    shear_center_y: float = 0.0
+
+
+@dataclass
 class SlabDesignInput:
     """Slab-specific design inputs"""
     slab_type: SlabType = SlabType.TWO_WAY
@@ -157,10 +223,19 @@ class BeamDesignInput:
 @dataclass
 class LateralInput:
     """Lateral stability inputs"""
+    # Legacy fields (for backward compatibility with v2.1)
     core_dim_x: float = 0       # Core wall outer dimension in X (m)
     core_dim_y: float = 0       # Core wall outer dimension in Y (m)
     core_thickness: float = 0.5  # Core wall thickness (m), default 500mm
     core_location: CoreLocation = CoreLocation.CENTER  # Core location in plan
+    
+    # v3.0 FEM fields
+    core_wall_config: Optional[CoreWallConfig] = None  # Core wall configuration type
+    wall_thickness: float = 500.0  # Wall thickness (mm) for FEM modeling
+    core_geometry: Optional[CoreWallGeometry] = None   # Detailed geometry for FEM
+    section_properties: Optional[CoreWallSectionProperties] = None  # Calculated properties
+    
+    # Wind load parameters
     terrain: TerrainCategory = TerrainCategory.URBAN
     building_width: float = 0   # Total building width (m)
     building_depth: float = 0   # Total building depth (m)
