@@ -269,3 +269,320 @@ def calculate_i_section_properties(geometry: CoreWallGeometry) -> CoreWallSectio
     """
     i_section = ISectionCoreWall(geometry)
     return i_section.calculate_section_properties()
+
+
+class TwoCFacingCoreWall:
+    """Two C-shaped core walls facing each other geometry generator.
+
+    This configuration represents two C-shaped walls arranged to face each other,
+    creating an opening in the middle. Common in tall buildings with central
+    corridors or lift lobbies between the two C-walls.
+
+    Geometry notation:
+    - Each C-wall consists of: 2 flanges + 1 web
+    - Left C-wall: opens to the right (facing right)
+    - Right C-wall: opens to the left (facing left)
+    - Opening: Clear space between the two C-walls
+    - Wall thickness: Constant throughout (typically 500mm)
+
+    Coordinate system:
+    - Origin at bottom-left corner of bounding box
+    - X-axis horizontal (along total width)
+    - Y-axis vertical (along height)
+    
+    Configuration:
+        Left C (opening to right):
+        ┌──────┐
+        │      
+        │      
+        │      
+        └──────┘
+        
+        <--opening width-->
+        
+        Right C (opening to left):
+               ┌──────┐
+                      │
+                      │
+                      │
+               └──────┘
+    """
+
+    def __init__(self, geometry: CoreWallGeometry):
+        """Initialize two C-shaped facing core walls geometry.
+
+        Args:
+            geometry: CoreWallGeometry with config=TWO_C_FACING and required dimensions
+
+        Raises:
+            ValueError: If geometry config is not TWO_C_FACING or required dimensions missing
+        """
+        if geometry.config != CoreWallConfig.TWO_C_FACING:
+            raise ValueError(f"Expected TWO_C_FACING config, got {geometry.config}")
+
+        if geometry.flange_width is None or geometry.web_length is None:
+            raise ValueError("TWO_C_FACING requires flange_width and web_length")
+        
+        if geometry.opening_width is None:
+            raise ValueError("TWO_C_FACING requires opening_width")
+
+        self.geometry = geometry
+        self.t = geometry.wall_thickness       # Wall thickness
+        self.b_f = geometry.flange_width       # Flange width (for each C)
+        self.h_w = geometry.web_length         # Web height/length (vertical dimension)
+        self.opening = geometry.opening_width  # Opening width between the two C-walls
+
+    def calculate_area(self) -> float:
+        """Calculate gross cross-sectional area of two C-shaped walls facing each other.
+
+        Each C-section consists of:
+        - Two flanges (top and bottom): 2 × (b_f × t)
+        - One web (connecting flanges): (h_w - 2×t) × t
+
+        Total area = 2 × (area of one C)
+
+        Returns:
+            Cross-sectional area in mm²
+        """
+        # One C-section area (same as I-section calculation)
+        # Two flanges + one web
+        area_one_c = 2 * self.b_f * self.t + (self.h_w - 2 * self.t) * self.t
+        
+        # Two C-sections
+        return 2 * area_one_c
+
+    def calculate_centroid(self) -> Tuple[float, float]:
+        """Calculate centroid location of two C-sections facing each other.
+
+        Uses first moment of area method for each component.
+        Due to double symmetry (both horizontal and vertical), 
+        centroid is at geometric center of bounding box.
+
+        Total width = 2 × b_f + opening_width
+        Total height = h_w
+
+        Returns:
+            Tuple of (centroid_x, centroid_y) in mm from bottom-left corner
+        """
+        # Total bounding box dimensions
+        total_width = 2 * self.b_f + self.opening
+        
+        # By double symmetry, centroid is at center
+        centroid_x = total_width / 2
+        centroid_y = self.h_w / 2
+        
+        return (centroid_x, centroid_y)
+
+    def calculate_second_moment_x(self) -> float:
+        """Calculate second moment of area about centroidal X-X axis (I_xx).
+
+        This is the moment of inertia about the horizontal axis through centroid,
+        which governs bending resistance in the vertical plane.
+
+        Uses parallel axis theorem for each component of both C-sections:
+        I_xx = Σ (I_i + A_i × d_y²)
+
+        Returns:
+            Second moment of area I_xx in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+        I_xx_total = 0.0
+
+        # Process both C-sections (left and right are symmetric about Y-axis)
+        # Each C has: top flange, web, bottom flange
+        
+        # For one C-section:
+        # Top flange
+        A_top = self.b_f * self.t
+        I_top_local = self.b_f * self.t**3 / 12
+        d_top = (self.h_w - self.t / 2) - cy
+        I_top = I_top_local + A_top * d_top**2
+        
+        # Web
+        h_web = self.h_w - 2 * self.t
+        A_web = h_web * self.t
+        I_web_local = self.t * h_web**3 / 12
+        d_web = 0  # Web centroid coincides with section centroid (by symmetry)
+        I_web = I_web_local + A_web * d_web**2
+        
+        # Bottom flange
+        A_bot = self.b_f * self.t
+        I_bot_local = self.b_f * self.t**3 / 12
+        d_bot = (self.t / 2) - cy
+        I_bot = I_bot_local + A_bot * d_bot**2
+        
+        # One C-section contribution
+        I_one_c = I_top + I_web + I_bot
+        
+        # Two identical C-sections (symmetric about Y-axis, no additional parallel axis offset)
+        I_xx_total = 2 * I_one_c
+        
+        return I_xx_total
+
+    def calculate_second_moment_y(self) -> float:
+        """Calculate second moment of area about centroidal Y-Y axis (I_yy).
+
+        This is the moment of inertia about the vertical axis through centroid,
+        which governs bending resistance in the horizontal plane.
+
+        Uses parallel axis theorem for each component.
+
+        Returns:
+            Second moment of area I_yy in mm⁴
+        """
+        cx, cy = self.calculate_centroid()
+        I_yy_total = 0.0
+
+        # Left C-section (positioned from x=0 to x=b_f)
+        # Distance from left C centroid to section centroid
+        x_left_c = self.b_f / 2  # Centroid of left C is at its geometric center
+        d_left = x_left_c - cx
+        
+        # Right C-section (positioned from x=(b_f + opening) to x=(2*b_f + opening))
+        x_right_c = self.b_f + self.opening + self.b_f / 2
+        d_right = x_right_c - cx
+        
+        # For one C-section about its own centroidal Y-axis:
+        # Top flange
+        A_top = self.b_f * self.t
+        I_top_local = self.t * self.b_f**3 / 12
+        
+        # Web (at outer edge of C, distance from C centroid = b_f/2 - t/2)
+        h_web = self.h_w - 2 * self.t
+        A_web = h_web * self.t
+        I_web_local = h_web * self.t**3 / 12
+        d_web_from_c_center = self.b_f / 2 - self.t / 2
+        I_web_about_c_center = I_web_local + A_web * d_web_from_c_center**2
+        
+        # Bottom flange (same as top)
+        A_bot = self.b_f * self.t
+        I_bot_local = self.t * self.b_f**3 / 12
+        
+        # One C-section about its own centroidal axis
+        I_one_c_local = I_top_local + I_web_about_c_center + I_bot_local
+        
+        # Area of one C-section
+        A_one_c = 2 * self.b_f * self.t + (self.h_w - 2 * self.t) * self.t
+        
+        # Apply parallel axis theorem for both C-sections
+        I_left_c = I_one_c_local + A_one_c * d_left**2
+        I_right_c = I_one_c_local + A_one_c * d_right**2
+        
+        I_yy_total = I_left_c + I_right_c
+        
+        return I_yy_total
+
+    def calculate_torsional_constant(self) -> float:
+        """Calculate torsional constant J for two C-sections facing each other.
+
+        For thin-walled sections, use approximate formula:
+        J ≈ (1/3) × Σ (b_i × t_i³)
+
+        Sum contributions from all wall segments in both C-sections.
+
+        Returns:
+            Torsional constant J in mm⁴
+        """
+        # Each C-section has:
+        # - 2 flanges of length b_f
+        # - 1 web of length (h_w - 2*t)
+        
+        # One C-section contribution
+        J_flange = (1/3) * self.b_f * self.t**3
+        J_web = (1/3) * (self.h_w - 2 * self.t) * self.t**3
+        J_one_c = 2 * J_flange + J_web
+        
+        # Two C-sections
+        J_total = 2 * J_one_c
+        
+        return J_total
+
+    def calculate_section_properties(self) -> CoreWallSectionProperties:
+        """Calculate all section properties for two C-facing core walls.
+
+        Returns:
+            CoreWallSectionProperties with calculated values
+        """
+        cx, cy = self.calculate_centroid()
+
+        return CoreWallSectionProperties(
+            I_xx=self.calculate_second_moment_x(),
+            I_yy=self.calculate_second_moment_y(),
+            I_xy=0.0,  # Zero for doubly symmetric sections
+            A=self.calculate_area(),
+            J=self.calculate_torsional_constant(),
+            centroid_x=cx,
+            centroid_y=cy,
+            shear_center_x=cx,  # Coincides with centroid for doubly symmetric sections
+            shear_center_y=cy,
+        )
+
+    def get_outline_coordinates(self) -> List[Tuple[float, float]]:
+        """Get coordinates of two C-facing sections outline for visualization.
+
+        Returns coordinates in counter-clockwise order for each C-section.
+
+        Returns:
+            List of (x, y) coordinate tuples in mm
+        """
+        t = self.t
+        b = self.b_f
+        h = self.h_w
+        opening = self.opening
+
+        # Left C-section (opening to the right)
+        left_c = [
+            # Start from bottom-left outer corner, go counter-clockwise
+            (0, 0),
+            (b, 0),
+            (b, t),
+            # Inner edge (right side, opening side)
+            (t, t),
+            (t, h - t),
+            # Continue to top
+            (b, h - t),
+            (b, h),
+            (0, h),
+            (0, h - t),
+            # Left outer edge
+            (0, h - t),
+            (0, 0),
+        ]
+
+        # Right C-section (opening to the left)
+        # Offset by (b + opening)
+        x_offset = b + opening
+        right_c = [
+            # Start from bottom-left of right C
+            (x_offset, 0),
+            (x_offset + b, 0),
+            (x_offset + b, h),
+            (x_offset + b, h - t),
+            # Continue along top
+            (x_offset + b, h - t),
+            (x_offset + b, h),
+            (x_offset + b, h),
+            (x_offset, h),
+            (x_offset, h - t),
+            # Inner edge (left side, opening side)
+            (x_offset + b - t, h - t),
+            (x_offset + b - t, t),
+            (x_offset, t),
+            (x_offset, 0),
+        ]
+
+        # Combine both C-sections (keeping them separate for visualization)
+        return left_c + right_c
+
+
+def calculate_two_c_facing_properties(geometry: CoreWallGeometry) -> CoreWallSectionProperties:
+    """Convenience function to calculate two C-facing section properties.
+
+    Args:
+        geometry: CoreWallGeometry with config=TWO_C_FACING
+
+    Returns:
+        Calculated CoreWallSectionProperties
+    """
+    two_c_facing = TwoCFacingCoreWall(geometry)
+    return two_c_facing.calculate_section_properties()
