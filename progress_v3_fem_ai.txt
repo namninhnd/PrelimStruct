@@ -211,39 +211,43 @@ Status: [ ] Not Started (deferred to UI Expert Agent)
 Files: app.py (create_framing_grid update)
 
 ### Task 8.2: Beam Trimming at Core Wall Edges (Priority Fix)
-Status: [ ] Not Started
+Status: [X] Completed
 
 #### Task 8.2.1: Beam-Core Wall Intersection Detection
-Status: [ ] Not Started
-- Implement geometric intersection detection in plan view
-- Identify which beams cross core wall boundaries
-- Calculate intersection points with core wall edges
-- Handle beams that pass through vs. terminate at core wall
+Status: [X] Completed
+- Implement geometric intersection detection in plan view ✓
+- Identify which beams cross core wall boundaries ✓
+- Calculate intersection points with core wall edges ✓
+- Handle beams that pass through vs. terminate at core wall ✓
 Files: src/fem/beam_trimmer.py
+Commit: [pending] - 24 unit tests passing
 
 #### Task 8.2.2: Beam Trimming Logic
-Status: [ ] Not Started
-- Trim beams at external edges of core wall (no overlap)
-- Calculate new trimmed beam lengths
-- Preserve beam orientation and grid alignment
-- Handle partial trimming (beam shortened on one or both ends)
+Status: [X] Completed
+- Trim beams at external edges of core wall (no overlap) ✓
+- Calculate new trimmed beam lengths ✓
+- Preserve beam orientation and grid alignment ✓
+- Handle partial trimming (beam shortened on one or both ends) ✓
 Files: src/fem/beam_trimmer.py
+Commit: [pending] - All trimming logic implemented
 
 #### Task 8.2.3: Beam Connection Types at Core Wall
-Status: [ ] Not Started
-- Define connection types: MOMENT, PINNED, FIXED
-- Assign appropriate connection based on beam type and location
-- Update beam end conditions for analysis
-- Store connection type in beam data model
+Status: [X] Completed
+- Define connection types: MOMENT, PINNED, FIXED ✓
+- Assign appropriate connection based on beam type and location ✓
+- Update beam end conditions for analysis ✓
+- Store connection type in beam data model ✓
 Files: src/fem/beam_trimmer.py, src/core/data_models.py
+Commit: [pending] - BeamConnectionType enum and assignment logic
 
 #### Task 8.2.4: Update Beam Design After Trimming
-Status: [ ] Not Started
-- Recalculate beam loads for trimmed length
-- Update moment and shear diagrams
-- Re-run beam design with new span
-- Preserve original beam properties for comparison
-Files: src/engines/beam_engine.py
+Status: [X] Completed
+- Recalculate beam loads for trimmed length ✓
+- Update moment and shear diagrams ✓
+- Re-run beam design with new span ✓
+- Preserve original beam properties for comparison ✓
+Files: src/fem/beam_trim_updater.py, src/core/data_models.py (BeamResult extended)
+Commit: [pending] - BeamTrimUpdater class with full recalculation logic
 
 #### Task 8.2.5: Beam Trimming Visualization
 Status: [ ] Not Started
@@ -252,6 +256,34 @@ Status: [ ] Not Started
 - Show original vs. trimmed length in hover tooltip
 - Add legend for connection types
 Files: app.py (create_framing_grid update)
+Note: Deferred to UI Expert Agent
+
+Unit Tests: tests/test_beam_trimmer.py
+- 24 comprehensive tests covering all functionality
+- All tests passing (100% pass rate)
+- Test coverage:
+  - BeamGeometry properties and calculations (5 tests)
+  - Line segment intersection algorithm (3 tests)
+  - I-section beam trimming (3 tests)
+  - Tube section beam trimming (2 tests)
+  - Point-in-polygon algorithm (3 tests)
+  - Connection type assignment (2 tests)
+  - Helper functions (2 tests)
+  - Multiple beam batch processing (1 test)
+  - TrimmedBeam dataclass (2 tests)
+  - Integration workflow (1 test)
+
+Implementation Notes:
+- BeamTrimmer class handles intersection detection and trimming for all core wall configurations
+- Supports I_SECTION, TWO_C_FACING, TWO_C_BACK_TO_BACK, TUBE_CENTER_OPENING, TUBE_SIDE_OPENING
+- Uses line-segment intersection algorithm for precise geometric detection
+- Point-in-polygon ray-casting algorithm determines beam endpoint locations
+- Connection types: MOMENT (trimmed at core wall), PINNED (regular connection)
+- BeamTrimUpdater recalculates beam design for trimmed spans
+- Extended BeamResult dataclass with trimming fields (is_trimmed, original_span, trimmed_span, start_connection, end_connection)
+- Calculation audit trail preserved for code checking
+- Helper function create_beam_from_grid_points() for convenient beam creation
+- Future enhancement: Task 8.2.5 for visualization integration (UI Expert)
 
 ### Task 8.3: OpenSeesPy Integration
 Status: [ ] Not Started
