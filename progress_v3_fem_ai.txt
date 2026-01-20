@@ -69,7 +69,7 @@ Status: [X] Completed
 - Calculate section properties (Ixx, Iyy, A, centroid) ✓
 - Add unit tests with hand calculation verification ✓
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
-Commit: [pending] - 12 unit tests passing, hand calculations verified
+Commit: 9613907 - 12 unit tests passing, hand calculations verified
 
 #### Task 8.1.3: TWO_C_FACING Geometry Generator
 Status: [ ] Not Started
