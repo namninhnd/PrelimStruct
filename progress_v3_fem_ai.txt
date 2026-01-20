@@ -357,7 +357,7 @@ Implementation Date: 2026-01-20
 - ✅ Hand calculation verification for C40 concrete
 Files: src/fem/design_codes/__init__.py, src/fem/design_codes/hk2013.py,
        tests/test_hk2013_design_code.py
-Commit: [pending]
+Commit: 165c9f8 - All 28 unit tests passing, ConcreteProperties integration complete
 
 Note: src/fem/materials.py provides OpenSeesPy helpers (separate from ConcreteProperties).
 Both modules serve different purposes and are kept for compatibility.
