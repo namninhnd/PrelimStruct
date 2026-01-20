@@ -204,11 +204,30 @@ Implementation Notes:
 - Future enhancement: Task 8.1-CB.4 for visualization integration
 
 #### Task 8.1-CB.4: Coupling Beam Visualization
-Status: [ ] Not Started (deferred to UI Expert Agent)
-- Add coupling beams to framing plan visualization
-- Show coupling beam dimensions and labels
-- Display reinforcement details in hover/tooltip
+Status: [X] Completed
+- Add coupling beams to framing plan visualization ✓
+- Show coupling beam dimensions and labels ✓
+- Display reinforcement details in hover/tooltip ✓
 Files: app.py (create_framing_grid update)
+Commit: [pending] - Coupling beam visualization integrated with Plotly
+
+Implementation Details:
+- Added get_coupling_beams() helper function to generate coupling beams from core geometry
+- Coupling beams displayed as thick orange lines (#F59E0B, width=8) with markers
+- Hover tooltip shows:
+  - Clear span (mm)
+  - Depth and width (mm)
+  - L/h ratio (span-to-depth ratio)
+  - Deep beam status (Yes/No for L/h < 2.0)
+- Beams positioned at opening locations within core wall
+- Supports all 5 core wall configurations:
+  - TWO_C_FACING: 1 coupling beam at central opening
+  - TWO_C_BACK_TO_BACK: 2 coupling beams (one per opening)
+  - TUBE_CENTER_OPENING: 1 coupling beam
+  - TUBE_SIDE_OPENING: 1 coupling beam
+  - I_SECTION: No coupling beams (no door openings)
+- Coordinates converted from mm to m for visualization consistency
+- Legend shows "Coupling Beam" entry
 
 ### Task 8.2: Beam Trimming at Core Wall Edges (Priority Fix)
 Status: [X] Completed
@@ -250,13 +269,31 @@ Files: src/fem/beam_trim_updater.py, src/core/data_models.py (BeamResult extende
 Commit: [pending] - BeamTrimUpdater class with full recalculation logic
 
 #### Task 8.2.5: Beam Trimming Visualization
-Status: [ ] Not Started
-- Update framing plan to show trimmed beams correctly
-- Indicate connection types at core wall (symbol/color)
-- Show original vs. trimmed length in hover tooltip
-- Add legend for connection types
+Status: [X] Completed
+- Update framing plan to show trimmed beams correctly ✓
+- Indicate connection types at core wall (symbol/color) ✓
+- Show original vs. trimmed length in hover tooltip ✓
+- Add legend for connection types ✓
 Files: app.py (create_framing_grid update)
-Note: Deferred to UI Expert Agent
+Commit: [pending] - Beam trimming visualization with connection type indicators
+
+Implementation Details:
+- Added create_beam_geometries_from_project() helper function to generate BeamGeometry objects
+- Beam trimming detection uses BeamTrimmer class for geometric intersection analysis
+- Connection type indicators displayed as markers at trimmed beam ends:
+  - MOMENT connection: Red diamond (#EF4444) - for beams trimmed at core wall
+  - FIXED connection: Purple square (#7C3AED)
+  - PINNED connection: Green circle (#10B981) - for regular connections
+- Hover tooltip shows:
+  - Connection type (MOMENT/PINNED/FIXED)
+  - Original beam length (mm)
+  - Trimmed beam length (mm)
+  - Location (start or end)
+- Markers sized at 12px with white outline for visibility
+- Coordinates converted from mm to m for consistency
+- Works with all 5 core wall configurations
+- Graceful error handling (silently skips if trimming fails)
+- Legend shows "Beam Connection" entry
 
 Unit Tests: tests/test_beam_trimmer.py
 - 24 comprehensive tests covering all functionality

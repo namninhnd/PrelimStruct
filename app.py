@@ -32,6 +32,8 @@ from src.fem.core_wall_geometry import (
     ISectionCoreWall, TwoCFacingCoreWall, TwoCBackToBackCoreWall,
     TubeCenterOpeningCoreWall, TubeSideOpeningCoreWall,
 )
+from src.fem.coupling_beam import CouplingBeamGenerator
+from src.fem.beam_trimmer import BeamTrimmer, BeamGeometry, BeamConnectionType
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -257,6 +259,73 @@ def get_core_wall_outline(geometry: CoreWallGeometry) -> Optional[list]:
         return None
 
 
+def get_coupling_beams(geometry: CoreWallGeometry, story_height: float = 3000.0) -> list:
+    """Generate coupling beams for core wall openings.
+
+    Args:
+        geometry: CoreWallGeometry with configuration and dimensions
+        story_height: Story height in mm (default 3000mm)
+
+    Returns:
+        List of CouplingBeam objects or empty list if none
+    """
+    try:
+        generator = CouplingBeamGenerator(geometry)
+        return generator.generate_coupling_beams(story_height=story_height)
+    except Exception as e:
+        st.warning(f"Failed to generate coupling beams: {str(e)}")
+        return []
+
+
+def create_beam_geometries_from_project(project: ProjectData, core_offset_x: float, core_offset_y: float) -> list:
+    """Create BeamGeometry objects from project framing layout.
+
+    Args:
+        project: ProjectData with geometry configuration
+        core_offset_x: Core wall X offset in meters
+        core_offset_y: Core wall Y offset in meters
+
+    Returns:
+        List of BeamGeometry objects representing all beams in plan
+    """
+    bay_x = project.geometry.bay_x
+    bay_y = project.geometry.bay_y
+    num_bays_x = project.geometry.num_bays_x
+    num_bays_y = project.geometry.num_bays_y
+    total_x = bay_x * num_bays_x
+    total_y = bay_y * num_bays_y
+
+    beams = []
+
+    # Horizontal beams (along X direction)
+    for iy in range(num_bays_y + 1):
+        y_pos = iy * bay_y * 1000  # Convert to mm
+        beam = BeamGeometry(
+            start_x=0,
+            start_y=y_pos,
+            end_x=total_x * 1000,
+            end_y=y_pos,
+            width=300.0,
+            beam_id=f"H{iy}"
+        )
+        beams.append(beam)
+
+    # Vertical beams (along Y direction)
+    for ix in range(num_bays_x + 1):
+        x_pos = ix * bay_x * 1000  # Convert to mm
+        beam = BeamGeometry(
+            start_x=x_pos,
+            start_y=0,
+            end_x=x_pos,
+            end_y=total_y * 1000,
+            width=300.0,
+            beam_id=f"V{ix}"
+        )
+        beams.append(beam)
+
+    return beams
+
+
 def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, num_secondary_beams: int = 3) -> go.Figure:
     """Create interactive framing grid visualization with multi-bay support"""
     bay_x = project.geometry.bay_x
@@ -437,6 +506,129 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
                 name='Core Wall',
                 hovertemplate=f"Core Wall<br>Size: {core_x:.1f}m x {core_y:.1f}m<extra></extra>"
             ))
+
+        # Coupling beams (if core geometry available)
+        if project.lateral.core_geometry:
+            coupling_beams = get_coupling_beams(
+                project.lateral.core_geometry,
+                story_height=project.geometry.story_height * 1000  # Convert to mm
+            )
+
+            if coupling_beams:
+                first_coupling = True
+                for cb in coupling_beams:
+                    # Convert coupling beam coordinates from mm to m and apply offset
+                    cb_x = cx + (cb.location_x / 1000)
+                    cb_y = cy + (cb.location_y / 1000)
+                    cb_span = cb.clear_span / 1000  # m
+                    cb_width = cb.width / 1000  # m
+
+                    # Draw coupling beam as thick line (simplified visualization)
+                    # For more precise visualization, would need actual start/end coordinates
+                    fig.add_trace(go.Scatter(
+                        x=[cb_x - cb_span/2, cb_x + cb_span/2],
+                        y=[cb_y, cb_y],
+                        mode='lines+markers',
+                        line=dict(color='#F59E0B', width=8),
+                        marker=dict(size=10, color='#F59E0B', symbol='square'),
+                        name='Coupling Beam',
+                        showlegend=first_coupling,
+                        hovertemplate=(
+                            f"Coupling Beam<br>"
+                            f"Span: {cb.clear_span:.0f}mm<br>"
+                            f"Depth: {cb.depth:.0f}mm<br>"
+                            f"Width: {cb.width:.0f}mm<br>"
+                            f"L/h: {cb.span_to_depth_ratio:.2f}<br>"
+                            f"Deep Beam: {'Yes' if cb.is_deep_beam else 'No'}"
+                            f"<extra></extra>"
+                        )
+                    ))
+                    first_coupling = False
+
+        # Beam trimming visualization (if core geometry available)
+        if project.lateral.core_geometry and project.lateral.core_dim_x > 0:
+            try:
+                # Create beam geometries from framing grid
+                beam_geometries = create_beam_geometries_from_project(project, cx, cy)
+
+                # Initialize beam trimmer with offset core geometry
+                # Note: BeamTrimmer works in mm, so we need to adjust coordinates
+                trimmer = BeamTrimmer(project.lateral.core_geometry)
+
+                # Trim beams
+                trimmed_beams = trimmer.trim_multiple_beams(beam_geometries)
+
+                # Visualize trimmed beams and connection types
+                connection_symbols = []
+                connection_x = []
+                connection_y = []
+                connection_types = []
+                connection_labels = []
+
+                for tb in trimmed_beams:
+                    if tb.trimmed_start or tb.trimmed_end:
+                        # Add connection indicators at trimmed ends
+                        if tb.trimmed_start:
+                            # Convert from mm to m and apply offset
+                            x_m = cx + (tb.trimmed_geometry.start_x / 1000)
+                            y_m = cy + (tb.trimmed_geometry.start_y / 1000)
+                            connection_x.append(x_m)
+                            connection_y.append(y_m)
+                            connection_types.append(tb.start_connection.value)
+                            connection_labels.append(
+                                f"Trimmed Start<br>"
+                                f"Connection: {tb.start_connection.value.upper()}<br>"
+                                f"Original Length: {tb.original_length:.0f}mm<br>"
+                                f"Trimmed Length: {tb.trimmed_length:.0f}mm"
+                            )
+
+                        if tb.trimmed_end:
+                            # Convert from mm to m and apply offset
+                            x_m = cx + (tb.trimmed_geometry.end_x / 1000)
+                            y_m = cy + (tb.trimmed_geometry.end_y / 1000)
+                            connection_x.append(x_m)
+                            connection_y.append(y_m)
+                            connection_types.append(tb.end_connection.value)
+                            connection_labels.append(
+                                f"Trimmed End<br>"
+                                f"Connection: {tb.end_connection.value.upper()}<br>"
+                                f"Original Length: {tb.original_length:.0f}mm<br>"
+                                f"Trimmed Length: {tb.trimmed_length:.0f}mm"
+                            )
+
+                # Add connection type indicators
+                if connection_x:
+                    # Color code by connection type
+                    connection_colors = []
+                    connection_symbols_list = []
+                    for ct in connection_types:
+                        if ct == 'moment':
+                            connection_colors.append('#EF4444')  # Red for moment
+                            connection_symbols_list.append('diamond')
+                        elif ct == 'fixed':
+                            connection_colors.append('#7C3AED')  # Purple for fixed
+                            connection_symbols_list.append('square')
+                        else:  # pinned
+                            connection_colors.append('#10B981')  # Green for pinned
+                            connection_symbols_list.append('circle')
+
+                    fig.add_trace(go.Scatter(
+                        x=connection_x,
+                        y=connection_y,
+                        mode='markers',
+                        marker=dict(
+                            size=12,
+                            color=connection_colors,
+                            symbol=connection_symbols_list,
+                            line=dict(width=2, color='white')
+                        ),
+                        name='Beam Connection',
+                        text=connection_labels,
+                        hovertemplate='%{text}<extra></extra>'
+                    ))
+            except Exception as e:
+                # Silently skip if beam trimming fails (optional feature)
+                pass
 
     # Layout
     title_text = f"Framing Plan ({num_bays_x}×{num_bays_y} bays)" if num_bays_x > 1 or num_bays_y > 1 else "Framing Plan (Single Bay)"
