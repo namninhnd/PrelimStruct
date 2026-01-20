@@ -44,21 +44,32 @@ Status: [ ] Not Started
 Status: [ ] Not Started
 
 #### Task 8.1.1: Core Wall Data Models and Enum
+Status: [X] Completed
+- Define CoreWallConfig enum with all configuration types ✓
+- Create CoreWallGeometry data class (dimensions, openings, wall thickness) ✓
+- Create CoreWallSectionProperties data class (I, A, centroid, J) ✓
+- Update LateralInput with core_wall_config and wall_thickness fields ✓
+Files: src/core/data_models.py, tests/test_core_wall_data_models.py
+Commit: 8a17826 - All 17 unit tests passing
+
+#### Task 8.1.7: Core Wall Section Properties Calculator (Priority)
 Status: [ ] Not Started
-- Define CoreWallConfig enum with all configuration types
-- Create CoreWallGeometry data class (dimensions, openings, wall thickness)
-- Create CoreWallSectionProperties data class (I, A, centroid, J)
-- Update LateralInput with core_wall_config and wall_thickness fields
-Files: src/core/data_models.py
+- Implement general section properties calculator
+- Calculate Ixx, Iyy, Ixy (product of inertia)
+- Calculate torsional constant J
+- Calculate shear center location
+- Validate against known solutions (textbook examples)
+Files: src/fem/core_wall_geometry.py (section_properties module)
 
 #### Task 8.1.2: I_SECTION Geometry Generator
-Status: [ ] Not Started
-- Implement I-section core wall geometry (2 walls blended)
-- Calculate flange and web dimensions from user inputs
-- Generate coordinate points for section outline
-- Calculate section properties (Ixx, Iyy, A, centroid)
-- Add unit tests with hand calculation verification
+Status: [X] Completed
+- Implement I-section core wall geometry (2 walls blended) ✓
+- Calculate flange and web dimensions from user inputs ✓
+- Generate coordinate points for section outline ✓
+- Calculate section properties (Ixx, Iyy, A, centroid) ✓
+- Add unit tests with hand calculation verification ✓
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
+Commit: [pending] - 12 unit tests passing, hand calculations verified
 
 #### Task 8.1.3: TWO_C_FACING Geometry Generator
 Status: [ ] Not Started
@@ -93,16 +104,8 @@ Status: [ ] Not Started
 - Add unit tests
 Files: src/fem/core_wall_geometry.py, tests/test_core_wall_geometry.py
 
-#### Task 8.1.7: Core Wall Section Properties Calculator
-Status: [ ] Not Started
-- Implement general section properties calculator
-- Calculate Ixx, Iyy, Ixy (product of inertia)
-- Calculate torsional constant J
-- Calculate shear center location
-- Validate against known solutions (textbook examples)
-Files: src/fem/core_wall_geometry.py (section_properties module)
-
 #### Task 8.1.8: Core Wall UI Integration
+
 Status: [ ] Not Started
 - Add core wall configuration dropdown selector
 - Add wall thickness input field (default 500mm)
@@ -277,7 +280,15 @@ Status: [ ] Not Started
 - Export to OpenSeesPy model format
 Files: src/fem/model_builder.py
 
+### Checkpoint: FEM Schema Freeze
+Status: [ ] Not Started
+- Lock FEM-related data models before Feature 9
+- Confirm downstream consumers (solver, visualization, AI, reports)
+- Approve changes via Plan Agent review
+Files: src/core/data_models.py
+
 --------------------------------------------------------------------------------
+
 
 ## FEATURE 9: Linear Static Analysis with Load Combinations
 Status: [ ] Not Started
@@ -345,7 +356,16 @@ Files: src/fem/results_processor.py (comparison functions)
 ## FEATURE 10: FEM Visualization (opsvis/vfo Integration)
 Status: [ ] Not Started
 
+### Task 10.0: Visualization Spike (opsvis/vfo Validation)
+Status: [ ] Not Started
+- Build minimal OpenSeesPy model in sandbox module
+- Extract nodes/elements via opsvis/vfo
+- Render basic Plotly plan view
+- Confirm data extraction performance and API stability
+Files: src/fem/visualization_spike.py
+
 ### Task 10.1: Visualization Infrastructure
+
 Status: [ ] Not Started
 - Integrate opsvis or vfo (Visualization For OpenSees) library
 - Create visualization wrapper module
@@ -612,7 +632,36 @@ Milestone: AI-assisted modeling and optimization
 # NEXT ACTION: Task 8.1.1 - Core Wall Data Models and Enum
 #              Task 8.4.1 - HK2013 Design Code Class (can run in parallel)
 #
+# AGENT ASSIGNMENTS (Balanced Team)
+# - Task 8.1.1 → Coder Agent
+# - Task 8.1.7 → Coder Agent
+# - Task 8.1.2 → Coder Agent
+# - Task 8.1.3 → Coder Agent
+# - Task 8.1.4 → Coder Agent
+# - Task 8.1.5 → Coder Agent
+# - Task 8.1.6 → Coder Agent
+# - Task 8.1.8 → UI Expert Agent
+# - Task 8.1-CB.1–8.1-CB.3 → Coder Agent
+# - Task 8.1-CB.4 → UI Expert Agent
+# - Task 8.2.1–8.2.4 → Coder Agent
+# - Task 8.2.5 → UI Expert Agent
+# - Task 8.3 → Coder Agent
+# - Task 8.4.1–8.4.6 → Coder Agent
+# - Task 8.5 → Coder Agent
+# - Task 8.6 → Coder Agent
+# - Task 9.1–9.5 → Coder Agent
+# - Task 10.0–10.4 → UI Expert Agent (Coder support for data extraction)
+# - Task 10.5 → UI Expert Agent
+# - Task 11.1–11.4 → Coder Agent
+# - Task 12.1–12.3 → Coder Agent
+# - Task 13.1–13.2 → Coder Agent
+# - Task 14.1–14.2 → Coder Agent
+# - Feature 15 tests → Test Agent
+# - After any commit → Code Reviewer Agent
+# - Phase transitions / architecture checks → Plan Agent
+#
 # COMPLETED (v2.1):
+
 # - Feature 1 - Python Engineering Core (All 5 Tasks)
 # - Feature 2 - Lateral Stability Module (All 4 Tasks)
 # - Feature 3 - Streamlit Dashboard (All 6 Tasks)
