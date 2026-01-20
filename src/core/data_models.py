@@ -181,10 +181,10 @@ class CoreWallGeometry:
 @dataclass
 class CoreWallSectionProperties:
     """Section properties for core wall structural analysis.
-    
+
     These properties are used for FEM analysis and lateral stability calculations.
     All properties are calculated about the centroidal axis.
-    
+
     Attributes:
         I_xx: Second moment of area about X-X axis (mm⁴)
         I_yy: Second moment of area about Y-Y axis (mm⁴)
@@ -205,6 +205,65 @@ class CoreWallSectionProperties:
     centroid_y: float = 0.0
     shear_center_x: float = 0.0
     shear_center_y: float = 0.0
+
+
+@dataclass
+class CouplingBeam:
+    """Coupling beam spanning core wall openings.
+
+    Coupling beams are deep beams that connect core wall segments across
+    openings (e.g., door openings, elevator/stair openings). They provide
+    critical coupling action for lateral load resistance in tall buildings.
+
+    Per HK Code 2013, coupling beams typically have:
+    - Width equal to wall thickness (for compatibility)
+    - Depth constrained by opening height minus clearances
+    - High shear forces requiring diagonal reinforcement
+
+    Attributes:
+        clear_span: Clear span between core wall faces (mm)
+        depth: Beam depth constrained by opening height (mm)
+        width: Beam width, typically equal to wall thickness (mm)
+        location_x: X-coordinate of beam centerline (mm)
+        location_y: Y-coordinate of beam centerline (mm)
+        floor_level: Floor level where beam is located (0-indexed)
+        opening_height: Full height of opening in core wall (mm)
+        top_rebar_area: Top reinforcement area (mm²)
+        bottom_rebar_area: Bottom reinforcement area (mm²)
+        diagonal_rebar_area: Diagonal reinforcement area per leg (mm²)
+        link_area: Shear link area (mm²/m)
+        link_spacing: Shear link spacing (mm)
+    """
+    clear_span: float
+    depth: float
+    width: float
+    location_x: float = 0.0
+    location_y: float = 0.0
+    floor_level: int = 0
+    opening_height: Optional[float] = None
+    top_rebar_area: float = 0.0
+    bottom_rebar_area: float = 0.0
+    diagonal_rebar_area: float = 0.0
+    link_area: float = 0.0
+    link_spacing: int = 0
+
+    @property
+    def span_to_depth_ratio(self) -> float:
+        """Calculate span-to-depth ratio (L/h).
+
+        HK Code 2013 Cl 6.1.1.2: Deep beam when L/h < 2.0
+        """
+        if self.depth == 0:
+            return float('inf')
+        return self.clear_span / self.depth
+
+    @property
+    def is_deep_beam(self) -> bool:
+        """Check if beam qualifies as deep beam per HK Code 2013.
+
+        HK Code 2013 Cl 6.1.1.2: Deep beam when clear span ≤ 2 × overall depth
+        """
+        return self.span_to_depth_ratio < 2.0
 
 
 @dataclass
@@ -275,6 +334,35 @@ class BeamResult(DesignResult):
     link_spacing: int = 0       # mm
     is_deep_beam: bool = False
     iteration_count: int = 0
+    # Beam trimming fields (v3.0 FEM)
+    is_trimmed: bool = False                    # True if beam was trimmed at core wall
+    original_span: Optional[float] = None       # Original span before trimming (m)
+    trimmed_span: Optional[float] = None        # Trimmed span after trimming (m)
+    start_connection: Optional[str] = None      # Connection type at start ("moment", "pinned", "fixed")
+    end_connection: Optional[str] = None        # Connection type at end ("moment", "pinned", "fixed")
+
+
+@dataclass
+class CouplingBeamResult(DesignResult):
+    """Coupling beam design results.
+
+    Coupling beams require special design considerations per HK Code 2013:
+    - High shear forces requiring diagonal reinforcement
+    - Deep beam provisions for L/h < 2.0
+    - Ductility requirements for seismic regions
+    """
+    width: int = 0              # mm
+    depth: int = 0              # mm
+    clear_span: float = 0.0     # mm
+    moment: float = 0.0         # kNm (from wind/seismic coupling action)
+    shear: float = 0.0          # kN (dominant action in coupling beams)
+    shear_capacity: float = 0.0 # kN
+    top_rebar: float = 0.0      # mm² (top reinforcement)
+    bottom_rebar: float = 0.0   # mm² (bottom reinforcement)
+    diagonal_rebar: float = 0.0 # mm² per leg (diagonal reinforcement)
+    link_spacing: int = 0       # mm (shear link spacing)
+    is_deep_beam: bool = True   # Typically true for coupling beams
+    span_to_depth_ratio: float = 0.0
 
 
 @dataclass
