@@ -15,7 +15,8 @@ from src.core.data_models import (
     ProjectData, GeometryInput, LoadInput, MaterialInput, LateralInput,
     SlabDesignInput, BeamDesignInput, ReinforcementInput,
     SlabType, SpanDirection, ExposureClass, TerrainCategory,
-    CoreLocation, ColumnPosition, LoadCombination, PRESETS,
+    CoreLocation, CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties,
+    ColumnPosition, LoadCombination, PRESETS,
 )
 from src.core.constants import CARBON_FACTORS
 from src.core.load_tables import LIVE_LOAD_TABLE
@@ -25,6 +26,12 @@ from src.engines.slab_engine import SlabEngine
 from src.engines.beam_engine import BeamEngine
 from src.engines.column_engine import ColumnEngine
 from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
+
+# Import FEM modules
+from src.fem.core_wall_geometry import (
+    ISectionCoreWall, TwoCFacingCoreWall, TwoCBackToBackCoreWall,
+    TubeCenterOpeningCoreWall, TubeSideOpeningCoreWall,
+)
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -186,6 +193,70 @@ def calculate_carbon_emission(project: ProjectData) -> Tuple[float, float]:
     return total_volume, carbon_emission
 
 
+def calculate_core_wall_properties(geometry: CoreWallGeometry) -> Optional[CoreWallSectionProperties]:
+    """Calculate section properties for core wall geometry.
+
+    Args:
+        geometry: CoreWallGeometry with configuration and dimensions
+
+    Returns:
+        CoreWallSectionProperties or None if calculation fails
+    """
+    try:
+        if geometry.config == CoreWallConfig.I_SECTION:
+            core_wall = ISectionCoreWall(geometry)
+            return core_wall.calculate_section_properties()
+        elif geometry.config == CoreWallConfig.TWO_C_FACING:
+            core_wall = TwoCFacingCoreWall(geometry)
+            return core_wall.calculate_section_properties()
+        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
+            core_wall = TwoCBackToBackCoreWall(geometry)
+            return core_wall.calculate_section_properties()
+        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
+            core_wall = TubeCenterOpeningCoreWall(geometry)
+            return core_wall.calculate_section_properties()
+        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
+            core_wall = TubeSideOpeningCoreWall(geometry)
+            return core_wall.calculate_section_properties()
+        else:
+            return None
+    except Exception as e:
+        st.warning(f"Failed to calculate section properties: {str(e)}")
+        return None
+
+
+def get_core_wall_outline(geometry: CoreWallGeometry) -> Optional[list]:
+    """Get outline coordinates for core wall visualization.
+
+    Args:
+        geometry: CoreWallGeometry with configuration and dimensions
+
+    Returns:
+        List of (x, y) tuples or None if generation fails
+    """
+    try:
+        if geometry.config == CoreWallConfig.I_SECTION:
+            core_wall = ISectionCoreWall(geometry)
+            return core_wall.get_outline_coordinates()
+        elif geometry.config == CoreWallConfig.TWO_C_FACING:
+            core_wall = TwoCFacingCoreWall(geometry)
+            return core_wall.get_outline_coordinates()
+        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
+            core_wall = TwoCBackToBackCoreWall(geometry)
+            return core_wall.get_outline_coordinates()
+        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
+            core_wall = TubeCenterOpeningCoreWall(geometry)
+            return core_wall.get_outline_coordinates()
+        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
+            core_wall = TubeSideOpeningCoreWall(geometry)
+            return core_wall.get_outline_coordinates()
+        else:
+            return None
+    except Exception as e:
+        st.warning(f"Failed to generate core wall outline: {str(e)}")
+        return None
+
+
 def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, num_secondary_beams: int = 3) -> go.Figure:
     """Create interactive framing grid visualization with multi-bay support"""
     bay_x = project.geometry.bay_x
@@ -325,15 +396,47 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
             cx = total_x - core_x - 0.5
             cy = total_y - core_y - 0.5
 
-        fig.add_trace(go.Scatter(
-            x=[cx, cx + core_x, cx + core_x, cx, cx],
-            y=[cy, cy, cy + core_y, cy + core_y, cy],
-            fill="toself",
-            fillcolor="rgba(30, 58, 95, 0.5)",
-            line=dict(color="#1E3A5F", width=3),
-            name='Core Wall',
-            hovertemplate=f"Core Wall<br>Size: {core_x:.1f}m x {core_y:.1f}m<extra></extra>"
-        ))
+        # Get core wall outline from geometry if available
+        if project.lateral.core_geometry:
+            outline_coords = get_core_wall_outline(project.lateral.core_geometry)
+
+            if outline_coords:
+                # Convert mm to m and offset by core wall position
+                outline_x = [cx + (coord[0] / 1000) for coord in outline_coords]
+                outline_y = [cy + (coord[1] / 1000) for coord in outline_coords]
+
+                # Add outline trace
+                fig.add_trace(go.Scatter(
+                    x=outline_x,
+                    y=outline_y,
+                    fill="toself",
+                    fillcolor="rgba(30, 58, 95, 0.3)",
+                    line=dict(color="#1E3A5F", width=3),
+                    name='Core Wall',
+                    hovertemplate=f"Core Wall<br>Config: {project.lateral.core_wall_config.value if project.lateral.core_wall_config else 'N/A'}<br>Wall Thickness: {project.lateral.wall_thickness}mm<extra></extra>"
+                ))
+            else:
+                # Fallback to simple rectangle if outline generation fails
+                fig.add_trace(go.Scatter(
+                    x=[cx, cx + core_x, cx + core_x, cx, cx],
+                    y=[cy, cy, cy + core_y, cy + core_y, cy],
+                    fill="toself",
+                    fillcolor="rgba(30, 58, 95, 0.3)",
+                    line=dict(color="#1E3A5F", width=3),
+                    name='Core Wall',
+                    hovertemplate=f"Core Wall<br>Size: {core_x:.1f}m x {core_y:.1f}m<extra></extra>"
+                ))
+        else:
+            # Legacy visualization (simple rectangle) for backward compatibility
+            fig.add_trace(go.Scatter(
+                x=[cx, cx + core_x, cx + core_x, cx, cx],
+                y=[cy, cy, cy + core_y, cy + core_y, cy],
+                fill="toself",
+                fillcolor="rgba(30, 58, 95, 0.3)",
+                line=dict(color="#1E3A5F", width=3),
+                name='Core Wall',
+                hovertemplate=f"Core Wall<br>Size: {core_x:.1f}m x {core_y:.1f}m<extra></extra>"
+            ))
 
     # Layout
     title_text = f"Framing Plan ({num_bays_x}×{num_bays_y} bays)" if num_bays_x > 1 or num_bays_y > 1 else "Framing Plan (Single Bay)"
@@ -788,13 +891,95 @@ def main():
                               value=st.session_state.project.lateral.core_dim_x > 0)
 
         if has_core:
-            col1, col2 = st.columns(2)
-            with col1:
-                core_x = st.number_input("Core X (m)", min_value=2.0, max_value=15.0,
-                                        value=max(4.0, float(st.session_state.project.lateral.core_dim_x)), step=0.5)
-            with col2:
-                core_y = st.number_input("Core Y (m)", min_value=2.0, max_value=15.0,
-                                        value=max(4.0, float(st.session_state.project.lateral.core_dim_y)), step=0.5)
+            # Core wall configuration dropdown
+            config_options = {
+                CoreWallConfig.I_SECTION: "I-Section (2 Walls Blended)",
+                CoreWallConfig.TWO_C_FACING: "Two C-Walls Facing",
+                CoreWallConfig.TWO_C_BACK_TO_BACK: "Two C-Walls Back-to-Back",
+                CoreWallConfig.TUBE_CENTER_OPENING: "Tube with Center Opening",
+                CoreWallConfig.TUBE_SIDE_OPENING: "Tube with Side Opening"
+            }
+
+            # Get current config or default to I_SECTION
+            current_config = st.session_state.project.lateral.core_wall_config or CoreWallConfig.I_SECTION
+            selected_config_label = st.selectbox(
+                "Core Wall Configuration",
+                options=list(config_options.values()),
+                index=list(config_options.keys()).index(current_config),
+                help="Select the core wall configuration type for FEM modeling"
+            )
+            selected_core_wall_config = list(config_options.keys())[list(config_options.values()).index(selected_config_label)]
+
+            # Wall thickness input
+            wall_thickness = st.number_input(
+                "Wall Thickness (mm)",
+                min_value=200, max_value=1000, value=500, step=50,
+                help="Core wall thickness in millimeters (typical: 500mm)"
+            )
+
+            # Dimension inputs depend on configuration type
+            if selected_core_wall_config in [CoreWallConfig.I_SECTION, CoreWallConfig.TWO_C_FACING, CoreWallConfig.TWO_C_BACK_TO_BACK]:
+                st.caption("I-Section / C-Wall Dimensions")
+                col1, col2 = st.columns(2)
+                with col1:
+                    flange_width = st.number_input(
+                        "Flange Width (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
+                        help="Width of horizontal flange"
+                    )
+                with col2:
+                    web_length = st.number_input(
+                        "Web Length (m)", min_value=2.0, max_value=20.0, value=8.0, step=0.5,
+                        help="Length of vertical web"
+                    )
+
+                # For C-walls, add opening width
+                if selected_core_wall_config in [CoreWallConfig.TWO_C_FACING, CoreWallConfig.TWO_C_BACK_TO_BACK]:
+                    opening_width = st.number_input(
+                        "Opening Width (m)", min_value=1.0, max_value=10.0, value=3.0, step=0.5,
+                        help="Width of opening between/within C-walls"
+                    )
+                else:
+                    opening_width = None
+
+                # Set core_x and core_y from dimensions
+                core_x = flange_width
+                core_y = web_length
+                length_x = None
+                length_y = None
+                opening_height = None
+
+            else:  # TUBE configurations
+                st.caption("Tube Dimensions")
+                col1, col2 = st.columns(2)
+                with col1:
+                    length_x = st.number_input(
+                        "Length X (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
+                        help="Outer dimension in X direction"
+                    )
+                with col2:
+                    length_y = st.number_input(
+                        "Length Y (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
+                        help="Outer dimension in Y direction"
+                    )
+
+                st.caption("Opening Dimensions")
+                col1, col2 = st.columns(2)
+                with col1:
+                    opening_width = st.number_input(
+                        "Opening Width (m)", min_value=0.5, max_value=5.0, value=2.0, step=0.5,
+                        help="Width of opening"
+                    )
+                with col2:
+                    opening_height = st.number_input(
+                        "Opening Height (m)", min_value=0.5, max_value=5.0, value=2.0, step=0.5,
+                        help="Height of opening"
+                    )
+
+                # Set core_x and core_y from tube dimensions
+                core_x = length_x
+                core_y = length_y
+                flange_width = None
+                web_length = None
 
             core_location_options = {
                 CoreLocation.CENTER: "Center",
@@ -807,10 +992,47 @@ def main():
                 index=list(core_location_options.keys()).index(st.session_state.project.lateral.core_location)
             )
             selected_core_location = list(core_location_options.keys())[list(core_location_options.values()).index(selected_core_loc_label)]
+
+            # Calculate and display section properties
+            st.caption("Calculated Section Properties")
+            temp_geometry = CoreWallGeometry(
+                config=selected_core_wall_config,
+                wall_thickness=wall_thickness,
+                length_x=length_x * 1000 if length_x else None,
+                length_y=length_y * 1000 if length_y else None,
+                opening_width=opening_width * 1000 if opening_width else None,
+                opening_height=opening_height * 1000 if opening_height else None,
+                flange_width=flange_width * 1000 if flange_width else None,
+                web_length=web_length * 1000 if web_length else None,
+            )
+
+            section_props = calculate_core_wall_properties(temp_geometry)
+
+            if section_props:
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Area", f"{section_props.A / 1e6:.2f} m²", help="Cross-sectional area")
+                    st.metric("Ixx", f"{section_props.I_xx / 1e12:.2f} m⁴", help="Moment of inertia about X-axis")
+                    st.metric("Iyy", f"{section_props.I_yy / 1e12:.2f} m⁴", help="Moment of inertia about Y-axis")
+                with col2:
+                    st.metric("Centroid X", f"{section_props.centroid_x / 1000:.2f} m", help="Centroid X-coordinate")
+                    st.metric("Centroid Y", f"{section_props.centroid_y / 1000:.2f} m", help="Centroid Y-coordinate")
+                    st.metric("J", f"{section_props.J / 1e12:.3f} m⁴", help="Torsional constant")
+
+                if abs(section_props.I_xy) > 1e6:  # Show only if non-negligible
+                    st.metric("Ixy", f"{section_props.I_xy / 1e12:.3f} m⁴", help="Product of inertia (asymmetric sections)")
         else:
             core_x = 0.0
             core_y = 0.0
             selected_core_location = CoreLocation.CENTER
+            selected_core_wall_config = None
+            wall_thickness = 500.0
+            flange_width = None
+            web_length = None
+            length_x = None
+            length_y = None
+            opening_width = None
+            opening_height = None
 
         st.divider()
 
@@ -883,13 +1105,36 @@ def main():
     # Use total building dimensions for lateral analysis
     total_width_x = bay_x * num_bays_x
     total_width_y = bay_y * num_bays_y
+
+    # Create CoreWallGeometry if core wall system is enabled
+    core_geometry = None
+    section_properties = None
+    if has_core and selected_core_wall_config:
+        core_geometry = CoreWallGeometry(
+            config=selected_core_wall_config,
+            wall_thickness=wall_thickness,
+            length_x=length_x * 1000 if length_x else None,  # Convert m to mm
+            length_y=length_y * 1000 if length_y else None,
+            opening_width=opening_width * 1000 if opening_width else None,
+            opening_height=opening_height * 1000 if opening_height else None,
+            flange_width=flange_width * 1000 if flange_width else None,
+            web_length=web_length * 1000 if web_length else None,
+        )
+
+        # Calculate section properties
+        section_properties = calculate_core_wall_properties(core_geometry)
+
     project.lateral = LateralInput(
         core_dim_x=core_x,
         core_dim_y=core_y,
         core_location=selected_core_location,
         terrain=selected_terrain,
         building_width=total_width_x,
-        building_depth=total_width_y
+        building_depth=total_width_y,
+        core_wall_config=selected_core_wall_config if has_core else None,
+        wall_thickness=wall_thickness,
+        core_geometry=core_geometry,
+        section_properties=section_properties,
     )
     project.load_combination = selected_load_comb
 

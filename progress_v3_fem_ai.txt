@@ -109,13 +109,34 @@ Commit: [pending] - All 68 unit tests passing (including 14 for TUBE_SIDE_OPENIN
 
 #### Task 8.1.8: Core Wall UI Integration
 
-Status: [ ] Not Started
-- Add core wall configuration dropdown selector
-- Add wall thickness input field (default 500mm)
-- Add opening dimensions inputs where applicable
-- Display calculated section properties
-- Update framing plan to show core wall outline
+Status: [X] Completed
+- Add core wall configuration dropdown selector ✓
+- Add wall thickness input field (default 500mm) ✓
+- Add opening dimensions inputs where applicable ✓
+- Display calculated section properties ✓
+- Update framing plan to show core wall outline ✓
 Files: app.py
+Commit: [pending] - UI integration complete, all configurations supported
+
+Implementation Details:
+- Added CoreWallConfig dropdown with 5 configuration types (I_SECTION, TWO_C_FACING, TWO_C_BACK_TO_BACK, TUBE_CENTER_OPENING, TUBE_SIDE_OPENING)
+- Dynamic input fields based on selected configuration type:
+  - I-Section/C-Walls: flange_width, web_length, optional opening_width
+  - Tube configurations: length_x, length_y, opening_width, opening_height
+- Wall thickness input (200-1000mm, default 500mm)
+- Real-time section properties calculation and display in sidebar:
+  - Area (m²), Ixx (m⁴), Iyy (m⁴), J (m⁴)
+  - Centroid coordinates (m)
+  - Product of inertia Ixy for asymmetric sections
+- Enhanced framing plan visualization:
+  - Detailed core wall outline based on actual geometry
+  - Hover tooltip shows configuration type and wall thickness
+  - Fallback to simple rectangle for legacy compatibility
+- Helper functions added:
+  - calculate_core_wall_properties(): Computes section properties
+  - get_core_wall_outline(): Generates visualization coordinates
+- Updated LateralInput to store core_geometry and section_properties
+- All 5 geometry generators integrated (I_SECTION, TWO_C_FACING, TWO_C_BACK_TO_BACK, TUBE_CENTER_OPENING, TUBE_SIDE_OPENING)
 
 ### Task 8.1-CB: Coupling Beam System
 Status: [ ] Not Started
