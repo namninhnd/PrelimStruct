@@ -1,61 +1,79 @@
 """
-AI Assistant Module for PrelimStruct
+AI Assistant Module for PrelimStruct.
 
-This module provides AI-powered assistance for structural design using
-multiple LLM providers (DeepSeek, Grok, OpenRouter) with a provider-agnostic
-interface.
-
-Supported Providers:
-- DeepSeek (PRIMARY): api.deepseek.com, 128K context
-- Grok (BACKUP): api.x.ai, 2M context
-- OpenRouter (FALLBACK): openrouter.ai, 300+ models
+This module provides AI-powered features for structural engineering:
+- LLM provider abstraction (DeepSeek, Grok, OpenRouter)
+- Configuration management
+- Prompt engineering for structural engineering tasks
+- Results interpretation and recommendations
 
 Usage:
-    from src.ai import LLMProviderFactory, LLMProviderType, LLMMessage
-
-    # Create provider
-    provider = LLMProviderFactory.create(
-        provider_type=LLMProviderType.DEEPSEEK,
-        api_key="your-api-key"
-    )
-
-    # Send message
-    messages = [LLMMessage(role="user", content="Hello")]
-    response = provider.chat(messages)
-    print(response.content)
+    from src.ai import AIConfig, LLMMessage
+    
+    # Load configuration from environment
+    config = AIConfig.from_env()
+    
+    # Create provider and send request
+    provider = config.create_provider()
+    response = provider.chat([
+        LLMMessage(role="system", content="You are a structural engineer."),
+        LLMMessage(role="user", content="Explain moment redistribution.")
+    ])
 """
 
 from .providers import (
     LLMProviderType,
+    MessageRole,
     LLMMessage,
     LLMResponse,
     LLMUsage,
     LLMProvider,
     LLMProviderFactory,
     DeepSeekProvider,
+    GrokProvider,
+    OpenRouterProvider,
     LLMProviderError,
     RateLimitError,
     AuthenticationError,
     ProviderUnavailableError,
     DEEPSEEK_PRICING,
+    GROK_PRICING,
+    OPENROUTER_PRICING,
 )
 
+from .config import AIConfig
+
 __all__ = [
-    # Enums and data classes
+    # Enums
     "LLMProviderType",
+    "MessageRole",
+    
+    # Data models
     "LLMMessage",
     "LLMResponse",
     "LLMUsage",
+    
     # Base class and factory
     "LLMProvider",
     "LLMProviderFactory",
+    
     # Concrete providers
     "DeepSeekProvider",
+    "GrokProvider",
+    "OpenRouterProvider",
+    
     # Errors
     "LLMProviderError",
     "RateLimitError",
     "AuthenticationError",
     "ProviderUnavailableError",
-    # Pricing
+    
+    # Pricing constants
     "DEEPSEEK_PRICING",
+    "GROK_PRICING",
+    "OPENROUTER_PRICING",
+    
+    # Configuration
+    "AIConfig",
 ]
+

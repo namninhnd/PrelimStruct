@@ -315,6 +315,18 @@ GROK_PRICING = {
     },
 }
 
+# OpenRouter API pricing (pass-through with markup)
+# https://openrouter.ai/docs#models
+# Note: OpenRouter uses dynamic pricing based on selected model
+# Costs are returned in the API response
+OPENROUTER_PRICING = {
+    "auto": {
+        "input_per_million": 0.0,  # Dynamic pricing
+        "output_per_million": 0.0,  # Retrieved from response
+        "cache_hit_per_million": 0.0,
+    },
+}
+
 
 class DeepSeekProvider(LLMProvider):
     """DeepSeek API provider implementation.
@@ -1080,6 +1092,383 @@ class GrokProvider(LLMProvider):
         return len(text) // 4
 
 
+class OpenRouterProvider(LLMProvider):
+    """OpenRouter API provider implementation.
+
+    OpenRouter is the FALLBACK provider with access to 300+ models:
+    - Gateway to multiple LLM providers (OpenAI, Anthropic, Google, etc.)
+    - OpenAI-compatible API format (openrouter.ai/api/v1)
+    - Auto model selection or manual model choice
+    - Competitive pricing with transparent cost tracking
+
+    API Reference: https://openrouter.ai/docs
+
+    Features:
+    - Chat completion with JSON mode
+    - Automatic retry with exponential backoff
+    - Dynamic pricing from API response
+    - Model fallback routing (auto-select best available)
+    - Privacy mode (data_collection: deny)
+
+    Usage:
+        provider = OpenRouterProvider(api_key="your-key")
+        response = provider.chat([LLMMessage(role="user", content="Hello")])
+        print(f"Model used: {response.model}")
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "https://openrouter.ai/api/v1",
+        default_model: str = "auto",
+        timeout: float = 60.0,
+        max_retries: int = 3,
+        retry_base_delay: float = 1.0,
+        site_url: Optional[str] = None,
+        site_name: Optional[str] = None,
+    ):
+        """Initialize OpenRouter provider.
+
+        Args:
+            api_key: OpenRouter API key
+            base_url: API base URL (default: openrouter.ai/api/v1)
+            default_model: Default model (default: "auto" for auto-selection)
+            timeout: Request timeout in seconds (default: 60)
+            max_retries: Maximum retry attempts for failed requests (default: 3)
+            retry_base_delay: Base delay for exponential backoff in seconds (default: 1.0)
+            site_url: Optional site URL for rankings (e.g., https://prelimstruct.com)
+            site_name: Optional site name for rankings (e.g., "PrelimStruct")
+        """
+        super().__init__(api_key, base_url, default_model, timeout)
+        self._max_retries = max_retries
+        self._retry_base_delay = retry_base_delay
+        self._site_url = site_url
+        self._site_name = site_name
+
+    @property
+    def provider_type(self) -> LLMProviderType:
+        return LLMProviderType.OPENROUTER
+
+    def chat(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        temperature: float = 0.7,
+        max_tokens: Optional[int] = None,
+        json_mode: bool = False,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Send a chat completion request to OpenRouter API.
+
+        Args:
+            messages: List of messages in the conversation
+            model: Model to use (default: "auto" for auto-selection)
+            temperature: Sampling temperature 0.0-2.0 (default: 0.7)
+            max_tokens: Maximum tokens to generate (default: None = no limit)
+            json_mode: If True, enforce JSON output format
+            **kwargs: Additional parameters passed to the API
+
+        Returns:
+            LLMResponse with completion content and metadata
+
+        Raises:
+            AuthenticationError: Invalid API key (401/403)
+            RateLimitError: Rate limit exceeded (429)
+            ProviderUnavailableError: Server error (500/502/503)
+            LLMProviderError: Other API errors
+        """
+        try:
+            import httpx
+        except ImportError:
+            raise ImportError(
+                "httpx is required for OpenRouterProvider. "
+                "Install with: pip install httpx"
+            )
+
+        actual_model = model or self._default_model
+
+        # Build request payload (OpenAI-compatible format)
+        payload: Dict[str, Any] = {
+            "model": actual_model,
+            "messages": [m.to_dict() for m in messages],
+            "temperature": temperature,
+        }
+
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        # Enable JSON mode if requested
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+
+        # Add any additional kwargs
+        payload.update(kwargs)
+
+        # Make request with retry logic
+        response_data = self._make_request_with_retry(
+            endpoint="/chat/completions",
+            payload=payload,
+        )
+
+        # Parse response
+        return self._parse_response(response_data, actual_model)
+
+    def _make_request_with_retry(
+        self,
+        endpoint: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Make HTTP request with exponential backoff retry.
+
+        Args:
+            endpoint: API endpoint path
+            payload: Request payload
+
+        Returns:
+            Parsed JSON response
+
+        Raises:
+            LLMProviderError: If all retries fail
+        """
+        import httpx
+
+        url = f"{self._base_url}{endpoint}"
+        headers = self._build_headers()
+
+        # Add OpenRouter-specific headers for privacy and rankings
+        headers["HTTP-Referer"] = self._site_url or "https://prelimstruct.com"
+        headers["X-Title"] = self._site_name or "PrelimStruct AI Assistant"
+
+        last_error: Optional[Exception] = None
+
+        for attempt in range(self._max_retries + 1):
+            try:
+                with httpx.Client(timeout=self._timeout) as client:
+                    response = client.post(url, json=payload, headers=headers)
+
+                # Handle response based on status code
+                if response.status_code == 200:
+                    return response.json()
+
+                # Handle specific error codes
+                self._handle_error_response(response)
+
+            except httpx.TimeoutException as e:
+                last_error = e
+                logger.warning(
+                    f"OpenRouter request timeout (attempt {attempt + 1}/{self._max_retries + 1})"
+                )
+
+            except httpx.RequestError as e:
+                last_error = e
+                logger.warning(
+                    f"OpenRouter request error (attempt {attempt + 1}/{self._max_retries + 1}): {e}"
+                )
+
+            except RateLimitError as e:
+                # Retry rate limit errors with backoff
+                last_error = e
+                if attempt < self._max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.info(f"Rate limited, retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    continue
+                raise
+
+            except ProviderUnavailableError as e:
+                # Retry server errors with backoff
+                last_error = e
+                if attempt < self._max_retries:
+                    delay = self._calculate_backoff_delay(attempt)
+                    logger.info(f"Server error, retrying in {delay:.1f}s...")
+                    time.sleep(delay)
+                    continue
+                raise
+
+            except (AuthenticationError, LLMProviderError):
+                # Don't retry auth errors or other client errors
+                raise
+
+            # Calculate backoff delay for next attempt
+            if attempt < self._max_retries:
+                delay = self._calculate_backoff_delay(attempt)
+                time.sleep(delay)
+
+        # All retries exhausted
+        raise LLMProviderError(
+            f"Request failed after {self._max_retries + 1} attempts: {last_error}",
+            provider=LLMProviderType.OPENROUTER,
+        )
+
+    def _calculate_backoff_delay(self, attempt: int) -> float:
+        """Calculate exponential backoff delay.
+
+        Args:
+            attempt: Current attempt number (0-indexed)
+
+        Returns:
+            Delay in seconds with jitter
+        """
+        import random
+        # Exponential backoff: base * 2^attempt with jitter
+        delay = self._retry_base_delay * (2 ** attempt)
+        # Add random jitter (0-25% of delay)
+        jitter = delay * random.uniform(0, 0.25)
+        return delay + jitter
+
+    def _handle_error_response(self, response: "httpx.Response") -> None:
+        """Handle error HTTP responses.
+
+        Args:
+            response: HTTP response object
+
+        Raises:
+            AuthenticationError: For 401/403
+            RateLimitError: For 429
+            ProviderUnavailableError: For 500/502/503
+            LLMProviderError: For other errors
+        """
+        status_code = response.status_code
+
+        try:
+            error_data = response.json()
+            error_message = error_data.get("error", {}).get("message", response.text)
+        except Exception:
+            error_data = None
+            error_message = response.text
+
+        if status_code in (401, 403):
+            raise AuthenticationError(
+                f"Authentication failed: {error_message}",
+                provider=LLMProviderType.OPENROUTER,
+                status_code=status_code,
+                response=error_data,
+            )
+        elif status_code == 429:
+            raise RateLimitError(
+                f"Rate limit exceeded: {error_message}",
+                provider=LLMProviderType.OPENROUTER,
+                status_code=status_code,
+                response=error_data,
+            )
+        elif status_code in (500, 502, 503):
+            raise ProviderUnavailableError(
+                f"Server error: {error_message}",
+                provider=LLMProviderType.OPENROUTER,
+                status_code=status_code,
+                response=error_data,
+            )
+        else:
+            raise LLMProviderError(
+                f"API error: {error_message}",
+                provider=LLMProviderType.OPENROUTER,
+                status_code=status_code,
+                response=error_data,
+            )
+
+    def _parse_response(
+        self,
+        response_data: Dict[str, Any],
+        model: str,
+    ) -> LLMResponse:
+        """Parse API response into LLMResponse.
+
+        Args:
+            response_data: Raw API response
+            model: Model used for the request
+
+        Returns:
+            Parsed LLMResponse
+        """
+        # Extract content from first choice
+        choices = response_data.get("choices", [])
+        if not choices:
+            raise LLMProviderError(
+                "No choices in API response",
+                provider=LLMProviderType.OPENROUTER,
+            )
+
+        choice = choices[0]
+        content = choice.get("message", {}).get("content", "")
+        finish_reason = choice.get("finish_reason")
+
+        # Extract usage statistics
+        usage_data = response_data.get("usage", {})
+        usage = LLMUsage(
+            prompt_tokens=usage_data.get("prompt_tokens", 0),
+            completion_tokens=usage_data.get("completion_tokens", 0),
+            total_tokens=usage_data.get("total_tokens", 0),
+        )
+
+        return LLMResponse(
+            content=content,
+            model=response_data.get("model", model),
+            provider=LLMProviderType.OPENROUTER,
+            usage=usage,
+            finish_reason=finish_reason,
+            raw_response=response_data,
+        )
+
+    def health_check(self) -> bool:
+        """Check if OpenRouter API is available.
+
+        Sends a minimal request to verify connectivity.
+
+        Returns:
+            True if API is responding, False otherwise
+        """
+        try:
+            # Send minimal request
+            response = self.chat(
+                messages=[LLMMessage(role="user", content="ping")],
+                max_tokens=1,
+                temperature=0,
+            )
+            return len(response.content) > 0
+        except Exception as e:
+            logger.warning(f"OpenRouter health check failed: {e}")
+            return False
+
+    def calculate_cost(
+        self,
+        usage: LLMUsage,
+        model: Optional[str] = None,
+        cache_hit_tokens: int = 0,
+    ) -> float:
+        """Calculate cost for a request based on token usage.
+
+        Note: OpenRouter uses dynamic pricing. This method returns 0.0
+        as a placeholder. Actual costs should be retrieved from the
+        API response's usage.total_cost field.
+
+        Args:
+            usage: Token usage statistics
+            model: Model used (default: provider's default model)
+            cache_hit_tokens: Number of input tokens that hit cache
+
+        Returns:
+            Estimated cost in USD (0.0 for dynamic pricing)
+        """
+        # OpenRouter uses dynamic pricing
+        # Actual costs are in response.raw_response["usage"]["total_cost"]
+        return 0.0
+
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count for text.
+
+        Uses a simple approximation (4 characters per token on average).
+        For precise counting, use tiktoken with cl100k_base encoding.
+
+        Args:
+            text: Text to estimate tokens for
+
+        Returns:
+            Estimated token count
+        """
+        # Rough estimate: ~4 characters per token for English text
+        return len(text) // 4
+
+
 class LLMProviderFactory:
     """Factory for creating LLM provider instances.
 
@@ -1169,12 +1558,15 @@ class LLMProviderFactory:
                 retry_base_delay=kwargs.get("retry_base_delay", 1.0),
             )
         elif provider_type == LLMProviderType.OPENROUTER:
-            return _StubProvider(
+            return OpenRouterProvider(
                 api_key=api_key,
                 base_url=actual_base_url,
                 default_model=actual_model,
                 timeout=timeout,
-                provider_type=provider_type,
+                max_retries=kwargs.get("max_retries", 3),
+                retry_base_delay=kwargs.get("retry_base_delay", 1.0),
+                site_url=kwargs.get("site_url"),
+                site_name=kwargs.get("site_name"),
             )
         else:
             raise ValueError(f"Unsupported provider type: {provider_type}")

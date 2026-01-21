@@ -1086,40 +1086,198 @@ class TestGrokProviderMocked:
 
 
 class TestStubProviderUpdated:
-    """Tests for the stub provider implementation (OpenRouter only now)."""
+    """Tests for OpenRouter provider (no longer stub)."""
 
-    def test_stub_provider_chat(self):
-        """Test stub provider chat method returns response."""
-        # Use OpenRouter which still uses stub provider
+    def test_openrouter_provider_creation(self):
+        """Test OpenRouterProvider can be created."""
+        from src.ai.providers import OpenRouterProvider
         provider = LLMProviderFactory.create(
             provider_type=LLMProviderType.OPENROUTER,
             api_key="test-key",
         )
+        assert isinstance(provider, OpenRouterProvider)
+        assert provider.provider_type == LLMProviderType.OPENROUTER
+        assert provider.default_model == "auto"
+
+    def test_openrouter_estimate_tokens(self):
+        """Test token estimation."""
+        from src.ai.providers import OpenRouterProvider
+        provider = OpenRouterProvider(api_key="test-key")
+        assert provider.estimate_tokens("Hello World!") == 3  # 12 chars / 4
+
+    def test_openrouter_calculate_cost(self):
+        """Test cost calculation returns 0.0 for dynamic pricing."""
+        from src.ai.providers import OpenRouterProvider
+        provider = OpenRouterProvider(api_key="test-key")
+        usage = LLMUsage(
+            prompt_tokens=1000,
+            completion_tokens=500,
+            total_tokens=1500,
+        )
+        cost = provider.calculate_cost(usage)
+        # OpenRouter uses dynamic pricing
+        assert cost == 0.0
+
+
+class TestOpenRouterProviderMocked:
+    """Tests for OpenRouterProvider with mocked HTTP responses."""
+
+    @pytest.fixture
+    def mock_success_response(self):
+        """Mock successful API response."""
+        return {
+            "id": "chatcmpl-openrouter-123",
+            "object": "chat.completion",
+            "created": 1705395200,
+            "model": "anthropic/claude-3-sonnet",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Hello! How can I help you today?"
+                    },
+                    "finish_reason": "stop"
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 15,
+                "completion_tokens": 12,
+                "total_tokens": 27
+            }
+        }
+
+    def test_chat_success(self, mock_success_response, monkeypatch):
+        """Test successful chat completion."""
+        from src.ai.providers import OpenRouterProvider
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return mock_success_response
+
+        class MockClient:
+            def __init__(self, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def post(self, url, json, headers):
+                # Verify OpenRouter-specific headers
+                assert "HTTP-Referer" in headers
+                assert "X-Title" in headers
+                return MockResponse()
+
+        monkeypatch.setattr("httpx.Client", MockClient)
+
+        provider = OpenRouterProvider(api_key="test-key")
         messages = [LLMMessage(role="user", content="Hello")]
         response = provider.chat(messages)
 
-        assert response.content is not None
-        assert response.model == "auto"
+        assert response.content == "Hello! How can I help you today?"
+        assert response.model == "anthropic/claude-3-sonnet"
         assert response.provider == LLMProviderType.OPENROUTER
-        assert "STUB" in response.content
 
-    def test_stub_provider_chat_json_mode(self):
-        """Test stub provider returns JSON in json_mode."""
-        provider = LLMProviderFactory.create(
-            provider_type=LLMProviderType.OPENROUTER,
+    def test_chat_auto_model_selection(self, mock_success_response, monkeypatch):
+        """Test auto model selection."""
+        from src.ai.providers import OpenRouterProvider
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return mock_success_response
+
+        class MockClient:
+            def __init__(self, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def post(self, url, json, headers):
+                # Verify auto model in request
+                assert json.get("model") == "auto"
+                return MockResponse()
+
+        monkeypatch.setattr("httpx.Client", MockClient)
+
+        provider = OpenRouterProvider(api_key="test-key", default_model="auto")
+        messages = [LLMMessage(role="user", content="Hello")]
+        response = provider.chat(messages)
+
+        # Response contains actual model selected by OpenRouter
+        assert response.model == "anthropic/claude-3-sonnet"
+
+    def test_chat_with_site_info(self, mock_success_response, monkeypatch):
+        """Test chat with site URL and name for rankings."""
+        from src.ai.providers import OpenRouterProvider
+
+        captured_headers = {}
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return mock_success_response
+
+        class MockClient:
+            def __init__(self, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def post(self, url, json, headers):
+                nonlocal captured_headers
+                captured_headers = headers
+                return MockResponse()
+
+        monkeypatch.setattr("httpx.Client", MockClient)
+
+        provider = OpenRouterProvider(
             api_key="test-key",
+            site_url="https://prelimstruct.com",
+            site_name="PrelimStruct"
         )
-        messages = [LLMMessage(role="user", content="Give me JSON")]
-        response = provider.chat(messages, json_mode=True)
+        messages = [LLMMessage(role="user", content="Hello")]
+        provider.chat(messages)
 
-        assert response.content.startswith("{")
-        assert "openrouter" in response.content
+        assert captured_headers["HTTP-Referer"] == "https://prelimstruct.com"
+        assert captured_headers["X-Title"] == "PrelimStruct"
 
-    def test_stub_provider_health_check(self):
-        """Test stub provider health check returns True."""
-        provider = LLMProviderFactory.create(
-            provider_type=LLMProviderType.OPENROUTER,
-            api_key="test-key",
-        )
+    def test_health_check_success(self, monkeypatch):
+        """Test health check returns True when API is available."""
+        from src.ai.providers import OpenRouterProvider
+
+        mock_response = {
+            "id": "health-check",
+            "model": "auto",
+            "choices": [{
+                "index": 0,
+                "message": {"role": "assistant", "content": "ok"},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+        }
+
+        class MockResponse:
+            status_code = 200
+            def json(self):
+                return mock_response
+
+        class MockClient:
+            def __init__(self, **kwargs):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def post(self, url, json, headers):
+                return MockResponse()
+
+        monkeypatch.setattr("httpx.Client", MockClient)
+
+        provider = OpenRouterProvider(api_key="test-key")
         assert provider.health_check() is True
+
 

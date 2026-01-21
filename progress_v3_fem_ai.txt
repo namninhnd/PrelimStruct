@@ -640,24 +640,43 @@ Files: src/ai/providers.py, tests/test_ai_providers.py
 Commit: [pending] - All 64 unit tests passing, Grok as BACKUP provider ready
 
 #### Task 11.1.4: OpenRouter Provider Implementation
-Status: [ ] Not Started
-- Implement OpenRouterProvider (openrouter.ai/api/v1)
-- Support model selection from 300+ models
-- Add fallback routing logic (auto-select best model)
-- Enable data_collection: "deny" for privacy
-Files: src/ai/providers.py
+Status: [X] Completed
+Implementation Date: 2026-01-21
+- ✅ Implemented OpenRouterProvider class with OpenAI-compatible API (openrouter.ai/api/v1)
+- ✅ Added chat completion with JSON mode and auto model selection
+- ✅ Implemented retry logic with exponential backoff + jitter
+- ✅ Error handling: AuthenticationError, RateLimitError, ProviderUnavailableError
+- ✅ Dynamic pricing via API response (calculate_cost returns 0.0 placeholder)
+- ✅ Health check endpoint for provider availability testing
+- ✅ Support for 300+ models via auto model selection
+- ✅ Privacy mode with HTTP-Referer and X-Title headers for rankings
+- ✅ Updated LLMProviderFactory to use OpenRouterProvider
+- ✅ Removed _StubProvider (all providers now fully implemented)
+- ✅ Comprehensive unit tests: 68 tests total (5 new OpenRouter tests), all passing
+Files: src/ai/providers.py, tests/test_ai_providers.py
+Commit: [pending] - All 68 unit tests passing, all three providers complete
 
 #### Task 11.1.5: Configuration & Environment Management
-Status: [ ] Not Started
-- Create AIConfig Pydantic model with all settings
-- Load from environment variables:
+Status: [X] Completed
+Implementation Date: 2026-01-21
+- ✅ Created AIConfig Pydantic dataclass with all settings
+- ✅ Implemented from_env() class method to load from environment variables
+- ✅ Environment variables supported:
   - LLM_PROVIDER (deepseek/grok/openrouter)
-  - LLM_API_KEY
-  - LLM_MODEL (optional, use default)
-- Add .env.example with configuration template
-- Implement secure API key handling (no logging)
-- Add provider health check on startup
-Files: src/ai/config.py, .env.example
+  - {PROVIDER}_API_KEY (required for selected provider)
+  - {PROVIDER}_BASE_URL (optional, for resellers)
+  - LLM_MODEL (optional model override)
+  - LLM_TIMEOUT, LLM_MAX_RETRIES
+  - LLM_TRACK_COSTS, LLM_MONTHLY_BUDGET
+  - OPENROUTER_SITE_URL, OPENROUTER_SITE_NAME
+- ✅ Added secure API key handling with mask_api_key() method
+- ✅ Implemented provider health check on configuration (health_check() method)
+- ✅ Added create_provider() factory method for provider instantiation
+- ✅ Validation for all configuration parameters
+- ✅ .env file support via python-dotenv (optional dependency)
+- ✅ Updated src/ai/__init__.py to export AIConfig and all providers
+Files: src/ai/config.py, src/ai/__init__.py
+Commit: [pending] - Configuration management complete
 
 ### Task 11.2: Prompt Engineering
 Status: [ ] Not Started
