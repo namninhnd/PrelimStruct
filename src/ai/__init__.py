@@ -43,15 +43,29 @@ from .providers import (
 
 from .config import AIConfig
 
+from .prompts import (
+    PromptType,
+    PromptTemplate,
+    get_template,
+    inject_project_context,
+    create_design_review_prompt,
+    SYSTEM_PROMPT_BASE,
+    SYSTEM_PROMPT_DESIGN_REVIEW,
+    SYSTEM_PROMPT_RESULTS,
+    SYSTEM_PROMPT_OPTIMIZATION,
+)
+
 __all__ = [
     # Enums
     "LLMProviderType",
     "MessageRole",
+    "PromptType",
     
     # Data models
     "LLMMessage",
     "LLMResponse",
     "LLMUsage",
+    "PromptTemplate",
     
     # Base class and factory
     "LLMProvider",
@@ -75,5 +89,14 @@ __all__ = [
     
     # Configuration
     "AIConfig",
+    
+    # Prompts
+    "get_template",
+    "inject_project_context",
+    "create_design_review_prompt",
+    "SYSTEM_PROMPT_BASE",
+    "SYSTEM_PROMPT_DESIGN_REVIEW",
+    "SYSTEM_PROMPT_RESULTS",
+    "SYSTEM_PROMPT_OPTIMIZATION",
 ]
 

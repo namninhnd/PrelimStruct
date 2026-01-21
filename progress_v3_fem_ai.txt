@@ -679,17 +679,29 @@ Files: src/ai/config.py, src/ai/__init__.py
 Commit: [pending] - Configuration management complete
 
 ### Task 11.2: Prompt Engineering
-Status: [ ] Not Started
-- Design system prompts for Senior Structural Engineer role
-- Create prompt templates for:
-  - Design review and recommendations
-  - Results interpretation
-  - Model setup guidance
-  - Optimization suggestions
-  - Mesh generation recommendations
-- Set response length constraints (150-300 words)
-- Add context injection from ProjectData
-Files: src/ai/prompts.py
+Status: [X] Completed
+Implementation Date: 2026-01-21
+- ✅ Designed system prompts for Senior Structural Engineer role
+- ✅ Created SYSTEM_PROMPT_BASE with HK Code 2013 expertise
+- ✅ Created specialized system prompts:
+  - SYSTEM_PROMPT_DESIGN_REVIEW: Design review and code compliance
+  - SYSTEM_PROMPT_RESULTS: FEM results interpretation
+  - SYSTEM_PROMPT_OPTIMIZATION: Design optimization guidance
+- ✅ Created prompt templates with variable substitution:
+  - DESIGN_REVIEW_TEMPLATE: Design assessment with JSON output
+  - RESULTS_INTERPRETATION_TEMPLATE: FEM analysis interpretation
+  - OPTIMIZATION_TEMPLATE: Cost/performance optimization suggestions
+  - MODEL_SETUP_TEMPLATE: FEM model setup recommendations
+  - MESH_GENERATION_TEMPLATE: Mesh generation strategy
+- ✅ Response length constraints: max_tokens=200-400 (target 150-300 words)
+- ✅ Temperature settings: 0.5 (factual) to 0.7 (creative)
+- ✅ JSON mode support for structured outputs
+- ✅ Context injection via inject_project_context() and create_design_review_prompt()
+- ✅ All prompts cite HK Code 2013 clause numbers
+- ✅ PromptTemplate dataclass for easy template management
+- ✅ get_template() helper function for template retrieval
+Files: src/ai/prompts.py, src/ai/__init__.py
+Commit: [pending] - Comprehensive prompt templates for all AI tasks
 
 ### Task 11.3: AI Assistant UI Components
 Status: [ ] Not Started
