@@ -1,34 +1,48 @@
 """
-AI Assistant Module for PrelimStruct.
+AI Assistant Module for PrelimStruct v3.0
 
-This module provides AI-powered features for structural engineering:
-- LLM provider abstraction (DeepSeek, Grok, OpenRouter)
-- Configuration management
-- Prompt engineering for structural engineering tasks
-- Results interpretation and recommendations
+This module provides AI-powered features for structural design automation,
+including LLM providers, prompt engineering, response parsing, mesh generation,
+model setup, and design optimization.
+
+Features:
+- Feature 11: AI Assistant Core Infrastructure (DeepSeek, Grok, OpenRouter)
+- Feature 12: AI-Assisted Mesh Generation & Model Setup
+- Feature 13: AI-Assisted Design Optimization (NEW)
+- Feature 14: AI Results Interpretation (upcoming)
+
+Components:
+- LLM Providers: DeepSeekProvider, GrokProvider, OpenRouterProvider
+- Configuration: AIConfig
+- Prompt Templates: System prompts and templates for HK Code 2013
+- Response Parsing: Structured JSON response parsing
+- AI Service: High-level service interface
+- Mesh Generation: Automated mesh generation with quality checks
+- Model Setup: Smart boundary condition and load application detection
+- Design Optimization: Gradient-based optimization with AI guidance (NEW)
 
 Usage:
-    from src.ai import AIConfig, LLMMessage
+    from src.ai import AIService, DesignOptimizer
     
-    # Load configuration from environment
-    config = AIConfig.from_env()
+    # AI Assistant
+    service = AIService.from_env()
+    review = service.get_design_review(...)
     
-    # Create provider and send request
-    provider = config.create_provider()
-    response = provider.chat([
-        LLMMessage(role="system", content="You are a structural engineer."),
-        LLMMessage(role="user", content="Explain moment redistribution.")
-    ])
+    # Design Optimization
+    optimizer = DesignOptimizer()
+    optimizer.add_design_variable("depth", 600, 300, 1200)
+    optimizer.set_objective(cost_func)
+    result = optimizer.optimize()
 """
 
+# Provider Infrastructure
 from .providers import (
+    LLMProvider,
     LLMProviderType,
-    MessageRole,
     LLMMessage,
     LLMResponse,
     LLMUsage,
-    LLMProvider,
-    LLMProviderFactory,
+    MessageRole,
     DeepSeekProvider,
     GrokProvider,
     OpenRouterProvider,
@@ -41,25 +55,33 @@ from .providers import (
     OPENROUTER_PRICING,
 )
 
+# Configuration
 from .config import AIConfig
 
+# Prompts
 from .prompts import (
-    PromptType,
     PromptTemplate,
-    get_template,
-    inject_project_context,
-    create_design_review_prompt,
+    PromptType,
     SYSTEM_PROMPT_BASE,
     SYSTEM_PROMPT_DESIGN_REVIEW,
     SYSTEM_PROMPT_RESULTS,
     SYSTEM_PROMPT_OPTIMIZATION,
+    DESIGN_REVIEW_TEMPLATE,
+    RESULTS_INTERPRETATION_TEMPLATE,
+    OPTIMIZATION_TEMPLATE,
+    MODEL_SETUP_TEMPLATE,
+    MESH_GENERATION_TEMPLATE,
+    get_template,
+    create_design_review_prompt,
+    inject_project_context,
 )
 
+# Response Parsing
 from .response_parser import (
-    PriorityLevel,
     DesignReviewResponse,
     OptimizationResponse,
     UnstructuredResponse,
+    PriorityLevel,
     parse_design_review_response,
     parse_optimization_response,
     safe_parse_design_review,
@@ -67,18 +89,21 @@ from .response_parser import (
     extract_json_from_markdown,
 )
 
+# AI Service
 from .llm_service import AIService
 
+# Mesh Generation (Feature 12)
 from .mesh_generator import (
     MeshDensity,
     ElementType,
-    MeshQuality,
     MeshConfig,
+    MeshQuality,
     MeshElement,
     Mesh,
     MeshGenerator,
 )
 
+# Model Setup (Feature 12)
 from .auto_setup import (
     SupportType,
     LoadType,
@@ -88,75 +113,89 @@ from .auto_setup import (
     ModelSetup,
 )
 
+# Design Optimization (Feature 13 - NEW)
+from .optimizer import (
+    OptimizationObjective,
+    OptimizationStatus,
+    DesignVariable,
+    OptimizationConstraint,
+    OptimizationResult,
+    OptimizationConfig,
+    DesignOptimizer,
+    create_beam_optimizer,
+    get_ai_optimization_suggestions,
+)
+
 __all__ = [
-    # Enums
+    # Providers
+    "LLMProvider",
     "LLMProviderType",
-    "MessageRole",
-    "PromptType",
-    "PriorityLevel",
-    "MeshDensity",
-    "ElementType",
-    "SupportType",
-    "LoadType",
-    
-    # Data models
     "LLMMessage",
     "LLMResponse",
     "LLMUsage",
-    "PromptTemplate",
-    "DesignReviewResponse",
-    "OptimizationResponse",
-    "UnstructuredResponse",
-    "MeshQuality",
-    "MeshConfig",
-    "MeshElement",
-    "Mesh",
-    "BoundaryCondition",
-    "LoadCase",
-    "ModelSetupConfig",
-    
-    # Base class and factory
-    "LLMProvider",
-    "LLMProviderFactory",
-    
-    # Concrete providers
+    "MessageRole",
     "DeepSeekProvider",
     "GrokProvider",
     "OpenRouterProvider",
-    
-    # Errors
     "LLMProviderError",
     "RateLimitError",
     "AuthenticationError",
     "ProviderUnavailableError",
-    
-    # Pricing constants
     "DEEPSEEK_PRICING",
     "GROK_PRICING",
     "OPENROUTER_PRICING",
-    
-    # Configuration and Service
+    # Configuration
     "AIConfig",
-    "AIService",
-    
     # Prompts
-    "get_template",
-    "inject_project_context",
-    "create_design_review_prompt",
+    "PromptTemplate",
+    "PromptType",
     "SYSTEM_PROMPT_BASE",
     "SYSTEM_PROMPT_DESIGN_REVIEW",
     "SYSTEM_PROMPT_RESULTS",
     "SYSTEM_PROMPT_OPTIMIZATION",
-    
-    # Response parsing
+    "DESIGN_REVIEW_TEMPLATE",
+    "RESULTS_INTERPRETATION_TEMPLATE",
+    "OPTIMIZATION_TEMPLATE",
+    "MODEL_SETUP_TEMPLATE",
+    "MESH_GENERATION_TEMPLATE",
+    "get_template",
+    "create_design_review_prompt",
+    "inject_project_context",
+    # Response Parsing
+    "DesignReviewResponse",
+    "OptimizationResponse",
+    "UnstructuredResponse",
+    "PriorityLevel",
     "parse_design_review_response",
     "parse_optimization_response",
     "safe_parse_design_review",
     "safe_parse_optimization",
     "extract_json_from_markdown",
-    
-    # Mesh generation and model setup
+    # AI Service
+    "AIService",
+    # Mesh Generation
+    "MeshDensity",
+    "ElementType",
+    "MeshConfig",
+    "MeshQuality",
+    "MeshElement",
+    "Mesh",
     "MeshGenerator",
+    # Model Setup
+    "SupportType",
+    "LoadType",
+    "BoundaryCondition",
+    "LoadCase",
+    "ModelSetupConfig",
     "ModelSetup",
+    # Design Optimization (NEW)
+    "OptimizationObjective",
+    "OptimizationStatus",
+    "DesignVariable",
+    "OptimizationConstraint",
+    "OptimizationResult",
+    "OptimizationConfig",
+    "DesignOptimizer",
+    "create_beam_optimizer",
+    "get_ai_optimization_suggestions",
 ]
-
