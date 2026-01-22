@@ -55,17 +55,33 @@ from .prompts import (
     SYSTEM_PROMPT_OPTIMIZATION,
 )
 
+from .response_parser import (
+    PriorityLevel,
+    DesignReviewResponse,
+    OptimizationResponse,
+    UnstructuredResponse,
+    parse_design_review_response,
+    parse_optimization_response,
+    safe_parse_design_review,
+    safe_parse_optimization,
+    extract_json_from_markdown,
+)
+
 __all__ = [
     # Enums
     "LLMProviderType",
     "MessageRole",
     "PromptType",
+    "PriorityLevel",
     
     # Data models
     "LLMMessage",
     "LLMResponse",
     "LLMUsage",
     "PromptTemplate",
+    "DesignReviewResponse",
+    "OptimizationResponse",
+    "UnstructuredResponse",
     
     # Base class and factory
     "LLMProvider",
@@ -98,5 +114,12 @@ __all__ = [
     "SYSTEM_PROMPT_DESIGN_REVIEW",
     "SYSTEM_PROMPT_RESULTS",
     "SYSTEM_PROMPT_OPTIMIZATION",
+    
+    # Response parsing
+    "parse_design_review_response",
+    "parse_optimization_response",
+    "safe_parse_design_review",
+    "safe_parse_optimization",
+    "extract_json_from_markdown",
 ]
 
