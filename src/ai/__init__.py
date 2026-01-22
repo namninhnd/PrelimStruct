@@ -67,6 +67,8 @@ from .response_parser import (
     extract_json_from_markdown,
 )
 
+from .llm_service import AIService
+
 __all__ = [
     # Enums
     "LLMProviderType",
@@ -103,8 +105,9 @@ __all__ = [
     "GROK_PRICING",
     "OPENROUTER_PRICING",
     
-    # Configuration
+    # Configuration and Service
     "AIConfig",
+    "AIService",
     
     # Prompts
     "get_template",
