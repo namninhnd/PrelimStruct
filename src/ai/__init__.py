@@ -69,12 +69,35 @@ from .response_parser import (
 
 from .llm_service import AIService
 
+from .mesh_generator import (
+    MeshDensity,
+    ElementType,
+    MeshQuality,
+    MeshConfig,
+    MeshElement,
+    Mesh,
+    MeshGenerator,
+)
+
+from .auto_setup import (
+    SupportType,
+    LoadType,
+    BoundaryCondition,
+    LoadCase,
+    ModelSetupConfig,
+    ModelSetup,
+)
+
 __all__ = [
     # Enums
     "LLMProviderType",
     "MessageRole",
     "PromptType",
     "PriorityLevel",
+    "MeshDensity",
+    "ElementType",
+    "SupportType",
+    "LoadType",
     
     # Data models
     "LLMMessage",
@@ -84,6 +107,13 @@ __all__ = [
     "DesignReviewResponse",
     "OptimizationResponse",
     "UnstructuredResponse",
+    "MeshQuality",
+    "MeshConfig",
+    "MeshElement",
+    "Mesh",
+    "BoundaryCondition",
+    "LoadCase",
+    "ModelSetupConfig",
     
     # Base class and factory
     "LLMProvider",
@@ -124,5 +154,9 @@ __all__ = [
     "safe_parse_design_review",
     "safe_parse_optimization",
     "extract_json_from_markdown",
+    
+    # Mesh generation and model setup
+    "MeshGenerator",
+    "ModelSetup",
 ]
 
