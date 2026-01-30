@@ -5,37 +5,31 @@
 
 ---
 
-## 0. Failing Benchmark Tests (HIGH PRIORITY)
+## ~~0. Failing Benchmark Tests~~ ✅ RESOLVED
 
-### 0.1 FEM Reaction Extraction Issue
-**Files:** `tests/test_benchmark_validation.py`
-**Tests:**
-| Test | Status |
-|------|--------|
-| `test_simple_10_story_reactions` | FAILING |
-| `test_reactions_non_zero[Simple_10Story_Frame]` | FAILING |
-| `test_reactions_non_zero[Medium_20Story_Core]` | FAILING |
+### 0.1 FEM Reaction Extraction Issue - **FIXED**
+**Status:** ✅ RESOLVED (2026-01-30)
 
-**Root Cause:** After analysis, `node_reactions` dictionary is empty even though `node_displacements` contains non-zero values (displacements at z>0 show real values). The issue is in reaction extraction from OpenSeesPy, not the constraint handler.
+**Root Cause:** OpenSeesPy requires calling `ops.reactions()` before extracting reactions with `ops.nodeReaction()`. Without this call, `nodeReaction()` returns zeros for all nodes.
 
-**Investigation needed:**
-1. Check if `ops.nodeReaction(node_tag)` returns zeros for fixed nodes
-2. Verify that base nodes (z=0) are actually fixed with `ops.fix()`
-3. Check if reactions need to be extracted after analysis differently
-4. Consider if `ops.reactions()` needs to be called first
-
-**Potential fixes to try:**
+**Fix Applied:**
 ```python
-# In solver.py extract_results(), before calling nodeReaction:
-ops.reactions()  # May need to compute reactions explicitly
+# In src/fem/solver.py extract_results():
+# IMPORTANT: Must call reactions() to compute reactions before extracting them
+ops.reactions()
 
-# Or check if nodes are actually fixed:
-for node_tag in base_nodes:
-    print(f"Node {node_tag} fixity: {ops.nodeFixity(node_tag)}")
+# Now nodeReaction() returns correct values
+for node_tag in node_tags:
+    reaction = ops.nodeReaction(node_tag)
 ```
 
-**Priority:** HIGH - These tests validate core FEM functionality
-**Track:** Dedicated investigation task (complex debugging required)
+**Commits:**
+- `fix(fem): call ops.reactions() before extracting node reactions`
+
+**Tests now passing:**
+- `test_simple_10_story_reactions` ✅
+- `test_reactions_non_zero[Simple_10Story_Frame]` ✅
+- `test_reactions_non_zero[Medium_20Story_Core]` ✅
 
 ---
 
@@ -102,12 +96,11 @@ for node_tag in base_nodes:
 | Metric | Value |
 |--------|-------|
 | Total tests | 1128 |
-| Passing | 1113 |
+| Passing | 1116 |
 | Skipped | 12 |
-| Failed | 3 |
+| Failed | 0 |
 
-**Failed tests:** Benchmark validation (FEM constraint handler - see Issue 0.1)
-**Skipped tests:** `test_moment_frame.py` (deprecated API) + integration marks
+**Skipped tests:** `test_moment_frame.py` (deprecated API) + complex 30-story benchmarks
 
 ---
 
@@ -115,7 +108,7 @@ for node_tag in base_nodes:
 
 | Issue | Track | Status | Priority |
 |-------|-------|--------|----------|
-| **FEM Constraint Handler** | Backlog | **PENDING** | **HIGH** |
+| ~~FEM Reaction Extraction~~ | Fixed | **RESOLVED** | ~~HIGH~~ |
 | WallPanel base_point | Backlog | Pending | Low |
 | app.py type errors | Backlog | Pending | Medium |
 | analysis_summary.py cleanup | Backlog | Pending | Low |
@@ -124,52 +117,4 @@ for node_tag in base_nodes:
 
 ---
 
-## Fix Instructions for Issue 0.1
-
-**This requires deep FEM debugging, not a simple fix.** Suggested approach:
-
-1. Create a minimal test case:
-```python
-import openseespy.opensees as ops
-
-# Create simple 2-node model
-ops.wipe()
-ops.model('basic', '-ndm', 3, '-ndf', 6)
-
-# Nodes
-ops.node(1, 0, 0, 0)
-ops.node(2, 0, 0, 10)
-
-# Fix base
-ops.fix(1, 1, 1, 1, 1, 1, 1)
-
-# Material and section
-ops.geomTransf('Linear', 1, 0, 1, 0)
-ops.element('elasticBeamColumn', 1, 1, 2, 1.0, 30e9, 1e9, 0.01, 0.01, 0.01, 1)
-
-# Load
-ops.timeSeries('Constant', 1)
-ops.pattern('Plain', 1, 1)
-ops.load(2, 0, 0, -1000, 0, 0, 0)  # -1000N in Z
-
-# Analyze
-ops.constraints('Plain')
-ops.numberer('RCM')
-ops.system('BandGeneral')
-ops.test('NormDispIncr', 1e-8, 10)
-ops.algorithm('Linear')
-ops.integrator('LoadControl', 1.0)
-ops.analysis('Static')
-ops.analyze(1)
-
-# Check
-print("Disp at node 2:", ops.nodeDisp(2))
-print("Reaction at node 1:", ops.nodeReaction(1))
-```
-
-2. If reactions are zero, try calling `ops.reactions()` before extraction
-3. Check OpenSeesPy documentation for correct reaction extraction sequence
-
----
-
-*Updated by Orchestrator: 2026-01-30*
+*Updated: 2026-01-30 - FEM reaction issue resolved*

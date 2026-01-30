@@ -418,7 +418,6 @@ class TestBenchmarkValidation:
 
     @skip_without_openseespy
     @pytest.mark.slow
-    @pytest.mark.skip(reason="Known issue: FEM reaction extraction returns empty dict. See KNOWN_ISSUES.md Issue 0.1")
     def test_simple_10_story_reactions(self) -> None:
         """Validate Simple 10-story vertical reactions.
 
@@ -691,7 +690,6 @@ class TestAllBenchmarks:
 
     @skip_without_openseespy
     @pytest.mark.slow
-    @pytest.mark.skip(reason="Known issue: FEM reaction extraction returns empty dict. See KNOWN_ISSUES.md Issue 0.1")
     @pytest.mark.parametrize("building_name", list(get_all_benchmark_buildings().keys()))
     def test_reactions_non_zero(self, building_name: str) -> None:
         """Test that reactions are non-zero (model is loaded)."""

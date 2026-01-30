@@ -187,6 +187,10 @@ class FEMSolver:
             disp = ops.nodeDisp(node_tag)
             result.node_displacements[node_tag] = list(disp)
         
+        # IMPORTANT: Must call reactions() to compute reactions before extracting them
+        # Without this call, nodeReaction() returns zeros for all nodes
+        ops.reactions()
+        
         # Extract reactions for fixed nodes
         for node_tag in node_tags:
             reaction = ops.nodeReaction(node_tag)
