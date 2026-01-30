@@ -59,6 +59,7 @@ from src.ui.views.fem_views import render_unified_fem_views
 # Import report generator
 from src.report.report_generator import ReportGenerator
 from src.ui.theme import apply_theme
+from src.ui.components import get_status_badge
 
 
 
@@ -74,17 +75,6 @@ st.set_page_config(
 apply_theme()
 
 
-
-def get_status_badge(status: str, utilization: float = 0.0) -> str:
-    """Generate HTML status badge based on status and utilization"""
-    if status == "FAIL" or utilization > 1.0:
-        return '<span class="status-fail">FAIL</span>'
-    elif status == "WARNING" or utilization > 0.85:
-        return '<span class="status-warning">WARN</span>'
-    elif status == "PENDING":
-        return '<span class="status-pending">--</span>'
-    else:
-        return '<span class="status-pass">OK</span>'
 
 
 def calculate_carbon_emission(project: ProjectData) -> Tuple[float, float]:
