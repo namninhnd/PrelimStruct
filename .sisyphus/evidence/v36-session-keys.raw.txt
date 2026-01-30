@@ -1,0 +1,53 @@
+981:    if 'project' not in st.session_state:
+982:        st.session_state.project = ProjectData()
+1002:            st.session_state.project.loads = preset["loads"]
+1003:            st.session_state.project.materials = preset["materials"]
+1013:                                   value=float(st.session_state.project.geometry.bay_x), step=0.5)
+1016:                                   value=float(st.session_state.project.geometry.bay_y), step=0.5)
+1021:                                        value=st.session_state.project.geometry.num_bays_x, step=1,
+1025:                                        value=st.session_state.project.geometry.num_bays_y, step=1,
+1031:                                    value=st.session_state.project.geometry.floors, step=1)
+1034:                                          value=float(st.session_state.project.geometry.story_height), step=0.1)
+1048:        current_class = st.session_state.project.loads.live_load_class
+1065:            current_custom = st.session_state.project.loads.custom_live_load
+1083:                current_sub = st.session_state.project.loads.live_load_sub
+1092:                                   value=float(st.session_state.project.loads.dead_load), step=0.5,
+1105:                                   index=concrete_grades.index(st.session_state.project.materials.fcu_slab))
+1108:                                   index=concrete_grades.index(st.session_state.project.materials.fcu_beam))
+1111:                                 index=concrete_grades.index(st.session_state.project.materials.fcu_column))
+1124:            index=list(exposure_options.keys()).index(st.session_state.project.materials.exposure)
+1161:            index=list(terrain_options.keys()).index(st.session_state.project.lateral.terrain)
+1166:                              value=st.session_state.project.lateral.core_wall_config is not None)
+1184:            current_config = st.session_state.project.lateral.core_wall_config or CoreWallConfig.I_SECTION
+1517:                        if "omit_columns" not in st.session_state:
+1518:                            st.session_state.omit_columns = {col_id: True for col_id in suggestions}
+1522:                                if col_id not in st.session_state.omit_columns:
+1523:                                    st.session_state.omit_columns[col_id] = True
+1530:                            is_checked = st.session_state.omit_columns.get(col_id, True)
+1533:                                st.session_state.omit_columns[col_id] = new_val
+1597:        if "selected_combinations" not in st.session_state:
+1599:            st.session_state.selected_combinations = {"LC1", "SLS1"}
+1625:            selected_count = sum(1 for c in combos if c.name in st.session_state.selected_combinations)
+1634:                            st.session_state.selected_combinations.add(c.name)
+1639:                            st.session_state.selected_combinations.discard(c.name)
+1650:                            is_selected = combo.name in st.session_state.selected_combinations
+1655:                                st.session_state.selected_combinations.add(combo.name)
+1657:                                st.session_state.selected_combinations.discard(combo.name)
+1664:                            is_selected = combo.name in st.session_state.selected_combinations
+1668:                                st.session_state.selected_combinations.add(combo.name)
+1670:                                st.session_state.selected_combinations.discard(combo.name)
+1682:        total_selected = len(st.session_state.selected_combinations)
+1690:            if c.name in st.session_state.selected_combinations:
+1713:    project = st.session_state.project
+1766:    st.session_state.project = project
+1872:            apply_wind_loads=st.session_state.get("fem_include_wind", True),
+1877:            suggested_omit_columns=[col for col, omit in st.session_state.get("omit_columns", {}).items() if omit]
+1928:            st.session_state["fem_active_view"] = "plan"
+1930:            st.session_state["fem_active_view"] = "elevation"
+1932:            st.session_state["fem_active_view"] = "3d"
+1935:        active_view = st.session_state.get("fem_active_view", "plan")
+2048:            suggested_omit_columns=[col for col, omit in st.session_state.get("omit_columns", {}).items() if omit]
+2148:            st.session_state["fem_preview_analysis_result"] = result
+2149:            st.session_state["fem_preview_analysis_message"] = result.message
+2151:        analysis_result = st.session_state.get("fem_preview_analysis_result")
+2152:        analysis_message = st.session_state.get("fem_preview_analysis_message")
