@@ -56,6 +56,9 @@ from src.fem.load_combinations import (
 )
 from src.ui.views.fem_views import render_unified_fem_views
 
+# Import UI theme
+from src.ui.theme import GEMINI_TOKENS
+
 # Import report generator
 from src.report.report_generator import ReportGenerator
 from src.ui.theme import apply_theme
@@ -298,6 +301,7 @@ def _analysis_result_to_displacements(result) -> Dict[int, Tuple[float, float, f
 
 def create_lateral_diagram(project: ProjectData) -> go.Figure:
     """Create wind load and lateral system diagram"""
+    colors = GEMINI_TOKENS["colors"]
     height = project.geometry.story_height * project.geometry.floors
     width = project.lateral.building_width or project.geometry.bay_x
 
@@ -308,7 +312,7 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
         x=[0, width, width, 0, 0],
         y=[0, 0, height, height, 0],
         mode='lines',
-        line=dict(color="#1E3A5F", width=3),
+        line=dict(color=colors["accent_blue_dark"], width=3),
         name='Building',
         fill='toself',
         fillcolor='rgba(45, 90, 135, 0.1)'
@@ -336,7 +340,7 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
             arrowhead=2,
             arrowsize=1.5,
             arrowwidth=2,
-            arrowcolor="#F59E0B"
+            arrowcolor=colors["warning_alt"]
         )
 
     # Add wind label (positioned further left to avoid arrows)
@@ -345,13 +349,13 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
         y=height / 2,
         text=f"Wind<br>{wind_base_shear:.0f} kN",
         showarrow=False,
-        font=dict(size=12, color="#F59E0B")
+        font=dict(size=12, color=colors["warning_alt"])
     )
 
     # Drift indicator (if available)
     if project.wind_result and project.wind_result.drift_mm > 0:
         drift = project.wind_result.drift_mm
-        drift_color = "#10B981" if project.wind_result.drift_ok else "#EF4444"
+        drift_color = colors["success_alt"] if project.wind_result.drift_ok else colors["error_alt"]
 
         fig.add_trace(go.Scatter(
             x=[width, width + drift/100],  # Scale drift for visibility
@@ -365,7 +369,7 @@ def create_lateral_diagram(project: ProjectData) -> go.Figure:
     fig.update_layout(
         title=dict(
             text="Lateral Load Diagram",
-            font=dict(size=16, color="#1E3A5F")
+            font=dict(size=16, color=colors["accent_blue_dark"])
         ),
         xaxis=dict(
             title="Width (m)",
@@ -539,10 +543,12 @@ def run_calculations(project: ProjectData,
 
 
 def main():
+    colors = GEMINI_TOKENS["colors"]
+    
     # Header
-    st.markdown("""
-    <h1 style="color: #1E3A5F; margin-bottom: 0;">PrelimStruct</h1>
-    <p style="color: #64748B; margin-top: 0;">AI-Assisted Preliminary Structural Design Platform</p>
+    st.markdown(f"""
+    <h1 style="color: {colors["accent_blue_dark"]}; margin-bottom: 0;">PrelimStruct</h1>
+    <p style="color: {colors["text_tertiary"]}; margin-top: 0;">AI-Assisted Preliminary Structural Design Platform</p>
     """, unsafe_allow_html=True)
 
     # Initialize session state
@@ -1487,7 +1493,7 @@ def main():
             col1, col2 = st.columns(2)
             with col1:
                 primary_status = "PASS" if project.primary_beam_result.utilization <= 1.0 else "FAIL"
-                primary_status_color = "#10B981" if primary_status == "PASS" else "#EF4444"
+                primary_status_color = colors["success_alt"] if primary_status == "PASS" else colors["error_alt"]
                 st.markdown(f"""
                 **Primary Beam ({pri_dir})**
                 - Size: **{project.primary_beam_result.width} x {project.primary_beam_result.depth} mm**
@@ -1504,7 +1510,7 @@ def main():
                 """, unsafe_allow_html=True)
             with col2:
                 secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
-                secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
+                secondary_status_color = colors["success_alt"] if secondary_status == "PASS" else colors["error_alt"]
                 st.markdown(f"""
                 **Secondary Beam ({sec_dir})**
                 - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
@@ -1573,8 +1579,8 @@ def main():
 
     # ===== REPORT GENERATION SECTION =====
     st.markdown("### Generate Report")
-    st.markdown("""
-    <p style="color: #64748B; font-size: 14px;">
+    st.markdown(f"""
+    <p style="color: {colors["text_tertiary"]}; font-size: 14px;">
         Generate a professional Magazine-Style HTML report with your design results.
     </p>
     """, unsafe_allow_html=True)
@@ -1628,8 +1634,8 @@ def main():
 
     # Footer
     st.divider()
-    st.markdown("""
-    <p style="text-align: center; color: #94A3B8; font-size: 12px;">
+    st.markdown(f"""
+    <p style="text-align: center; color: {colors["text_quaternary"]}; font-size: 12px;">
         PrelimStruct v3.0 | FEM + AI-Assisted Design | HK Code 2013 + Wind Code 2019
     </p>
     """, unsafe_allow_html=True)

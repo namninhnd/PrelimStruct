@@ -29,4 +29,4 @@ def get_status_badge(status: str, utilization: float = 0.0) -> str:
         label = "OK"
         bg = colors["success"]  # #81c995
     
-    return f'<span style="background-color:{bg};color:#131314;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">{label}</span>'
+    return f'<span style="background-color:{bg};color:{colors["bg_base"]};padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">{label}</span>'

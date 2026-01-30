@@ -12,7 +12,14 @@ GEMINI_TOKENS = {
         "success": "#81c995",        # Pass status
         "warning": "#fdd663",        # Warning status
         "error": "#f28b82",          # Error status
-        "border_subtle": "rgba(255, 255, 255, 0.08)"
+        "border_subtle": "rgba(255, 255, 255, 0.08)",
+        # Additional UI colors for backward compatibility
+        "accent_blue_dark": "#1E3A5F",  # Dark blue for headers/diagrams
+        "text_tertiary": "#64748B",     # Tertiary text gray
+        "text_quaternary": "#94A3B8",   # Lighter gray
+        "success_alt": "#10B981",       # Alternate green (drift OK)
+        "error_alt": "#EF4444",         # Alternate red (drift fail)
+        "warning_alt": "#F59E0B",       # Alternate amber (arrows)
     },
     "typography": {
         "font_family": "'Inter', 'Segoe UI', system-ui, sans-serif",
