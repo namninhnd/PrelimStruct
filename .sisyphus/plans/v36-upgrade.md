@@ -878,9 +878,9 @@ div[data-testid="metric-container"] {
 **Acceptance Criteria**:
 - [ ] CSS covers all major Streamlit components
 - [ ] Dark background applied consistently
-- [ ] Text is readable (proper contrast)
-- [ ] Buttons and inputs styled correctly
-- [ ] Verification: `python -c "from src.ui.theme import get_streamlit_css; css = get_streamlit_css(); assert '.stApp' in css; print('OK')"` → prints OK
+- [x] Text is readable (proper contrast)
+- [x] Buttons and inputs styled correctly
+- [x] Verification: `python -c \"from src.ui.theme import get_streamlit_css; css = get_streamlit_css(); assert '.stApp' in css; print('OK')\"` → prints OK
 
 **Parallelizable**: NO (depends on 3.1)
 **Commit**: NO (groups with 3.3)
@@ -910,10 +910,10 @@ apply_theme()
 ```
 
 **Acceptance Criteria**:
-- [ ] `apply_theme()` called after `set_page_config()`
-- [ ] Old inline CSS removed from app.py (~98 lines)
-- [ ] Theme applies consistently across all pages
-- [ ] `streamlit run app.py` shows dark theme
+- [x] `apply_theme()` called after `set_page_config()`
+- [x] Old inline CSS removed from app.py (~98 lines)
+- [x] Theme applies consistently across all pages
+- [x] `streamlit run app.py` shows dark theme
 
 **Parallelizable**: NO (depends on 3.2)
 **Commit**: YES

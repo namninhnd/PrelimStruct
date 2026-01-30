@@ -58,6 +58,8 @@ from src.ui.views.fem_views import render_unified_fem_views
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
+from src.ui.theme import apply_theme
+
 
 
 # Page Configuration
@@ -68,96 +70,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for styling
-st.markdown("""
-<style>
-    /* Status Badge Styles */
-    .status-pass {
-        background-color: #10B981;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-weight: 600;
-        font-size: 14px;
-        display: inline-block;
-    }
-    .status-fail {
-        background-color: #EF4444;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-weight: 600;
-        font-size: 14px;
-        display: inline-block;
-    }
-    .status-warning {
-        background-color: #F59E0B;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-weight: 600;
-        font-size: 14px;
-        display: inline-block;
-    }
-    .status-pending {
-        background-color: #6B7280;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 16px;
-        font-weight: 600;
-        font-size: 14px;
-        display: inline-block;
-    }
+# Apply custom theme
+apply_theme()
 
-    /* Metric Card */
-    .metric-card {
-        background: linear-gradient(135deg, #1E3A5F 0%, #2D5A87 100%);
-        border-radius: 12px;
-        padding: 16px;
-        color: white;
-        margin-bottom: 8px;
-    }
-    .metric-value {
-        font-size: 28px;
-        font-weight: 700;
-        margin: 0;
-    }
-    .metric-label {
-        font-size: 14px;
-        opacity: 0.8;
-        margin: 0;
-    }
-
-    /* Section Headers */
-    .section-header {
-        color: #1E3A5F;
-        font-weight: 700;
-        border-bottom: 2px solid #2D5A87;
-        padding-bottom: 8px;
-        margin-bottom: 16px;
-    }
-
-    /* Element Summary Cards */
-    .element-card {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 8px;
-    }
-    .element-card strong {
-        color: #1E3A5F;
-        font-size: 15px;
-    }
-    .element-card small {
-        color: #4A5568;
-    }
-
-    /* Hide Streamlit branding */
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-</style>
-""", unsafe_allow_html=True)
 
 
 def get_status_badge(status: str, utilization: float = 0.0) -> str:
