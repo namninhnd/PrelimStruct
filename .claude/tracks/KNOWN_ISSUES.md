@@ -7,7 +7,7 @@
 
 ## 0. Failing Benchmark Tests (HIGH PRIORITY)
 
-### 0.1 FEM Constraint Handler Issue
+### 0.1 FEM Reaction Extraction Issue
 **Files:** `tests/test_benchmark_validation.py`
 **Tests:**
 | Test | Status |
@@ -16,21 +16,26 @@
 | `test_reactions_non_zero[Simple_10Story_Frame]` | FAILING |
 | `test_reactions_non_zero[Medium_20Story_Core]` | FAILING |
 
-**Root Cause:** OpenSeesPy `PlainHandler` warns about non-identity constraint matrices for rigid diaphragm nodes, causing reactions to be 0.
+**Root Cause:** After analysis, `node_reactions` dictionary is empty even though `node_displacements` contains non-zero values (displacements at z>0 show real values). The issue is in reaction extraction from OpenSeesPy, not the constraint handler.
 
-**Fix:** Update `build_openseespy_model()` in `src/fem/solver.py` to use `Transformation` constraint handler:
+**Investigation needed:**
+1. Check if `ops.nodeReaction(node_tag)` returns zeros for fixed nodes
+2. Verify that base nodes (z=0) are actually fixed with `ops.fix()`
+3. Check if reactions need to be extracted after analysis differently
+4. Consider if `ops.reactions()` needs to be called first
+
+**Potential fixes to try:**
 ```python
-# Current (problematic):
-ops.constraints('Plain')
+# In solver.py extract_results(), before calling nodeReaction:
+ops.reactions()  # May need to compute reactions explicitly
 
-# Fix:
-ops.constraints('Transformation')
+# Or check if nodes are actually fixed:
+for node_tag in base_nodes:
+    print(f"Node {node_tag} fixity: {ops.nodeFixity(node_tag)}")
 ```
 
-**Location:** `src/fem/solver.py` - look for `ops.constraints('Plain')`
-
-**Priority:** HIGH - These are real FEM analysis issues affecting reaction calculations
-**Track:** Backlog (or create dedicated fix task)
+**Priority:** HIGH - These tests validate core FEM functionality
+**Track:** Dedicated investigation task (complex debugging required)
 
 ---
 
@@ -121,17 +126,49 @@ ops.constraints('Transformation')
 
 ## Fix Instructions for Issue 0.1
 
-```powershell
-# 1. Find the constraint handler
-Select-String -Path src/fem/solver.py -Pattern "constraints"
+**This requires deep FEM debugging, not a simple fix.** Suggested approach:
 
-# 2. Change from Plain to Transformation
-# Before: ops.constraints('Plain')
-# After:  ops.constraints('Transformation')
+1. Create a minimal test case:
+```python
+import openseespy.opensees as ops
 
-# 3. Run benchmark tests to verify
-pytest tests/test_benchmark_validation.py -v
+# Create simple 2-node model
+ops.wipe()
+ops.model('basic', '-ndm', 3, '-ndf', 6)
+
+# Nodes
+ops.node(1, 0, 0, 0)
+ops.node(2, 0, 0, 10)
+
+# Fix base
+ops.fix(1, 1, 1, 1, 1, 1, 1)
+
+# Material and section
+ops.geomTransf('Linear', 1, 0, 1, 0)
+ops.element('elasticBeamColumn', 1, 1, 2, 1.0, 30e9, 1e9, 0.01, 0.01, 0.01, 1)
+
+# Load
+ops.timeSeries('Constant', 1)
+ops.pattern('Plain', 1, 1)
+ops.load(2, 0, 0, -1000, 0, 0, 0)  # -1000N in Z
+
+# Analyze
+ops.constraints('Plain')
+ops.numberer('RCM')
+ops.system('BandGeneral')
+ops.test('NormDispIncr', 1e-8, 10)
+ops.algorithm('Linear')
+ops.integrator('LoadControl', 1.0)
+ops.analysis('Static')
+ops.analyze(1)
+
+# Check
+print("Disp at node 2:", ops.nodeDisp(2))
+print("Reaction at node 1:", ops.nodeReaction(1))
 ```
+
+2. If reactions are zero, try calling `ops.reactions()` before extraction
+3. Check OpenSeesPy documentation for correct reaction extraction sequence
 
 ---
 

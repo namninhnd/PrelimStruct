@@ -122,7 +122,9 @@ class FEMSolver:
         
         # Create analysis
         # For linear static analysis, we use:
-        # - constraints: Plain (or Transformation for MPCs)
+        # - constraints: Plain (simpler, but may have issues with rigid diaphragms)
+        #   NOTE: Transformation would be better for MPC constraints but requires
+        #   investigation of reaction extraction issues. See KNOWN_ISSUES.md.
         # - numberer: RCM (Reverse Cuthill-McKee for bandwidth optimization)
         # - system: BandGeneral (for general systems) or ProfileSPD (for symmetric)
         # - test: NormDispIncr (convergence test)
