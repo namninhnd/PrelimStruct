@@ -101,3 +101,13 @@ Feature parity between `create_framing_grid()` (app.py:348-685) and `create_plan
 - New structure: single `render_unified_fem_views()` call
 - Legacy sections: Structural Layout gated behind `PRELIMSTRUCT_SHOW_LEGACY_VIEWS`, FEM Views/Analysis removed
 - Verification: syntax OK
+
+## [2026-01-30] Task 2.7: Legacy View Functions Removal
+- create_framing_grid(): REMOVED (338 lines)
+- create_lateral_diagram(): KEPT (gated by dev flag in Task 2.5)
+- Core-wall helpers: PRESERVED (calculate_core_wall_properties, get_core_wall_outline, get_coupling_beams)
+- Previous line count: 2072 (estimated)
+- Current line count: 1734
+- Lines removed: 338
+- Syntax verification: PASS
+- LSP warnings: Pre-existing (unrelated type hints)
