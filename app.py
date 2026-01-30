@@ -64,6 +64,9 @@ from src.report.report_generator import ReportGenerator
 from src.ui.theme import apply_theme
 from src.ui.components import get_status_badge
 
+# Import session state management
+from src.ui.state import init_session_state
+
 
 
 # Page Configuration
@@ -76,6 +79,9 @@ st.set_page_config(
 
 # Apply custom theme
 apply_theme()
+
+# Initialize session state (centralized)
+init_session_state()
 
 
 
@@ -1166,11 +1172,6 @@ def main():
 
         # ===== LOAD COMBINATION UI (Task 20.3) =====
         st.markdown("##### Load Combinations")
-        
-        # Initialize session state for load combination selections if not exists
-        if "selected_combinations" not in st.session_state:
-            # Default: select LC1 (gravity) and SLS1
-            st.session_state.selected_combinations = {"LC1", "SLS1"}
         
         # Get all available combinations from library
         all_combinations = LoadCombinationLibrary.get_all_combinations()
