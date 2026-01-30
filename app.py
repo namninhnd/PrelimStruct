@@ -3,6 +3,7 @@ PrelimStruct - Streamlit Dashboard
 AI-Assisted Preliminary Structural Design Platform
 """
 
+import os
 import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
@@ -14,8 +15,8 @@ from typing import Dict, Any, Tuple, Optional
 from src.core.data_models import (
     ProjectData, GeometryInput, LoadInput, MaterialInput, LateralInput,
     SlabDesignInput, BeamDesignInput, ReinforcementInput,
-    SlabType, SpanDirection, ExposureClass, TerrainCategory,
-    CoreLocation, CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties,
+    ExposureClass, TerrainCategory,
+    CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties,
     ColumnPosition, LoadCombination, PRESETS,
 )
 from src.core.constants import CARBON_FACTORS
@@ -34,6 +35,25 @@ from src.fem.core_wall_geometry import (
 )
 from src.fem.coupling_beam import CouplingBeamGenerator
 from src.fem.beam_trimmer import BeamTrimmer, BeamGeometry, BeamConnectionType
+from src.fem.fem_engine import FEMModel
+from src.fem.model_builder import (
+    build_fem_model, 
+    ModelBuilderOptions, 
+    get_column_omission_suggestions
+)
+from src.fem.visualization import (
+    create_plan_view,
+    create_elevation_view,
+    create_3d_view,
+    VisualizationConfig,
+    get_model_statistics,
+)
+from src.fem.solver import analyze_model
+from src.fem.load_combinations import (
+    LoadCombinationLibrary,
+    LoadCombinationCategory,
+    LoadCombinationDefinition,
+)
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -450,20 +470,24 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
             first_col = False
 
     # Core wall (if defined) - positioned relative to full building
-    if project.lateral.core_dim_x > 0 and project.lateral.core_dim_y > 0:
-        core_x = project.lateral.core_dim_x
-        core_y = project.lateral.core_dim_y
+    if project.lateral.core_geometry:
+        # Extract dimensions from geometry (mm -> m)
+        core_x = project.lateral.core_geometry.length_x / 1000.0 if project.lateral.core_geometry.length_x else 0.0
+        core_y = project.lateral.core_geometry.length_y / 1000.0 if project.lateral.core_geometry.length_y else 0.0
 
         # Position based on core location (relative to total building)
-        if project.lateral.core_location == CoreLocation.CENTER:
-            cx = (total_x - core_x) / 2
-            cy = (total_y - core_y) / 2
-        elif project.lateral.core_location == CoreLocation.SIDE:
-            cx = total_x - core_x - 0.5
-            cy = (total_y - core_y) / 2
-        else:  # CORNER
-            cx = total_x - core_x - 0.5
-            cy = total_y - core_y - 0.5
+        # Position based on core location (relative to total building)
+        # Default to CENTER for visualization since core_location enum is removed
+        cx = (total_x - core_x) / 2
+        cy = (total_y - core_y) / 2
+        
+        # If we had legacy side/corner logic:
+        # if project.lateral.core_location == "side":
+        #    cx = total_x - core_x - 0.5
+        #    cy = (total_y - core_y) / 2
+        # elif project.lateral.core_location == "corner":
+        #    cx = total_x - core_x - 0.5
+        #    cy = total_y - core_y - 0.5
 
         # Get core wall outline from geometry if available
         if project.lateral.core_geometry:
@@ -546,7 +570,7 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
                     first_coupling = False
 
         # Beam trimming visualization (if core geometry available)
-        if project.lateral.core_geometry and project.lateral.core_dim_x > 0:
+        if project.lateral.core_geometry:
             try:
                 # Create beam geometries from framing grid
                 beam_geometries = create_beam_geometries_from_project(project, cx, cy)
@@ -660,6 +684,49 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
     )
 
     return fig
+
+
+def build_preview_utilization_map(model: FEMModel, project: ProjectData) -> Dict[int, float]:
+    """Build approximate utilization map for FEM preview using preliminary design results."""
+    utilization_map: Dict[int, float] = {}
+    tolerance = 0.01
+    primary_along_x = project.geometry.bay_x >= project.geometry.bay_y
+
+    pri_util = project.primary_beam_result.utilization if project.primary_beam_result else 0.0
+    sec_util = project.secondary_beam_result.utilization if project.secondary_beam_result else 0.0
+    col_util = project.column_result.utilization if project.column_result else 0.0
+
+    for elem in model.elements.values():
+        if len(elem.node_tags) < 2:
+            continue
+        node_i = model.nodes[elem.node_tags[0]]
+        node_j = model.nodes[elem.node_tags[1]]
+
+        is_vertical = (abs(node_i.z - node_j.z) > tolerance and
+                       abs(node_i.x - node_j.x) < tolerance and
+                       abs(node_i.y - node_j.y) < tolerance)
+        if is_vertical:
+            utilization_map[elem.tag] = col_util
+            continue
+
+        is_horizontal = abs(node_i.z - node_j.z) < tolerance
+        if is_horizontal:
+            along_x = abs(node_i.y - node_j.y) < tolerance
+            if primary_along_x:
+                utilization_map[elem.tag] = pri_util if along_x else sec_util
+            else:
+                utilization_map[elem.tag] = sec_util if along_x else pri_util
+
+    return utilization_map
+
+
+def _analysis_result_to_displacements(result) -> Dict[int, Tuple[float, float, float]]:
+    """Extract translational displacements from AnalysisResult."""
+    displaced: Dict[int, Tuple[float, float, float]] = {}
+    for node_tag, values in result.node_displacements.items():
+        if len(values) >= 3:
+            displaced[node_tag] = (values[0], values[1], values[2])
+    return displaced
 
 
 def create_lateral_diagram(project: ProjectData) -> go.Figure:
@@ -878,7 +945,7 @@ def run_calculations(project: ProjectData,
     project.wind_result = wind_engine.calculate_wind_loads()
 
     # Core wall check and drift calculation (if core defined)
-    if project.lateral.core_dim_x > 0 and project.lateral.core_dim_y > 0:
+    if project.lateral.core_geometry:
         # Calculate drift using DriftEngine
         drift_engine = DriftEngine(project)
         project.wind_result = drift_engine.calculate_drift(project.wind_result)
@@ -896,14 +963,7 @@ def run_calculations(project: ProjectData,
             project.column_result.lateral_moment = first_col_load[1]
             project.column_result.has_lateral_loads = True
 
-            # Check combined P+M (returns tuple: utilization, status, warnings)
-            utilization, status, warnings = column_engine.check_combined_load(
-                project.column_result.axial_load,
-                first_col_load[1],
-                project.column_result.dimension,
-                project.materials.fcu_column
-            )
-            project.column_result.combined_utilization = utilization
+            # V3.5: check_combined_load() removed - combined_utilization set by ColumnEngine.calculate()
 
     # Calculate carbon emission
     project.concrete_volume, project.carbon_emission = calculate_carbon_emission(project)
@@ -979,31 +1039,55 @@ def main():
         # Loading Inputs
         st.markdown("##### Loading")
 
-        # Live load class selection
+        # Live load class selection - include "9: Other (Custom)" option
         class_options = [(k, v["name"]) for k, v in LIVE_LOAD_TABLE.items()]
+        class_options.append(("9", "Other (Custom)"))  # Add custom option as Class 9
         class_labels = [f"{k}: {name}" for k, name in class_options]
         class_keys = [k for k, _ in class_options]
+
+        # Get current class, default to "2" if not in valid options
+        current_class = st.session_state.project.loads.live_load_class
+        if current_class in class_keys:
+            default_class_idx = class_keys.index(current_class)
+        else:
+            default_class_idx = class_keys.index("2") if "2" in class_keys else 0
 
         selected_class_label = st.selectbox(
             "Live Load Class",
             options=class_labels,
-            index=class_keys.index(st.session_state.project.loads.live_load_class) if st.session_state.project.loads.live_load_class in class_keys else 1
+            index=default_class_idx
         )
         selected_class = class_keys[class_labels.index(selected_class_label)]
 
-        # Live load subdivision
-        if selected_class in LIVE_LOAD_TABLE:
-            sub_options = [(e.code, e.description, e.get_load()) for e in LIVE_LOAD_TABLE[selected_class]["loads"]]
-            sub_labels = [f"{code}: {desc} ({load:.1f} kPa)" for code, desc, load in sub_options]
-            sub_codes = [code for code, _, _ in sub_options]
-
-            current_sub = st.session_state.project.loads.live_load_sub
-            default_idx = sub_codes.index(current_sub) if current_sub in sub_codes else 0
-
-            selected_sub_label = st.selectbox("Subdivision", options=sub_labels, index=default_idx)
-            selected_sub = sub_codes[sub_labels.index(selected_sub_label)]
+        # Custom live load input when "9: Other (Custom)" is selected
+        custom_live_load_value: Optional[float] = None
+        if selected_class == "9":
+            # Show custom kPa input with validation (0.5 - 20.0 kPa)
+            current_custom = st.session_state.project.loads.custom_live_load
+            default_custom = current_custom if current_custom is not None else 5.0
+            custom_live_load_value = st.number_input(
+                "Custom Live Load (kPa)",
+                min_value=0.5,
+                max_value=20.0,
+                value=float(default_custom),
+                step=0.5,
+                help="Enter custom live load value (0.5 - 20.0 kPa) for special loading conditions"
+            )
+            selected_sub = "9.0"  # Placeholder subdivision for custom
         else:
-            selected_sub = "2.5"
+            # Live load subdivision from HK Code tables
+            if selected_class in LIVE_LOAD_TABLE:
+                sub_options = [(e.code, e.description, e.get_load()) for e in LIVE_LOAD_TABLE[selected_class]["loads"]]
+                sub_labels = [f"{code}: {desc} ({load:.1f} kPa)" for code, desc, load in sub_options]
+                sub_codes = [code for code, _, _ in sub_options]
+
+                current_sub = st.session_state.project.loads.live_load_sub
+                default_idx = sub_codes.index(current_sub) if current_sub in sub_codes else 0
+
+                selected_sub_label = st.selectbox("Subdivision", options=sub_labels, index=default_idx)
+                selected_sub = sub_codes[sub_labels.index(selected_sub_label)]
+            else:
+                selected_sub = "2.5"
 
         dead_load = st.number_input("SDL (kPa)", min_value=0.5, max_value=10.0,
                                    value=float(st.session_state.project.loads.dead_load), step=0.5,
@@ -1080,7 +1164,12 @@ def main():
         selected_terrain = list(terrain_options.keys())[list(terrain_options.values()).index(selected_terrain_label)]
 
         has_core = st.checkbox("Core Wall System",
-                              value=st.session_state.project.lateral.core_dim_x > 0)
+                              value=st.session_state.project.lateral.core_wall_config is not None)
+
+        # Initialize core wall location variables with defaults
+        selected_core_location = "Center"
+        custom_x = None
+        custom_y = None
 
         if has_core:
             # Core wall configuration dropdown
@@ -1136,9 +1225,88 @@ def main():
                 # Set core_x and core_y from dimensions
                 core_x = flange_width
                 core_y = web_length
-                length_x = None
-                length_y = None
+                length_x = flange_width
+                length_y = web_length
                 opening_height = None
+
+                # Core Position UI (Task 17.2)
+                st.caption("Core Position")
+                col_loc1, col_loc2 = st.columns(2)
+                with col_loc1:
+                    core_loc_type = st.radio(
+                        "Position Type",
+                        options=["Center", "Custom"],
+                        index=0,
+                        horizontal=True,
+                        help="Place core at building center or define specific coordinates. "
+                             "Coordinate system: Origin (0,0) at bottom-left corner of building, "
+                             "X increases to the right, Y increases upward.",
+                        key="i_section_position_type"
+                    )
+                
+                custom_x = None
+                custom_y = None
+                
+                if core_loc_type == "Custom":
+                    b_width = bay_x * num_bays_x
+                    b_depth = bay_y * num_bays_y
+                    
+                    with col_loc2:
+                        st.caption(f"Building: {b_width:.1f}m x {b_depth:.1f}m")
+                    
+                    # Coordinate system tooltip
+                    st.info(
+                        "**Coordinate System:** Origin (0, 0) is at the bottom-left corner. "
+                        "X-axis runs left-to-right, Y-axis runs bottom-to-top."
+                    )
+                        
+                    l_col, r_col = st.columns(2)
+                    
+                    # Calculate safe min/max to ensure core fits within building
+                    # Use flange_width and web_length for I-Section/C-Wall
+                    half_core_x = flange_width / 2.0
+                    half_core_y = web_length / 2.0
+                    min_x = half_core_x
+                    max_x = b_width - half_core_x
+                    min_y = half_core_y
+                    max_y = b_depth - half_core_y
+                    
+                    # Clamp to ensure valid range
+                    min_x = max(0.0, min_x)
+                    max_x = max(min_x + 0.1, max_x)
+                    min_y = max(0.0, min_y)
+                    max_y = max(min_y + 0.1, max_y)
+                    
+                    with l_col:
+                        custom_x = st.number_input(
+                            "Center X (m)", 
+                            min_value=0.0, 
+                            max_value=float(b_width), 
+                            value=float(b_width/2), 
+                            step=1.0,
+                            help=f"X-coordinate of the core wall centroid (valid range: {min_x:.1f}m - {max_x:.1f}m)"
+                        )
+                    with r_col:
+                        custom_y = st.number_input(
+                            "Center Y (m)", 
+                            min_value=0.0, 
+                            max_value=float(b_depth), 
+                            value=float(b_depth/2), 
+                            step=1.0,
+                            help=f"Y-coordinate of the core wall centroid (valid range: {min_y:.1f}m - {max_y:.1f}m)"
+                        )
+                    
+                    # Validation warning for edge cases
+                    if custom_x < min_x or custom_x > max_x:
+                        st.warning(f"Core wall may extend outside building in X direction. "
+                                   f"Recommended X range: {min_x:.1f}m - {max_x:.1f}m")
+                    if custom_y < min_y or custom_y > max_y:
+                        st.warning(f"Core wall may extend outside building in Y direction. "
+                                   f"Recommended Y range: {min_y:.1f}m - {max_y:.1f}m")
+                        
+                    selected_core_location = "Custom"
+                else:
+                    selected_core_location = "Center"
 
             else:  # TUBE configurations
                 st.caption("Tube Dimensions")
@@ -1173,18 +1341,84 @@ def main():
                 flange_width = None
                 web_length = None
 
-            core_location_options = {
-                CoreLocation.CENTER: "Center",
-                CoreLocation.SIDE: "Side",
-                CoreLocation.CORNER: "Corner"
-            }
-            selected_core_loc_label = st.selectbox(
-                "Core Location",
-                options=list(core_location_options.values()),
-                index=list(core_location_options.keys()).index(st.session_state.project.lateral.core_location)
-            )
-            selected_core_location = list(core_location_options.keys())[list(core_location_options.values()).index(selected_core_loc_label)]
-
+                # Core Position UI for TUBE configurations (Task 17.2)
+                st.caption("Core Position")
+                col_loc1, col_loc2 = st.columns(2)
+                with col_loc1:
+                    core_loc_type = st.radio(
+                        "Position Type",
+                        options=["Center", "Custom"],
+                        index=0,
+                        horizontal=True,
+                        help="Place core at building center or define specific coordinates. "
+                             "Coordinate system: Origin (0,0) at bottom-left corner of building, "
+                             "X increases to the right, Y increases upward.",
+                        key="tube_position_type"
+                    )
+                
+                custom_x = None
+                custom_y = None
+                
+                if core_loc_type == "Custom":
+                    b_width = bay_x * num_bays_x
+                    b_depth = bay_y * num_bays_y
+                    
+                    with col_loc2:
+                        st.caption(f"Building: {b_width:.1f}m x {b_depth:.1f}m")
+                    
+                    # Coordinate system tooltip
+                    st.info(
+                        "**Coordinate System:** Origin (0, 0) is at the bottom-left corner. "
+                        "X-axis runs left-to-right, Y-axis runs bottom-to-top."
+                    )
+                        
+                    l_col, r_col = st.columns(2)
+                    
+                    # Calculate safe min/max to ensure core fits within building
+                    half_core_x = length_x / 2.0
+                    half_core_y = length_y / 2.0
+                    min_x = half_core_x
+                    max_x = b_width - half_core_x
+                    min_y = half_core_y
+                    max_y = b_depth - half_core_y
+                    
+                    # Clamp to ensure valid range
+                    min_x = max(0.0, min_x)
+                    max_x = max(min_x + 0.1, max_x)
+                    min_y = max(0.0, min_y)
+                    max_y = max(min_y + 0.1, max_y)
+                    
+                    with l_col:
+                        custom_x = st.number_input(
+                            "Center X (m)", 
+                            min_value=0.0, 
+                            max_value=float(b_width), 
+                            value=float(b_width/2), 
+                            step=1.0,
+                            help=f"X-coordinate of the core wall centroid (valid range: {min_x:.1f}m - {max_x:.1f}m)"
+                        )
+                    with r_col:
+                        custom_y = st.number_input(
+                            "Center Y (m)", 
+                            min_value=0.0, 
+                            max_value=float(b_depth), 
+                            value=float(b_depth/2), 
+                            step=1.0,
+                            help=f"Y-coordinate of the core wall centroid (valid range: {min_y:.1f}m - {max_y:.1f}m)"
+                        )
+                    
+                    # Validation warning for edge cases
+                    if custom_x < min_x or custom_x > max_x:
+                        st.warning(f"Core wall may extend outside building in X direction. "
+                                   f"Recommended X range: {min_x:.1f}m - {max_x:.1f}m")
+                    if custom_y < min_y or custom_y > max_y:
+                        st.warning(f"Core wall may extend outside building in Y direction. "
+                                   f"Recommended Y range: {min_y:.1f}m - {max_y:.1f}m")
+                        
+                    selected_core_location = "Custom"
+                else:
+                    selected_core_location = "Center"
+            
             # Calculate and display section properties
             st.caption("Calculated Section Properties")
             temp_geometry = CoreWallGeometry(
@@ -1216,7 +1450,7 @@ def main():
         else:
             core_x = 0.0
             core_y = 0.0
-            selected_core_location = CoreLocation.CENTER
+            selected_core_location = "Center"
             selected_core_wall_config = None
             wall_thickness = 500.0
             flange_width = None
@@ -1225,6 +1459,89 @@ def main():
             length_y = None
             opening_width = None
             opening_height = None
+            custom_x = None
+            custom_y = None
+
+        # Column Omission Suggestion Review (Task 17.3)
+        if has_core and selected_core_wall_config:
+            # We need to temporarily update project geometry/lateral for the suggestion function to work
+            # logic is similar to lines 1346-1380 but we need it here for the UI
+            
+            # Create a localized project definition for calculation
+            # (Standard project update happens at end of sidebar, so we use session state or temp obj)
+            
+            # Simple approach: Check if we have enough info to run suggestion
+            st.divider()
+            with st.expander("🔍 Column Omission Review", expanded=False):
+                st.info("Columns within 0.5m of core walls can be omitted to avoid conflicts.")
+                
+                # We need a temporary project object with CURRENT inputs for the checker
+                # Reusing existing project structure but updating lateral/geometry locally
+                temp_project = ProjectData()  # Copy or new
+                # Copy essential data from session state
+                temp_project.geometry = GeometryInput(bay_x, bay_y, floors, story_height, num_bays_x, num_bays_y)
+                
+                temp_core_geo = CoreWallGeometry(
+                    config=selected_core_wall_config,
+                    wall_thickness=wall_thickness,
+                    length_x=length_x * 1000 if length_x else None,
+                    length_y=length_y * 1000 if length_y else None,
+                    opening_width=opening_width * 1000 if opening_width else None,
+                    opening_height=opening_height * 1000 if opening_height else None,
+                    flange_width=flange_width * 1000 if flange_width else None,
+                    web_length=web_length * 1000 if web_length else None,
+                )
+                
+                # We need the calculated centroid to position the core correctly in the checker
+                # The checker uses project.lateral.core_geometry
+                temp_project.lateral = LateralInput(
+                    terrain=selected_terrain, # Not used for omission
+                    building_width=bay_x * num_bays_x,
+                    building_depth=bay_y * num_bays_y,
+                    core_wall_config=selected_core_wall_config,
+                    wall_thickness=wall_thickness,
+                    core_geometry=temp_core_geo
+                )
+                
+                # Get suggestions
+                try:
+                    suggestions = get_column_omission_suggestions(
+                        project=temp_project,
+                        threshold_m=0.5
+                    )
+                    
+                    if suggestions:
+                        st.write(f"**{len(suggestions)} columns suggested for omission:**")
+                        
+                        # Initialize session state for omissions if not exists
+                        # We use a set of approved omissions
+                        if "omit_columns" not in st.session_state:
+                            st.session_state.omit_columns = {col_id: True for col_id in suggestions}
+                        else:
+                            # Add new suggestions as True, keep existing preference
+                            for col_id in suggestions:
+                                if col_id not in st.session_state.omit_columns:
+                                    st.session_state.omit_columns[col_id] = True
+                                    
+                        # Display checkboxes
+                        cols = st.columns(3)
+                        approved_count = 0
+                        for i, col_id in enumerate(sorted(suggestions)):
+                            col_idx = i % 3
+                            is_checked = st.session_state.omit_columns.get(col_id, True)
+                            with cols[col_idx]:
+                                new_val = st.checkbox(f"{col_id}", value=is_checked, key=f"omit_chk_{col_id}")
+                                st.session_state.omit_columns[col_id] = new_val
+                                if new_val:
+                                    approved_count += 1
+                        
+                        st.caption(f"✅ {approved_count} columns set to be omitted.")
+                    else:
+                        st.success("No columns detected near core wall.")
+                        
+                except Exception as e:
+                    st.error(f"Could not calculate omissions: {str(e)}")
+
 
         st.divider()
 
@@ -1274,25 +1591,129 @@ def main():
 
         st.divider()
 
-        # Load Combination Toggle
-        st.markdown("##### Load Combination")
-        load_comb_options = {
-            LoadCombination.ULS_GRAVITY: "ULS: 1.4Gk + 1.6Qk",
-            LoadCombination.ULS_WIND: "ULS: 1.0Gk + 1.4Wk",
-            LoadCombination.SLS_DEFLECTION: "SLS: 1.0Gk + 1.0Qk"
-        }
-
-        selected_comb_label = st.selectbox(
-            "Active Combination",
-            options=list(load_comb_options.values()),
-            index=list(load_comb_options.keys()).index(st.session_state.project.load_combination)
-        )
-        selected_load_comb = list(load_comb_options.keys())[list(load_comb_options.values()).index(selected_comb_label)]
+        # ===== LOAD COMBINATION UI (Task 20.3) =====
+        st.markdown("##### Load Combinations")
+        
+        # Initialize session state for load combination selections if not exists
+        if "selected_combinations" not in st.session_state:
+            # Default: select LC1 (gravity) and SLS1
+            st.session_state.selected_combinations = {"LC1", "SLS1"}
+        
+        # Get all available combinations from library
+        all_combinations = LoadCombinationLibrary.get_all_combinations()
+        
+        # Group combinations by category
+        gravity_combos = [c for c in all_combinations if c.category == LoadCombinationCategory.ULS_GRAVITY]
+        wind_combos = [c for c in all_combinations if c.category == LoadCombinationCategory.ULS_WIND]
+        seismic_combos = [c for c in all_combinations if c.category == LoadCombinationCategory.ULS_SEISMIC]
+        accidental_combos = [c for c in all_combinations if c.category == LoadCombinationCategory.ULS_ACCIDENTAL]
+        sls_combos = [c for c in all_combinations if c.category == LoadCombinationCategory.SLS]
+        
+        # Helper function to render category section
+        def render_combo_category(
+            category_name: str,
+            combos: list,
+            category_key: str,
+            expanded: bool = False
+        ) -> int:
+            """Render a collapsible category section with checkboxes.
+            
+            Returns the count of selected combinations in this category.
+            """
+            if not combos:
+                return 0
+            
+            selected_count = sum(1 for c in combos if c.name in st.session_state.selected_combinations)
+            total_count = len(combos)
+            
+            with st.expander(f"{category_name} ({selected_count}/{total_count})", expanded=expanded):
+                # Select All / Select None buttons
+                btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
+                with btn_col1:
+                    if st.button("All", key=f"select_all_{category_key}", use_container_width=True):
+                        for c in combos:
+                            st.session_state.selected_combinations.add(c.name)
+                        st.rerun()
+                with btn_col2:
+                    if st.button("None", key=f"select_none_{category_key}", use_container_width=True):
+                        for c in combos:
+                            st.session_state.selected_combinations.discard(c.name)
+                        st.rerun()
+                
+                # Scrollable container for combinations (using container with max height)
+                # For wind combos (many), display in 3 columns; others in 2 columns
+                if len(combos) > 10:
+                    # Wind combos - use 3 columns for compact display
+                    cols = st.columns(3)
+                    for i, combo in enumerate(combos):
+                        col_idx = i % 3
+                        with cols[col_idx]:
+                            is_selected = combo.name in st.session_state.selected_combinations
+                            # Shorter label for wind combos
+                            label = f"{combo.name}"
+                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}", 
+                                          help=combo.to_equation()):
+                                st.session_state.selected_combinations.add(combo.name)
+                            else:
+                                st.session_state.selected_combinations.discard(combo.name)
+                else:
+                    # Other categories - use 2 columns
+                    cols = st.columns(2) if len(combos) > 1 else st.columns(1)
+                    for i, combo in enumerate(combos):
+                        col_idx = i % len(cols)
+                        with cols[col_idx]:
+                            is_selected = combo.name in st.session_state.selected_combinations
+                            label = f"{combo.name}: {combo.to_equation()}"
+                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
+                                          help=combo.description):
+                                st.session_state.selected_combinations.add(combo.name)
+                            else:
+                                st.session_state.selected_combinations.discard(combo.name)
+            
+            return selected_count
+        
+        # Render each category
+        gravity_selected = render_combo_category("Gravity (ULS)", gravity_combos, "gravity", expanded=True)
+        wind_selected = render_combo_category("Wind (ULS)", wind_combos, "wind", expanded=False)
+        seismic_selected = render_combo_category("Seismic (ULS)", seismic_combos, "seismic", expanded=False)
+        accidental_selected = render_combo_category("Accidental (ULS)", accidental_combos, "accidental", expanded=False)
+        sls_selected = render_combo_category("Serviceability (SLS)", sls_combos, "sls", expanded=True)
+        
+        # Total count display
+        total_selected = len(st.session_state.selected_combinations)
+        total_available = len(all_combinations)
+        st.caption(f"**Total: {total_selected}/{total_available} combinations selected**")
+        
+        # Active combination for simplified design (backwards compatibility)
+        # Use the first selected gravity combo, or first selected combo
+        active_combo_options = {}
+        for c in all_combinations:
+            if c.name in st.session_state.selected_combinations:
+                active_combo_options[c.combination_type] = f"{c.name}: {c.to_equation()}"
+        
+        if active_combo_options:
+            st.markdown("**Active Combination for Design:**")
+            selected_comb_label = st.selectbox(
+                "Active Combination",
+                options=list(active_combo_options.values()),
+                index=0,
+                label_visibility="collapsed",
+                help="This combination is used for the simplified design calculations"
+            )
+            # Find the LoadCombination enum for the selected label
+            selected_load_comb = list(active_combo_options.keys())[
+                list(active_combo_options.values()).index(selected_comb_label)
+            ]
+        else:
+            # Fallback to default if nothing selected
+            selected_load_comb = LoadCombination.ULS_GRAVITY_1
+            selected_comb_label = "LC1: 1.4DL + 1.4SDL + 1.6LL"
+            st.warning("No combinations selected. Using default ULS Gravity combination.")
 
     # Update project data
     project = st.session_state.project
     project.geometry = GeometryInput(bay_x, bay_y, floors, story_height, num_bays_x, num_bays_y)
-    project.loads = LoadInput(selected_class, selected_sub, dead_load)
+    project.loads = LoadInput(selected_class, selected_sub, dead_load, custom_live_load=custom_live_load_value)
     project.materials = MaterialInput(fcu_slab, fcu_beam, fcu_column, exposure=selected_exposure)
     # Use total building dimensions for lateral analysis
     total_width_x = bay_x * num_bays_x
@@ -1317,9 +1738,6 @@ def main():
         section_properties = calculate_core_wall_properties(core_geometry)
 
     project.lateral = LateralInput(
-        core_dim_x=core_x,
-        core_dim_y=core_y,
-        core_location=selected_core_location,
         terrain=selected_terrain,
         building_width=total_width_x,
         building_depth=total_width_y,
@@ -1327,6 +1745,10 @@ def main():
         wall_thickness=wall_thickness,
         core_geometry=core_geometry,
         section_properties=section_properties,
+        # Task 17.2: Pass custom core wall position
+        location_type=selected_core_location if has_core else "Center",
+        custom_center_x=custom_x if has_core and selected_core_location == "Custom" else None,
+        custom_center_y=custom_y if has_core and selected_core_location == "Custom" else None,
     )
     project.load_combination = selected_load_comb
 
@@ -1382,7 +1804,7 @@ def main():
         """, unsafe_allow_html=True)
 
     with col4:
-        if project.lateral.core_dim_x > 0 and project.core_wall_result:
+        if project.lateral.core_geometry and project.core_wall_result:
             core_util = max(project.core_wall_result.compression_check, project.core_wall_result.shear_check)
             core_status = "FAIL" if core_util > 1.0 else ("WARNING" if project.core_wall_result.requires_tension_piles else "OK")
         else:
@@ -1439,17 +1861,401 @@ def main():
             help="Embodied carbon per floor area"
         )
 
+    # ===== FEM VIEWS SECTION (Relocated below Key Metrics per Task 21.1) =====
+    st.markdown("### FEM Views")
+
+    # Build FEM model for visualization
+    try:
+        fem_options = ModelBuilderOptions(
+            include_core_wall=True,
+            trim_beams_at_core=True,
+            apply_gravity_loads=True,
+            apply_wind_loads=st.session_state.get("fem_include_wind", True),
+            apply_rigid_diaphragms=True,
+            secondary_beam_direction="X" if secondary_along_x else "Y",
+            num_secondary_beams=num_secondary_beams,
+            omit_columns_near_core=True,
+            suggested_omit_columns=[col for col, omit in st.session_state.get("omit_columns", {}).items() if omit]
+        )
+        fem_model_views = build_fem_model(project, fem_options)
+        fem_stats = get_model_statistics(fem_model_views)
+        fem_floor_levels = fem_stats.get("floor_elevations", [])
+
+        # Helper function to format floor labels in HK convention
+        def format_floor_label(z: float, floor_levels: list) -> str:
+            """Format floor elevation as HK convention: G/F, 1/F, 2/F, etc."""
+            if not floor_levels:
+                return f"Z = {z:.2f}m"
+            # Sort levels and find index
+            sorted_levels = sorted(floor_levels)
+            try:
+                floor_index = sorted_levels.index(z)
+            except ValueError:
+                return f"Z = {z:.2f}m"
+            # Ground floor is index 0, then 1/F, 2/F, etc.
+            if floor_index == 0:
+                return f"G/F (+{z:.2f})"
+            else:
+                return f"{floor_index}/F (+{z:.2f})"
+
+        # View selection buttons in horizontal row: Plan (Left), Elevation (Center), 3D (Right)
+        view_col1, view_col2, view_col3, floor_col = st.columns([1, 1, 1, 1.5])
+
+        with view_col1:
+            plan_btn = st.button("Plan View", key="fem_view_plan_btn", use_container_width=True)
+        with view_col2:
+            elev_btn = st.button("Elevation View", key="fem_view_elev_btn", use_container_width=True)
+        with view_col3:
+            view3d_btn = st.button("3D View", key="fem_view_3d_btn", use_container_width=True)
+        with floor_col:
+            # Floor selection dropdown with HK convention labels
+            if fem_floor_levels:
+                floor_options = sorted(fem_floor_levels)
+                floor_labels = [format_floor_label(z, floor_options) for z in floor_options]
+                selected_floor_idx = st.selectbox(
+                    "Floor",
+                    options=range(len(floor_options)),
+                    index=len(floor_options) - 1,  # Default to top floor
+                    format_func=lambda i: floor_labels[i],
+                    key="fem_view_floor_select"
+                )
+                selected_view_floor = floor_options[selected_floor_idx]
+            else:
+                selected_view_floor = None
+                st.info("No floor levels available")
+
+        # Update session state for active view
+        if plan_btn:
+            st.session_state["fem_active_view"] = "plan"
+        elif elev_btn:
+            st.session_state["fem_active_view"] = "elevation"
+        elif view3d_btn:
+            st.session_state["fem_active_view"] = "3d"
+
+        # Default to plan view if not set
+        active_view = st.session_state.get("fem_active_view", "plan")
+
+        # Build utilization map for coloring
+        view_util_map = build_preview_utilization_map(fem_model_views, project)
+
+        # Visualization config (simplified for FEM Views section)
+        views_config = VisualizationConfig(
+            show_nodes=False,
+            show_supports=True,
+            show_loads=False,
+            show_labels=False,
+            show_slabs=True,
+            show_slab_mesh_grid=False,
+            show_ghost_columns=True,
+            grid_spacing=1.0,
+        )
+
+        # Display active view
+        if active_view == "plan":
+            plan_fig = create_plan_view(
+                fem_model_views,
+                config=views_config,
+                floor_elevation=selected_view_floor,
+                utilization=view_util_map,
+            )
+            st.plotly_chart(plan_fig, use_container_width=True)
+            # Legend at bottom
+            st.caption("**Legend:** Blue = Columns | Red = Beams | Orange = Secondary Beams | Gray = Core Walls")
+
+        elif active_view == "elevation":
+            elev_direction = st.radio(
+                "Direction",
+                options=["X", "Y"],
+                horizontal=True,
+                key="fem_view_elev_dir"
+            )
+            elev_fig = create_elevation_view(
+                fem_model_views,
+                config=views_config,
+                view_direction=elev_direction,
+                utilization=view_util_map,
+            )
+            st.plotly_chart(elev_fig, use_container_width=True)
+            # Legend at bottom
+            st.caption("**Legend:** Blue = Columns | Red = Beams | Green = Supports | Dashed = Floor lines")
+
+        elif active_view == "3d":
+            view3d_fig = create_3d_view(
+                fem_model_views,
+                config=views_config,
+                utilization=view_util_map,
+            )
+            st.plotly_chart(view3d_fig, use_container_width=True)
+            # Legend at bottom
+            st.caption("**Legend:** Blue = Columns | Red/Orange = Beams | Gray = Core Walls | Green = Supports")
+
+    except Exception as exc:
+        st.warning(f"FEM Views unavailable: {exc}")
+
     # Visualizations Row
     st.markdown("### Structural Layout")
-    col1, col2 = st.columns(2)
-
-    with col1:
+    
+    # Show lateral diagram only if legacy views are enabled
+    show_legacy_views = os.getenv("PRELIMSTRUCT_SHOW_LEGACY_VIEWS", "0") == "1"
+    
+    if show_legacy_views:
+        col1, col2 = st.columns(2)
+        with col1:
+            grid_fig = create_framing_grid(project, secondary_along_x, num_secondary_beams)
+            st.plotly_chart(grid_fig, use_container_width=True)
+        with col2:
+            lateral_fig = create_lateral_diagram(project)
+            st.plotly_chart(lateral_fig, use_container_width=True)
+    else:
+        # Full-width framing grid when lateral diagram is hidden
         grid_fig = create_framing_grid(project, secondary_along_x, num_secondary_beams)
         st.plotly_chart(grid_fig, use_container_width=True)
 
+    # FEM Analysis & Preview
+    st.markdown("### FEM Analysis")
+    st.caption("Preview the FEM model and optionally overlay OpenSees analysis results.")
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        show_nodes = st.checkbox("Show nodes", value=False, key="fem_preview_show_nodes")
     with col2:
-        lateral_fig = create_lateral_diagram(project)
-        st.plotly_chart(lateral_fig, use_container_width=True)
+        show_supports = st.checkbox("Show supports", value=True, key="fem_preview_show_supports")
+    with col3:
+        show_loads = st.checkbox("Show loads", value=True, key="fem_preview_show_loads")
+    with col4:
+        show_labels = st.checkbox("Show labels", value=False, key="fem_preview_show_labels")
+
+    col5, col6 = st.columns(2)
+    with col5:
+        show_slabs = st.checkbox("Show slab elements", value=True, key="fem_preview_show_slabs")
+    with col6:
+        show_slab_mesh = st.checkbox("Show mesh grid", value=True, key="fem_preview_show_slab_mesh")
+
+    show_ghost_columns = st.checkbox(
+        "Show omitted columns (ghost)", 
+        value=True, 
+        key="fem_preview_show_ghost"
+    )
+
+    include_wind = st.checkbox(
+        "Include wind loads in preview",
+        value=True,
+        key="fem_preview_include_wind",
+    )
+
+    try:
+        options = ModelBuilderOptions(
+            include_core_wall=True,
+            trim_beams_at_core=True,
+            apply_gravity_loads=True,
+            apply_wind_loads=include_wind,
+            apply_rigid_diaphragms=True,
+            secondary_beam_direction="X" if secondary_along_x else "Y",
+            num_secondary_beams=num_secondary_beams,
+            omit_columns_near_core=True, # Enable the logic
+            suggested_omit_columns=[col for col, omit in st.session_state.get("omit_columns", {}).items() if omit]
+        )
+        fem_model = build_fem_model(project, options)
+        stats = get_model_statistics(fem_model)
+        floor_levels = stats.get("floor_elevations", [])
+        if floor_levels:
+            selected_floor = st.selectbox(
+                "Floor elevation (m)",
+                options=floor_levels,
+                index=len(floor_levels) - 1,
+                format_func=lambda z: f"Z = {z:.2f} m",
+                key="fem_preview_floor_level",
+            )
+        else:
+            selected_floor = None
+
+        # Task 20.5a - Model Statistics and Slab Load Display
+        st.markdown("#### Model Statistics")
+        stat_cols = st.columns(6)
+        stat_cols[0].metric("Nodes", stats["n_nodes"])
+        stat_cols[1].metric("Elements", stats["n_elements"])
+        stat_cols[2].metric("Loads", stats["n_loads"])
+        stat_cols[3].metric("Surface Loads", stats.get("n_surface_loads", 0))
+
+        # Add Slab Design Load Metric
+        if fem_model and options.include_slabs and fem_model.surface_loads:
+            # Get pressure from first surface load (assume uniform)
+            pressure_pa = fem_model.surface_loads[0].pressure
+            slab_load_kpa = pressure_pa / 1000.0  # Convert Pa -> kPa
+            stat_cols[4].metric("Slab Load", f"{slab_load_kpa:.2f} kPa")
+            
+            # Also add to sidebar as requested
+            st.sidebar.divider()
+            st.sidebar.markdown("##### FEM Slab Load")
+            st.sidebar.metric("Design Surface Load", f"{slab_load_kpa:.2f} kPa")
+
+        # Visualization controls
+        st.markdown("#### Visualization Settings")
+        viz_col1, viz_col2 = st.columns(2)
+        with viz_col1:
+            view_color_mode = st.selectbox(
+                "Color Scheme",
+                options=["Element Type", "Utilization"],
+                index=0,
+                help="Select coloring based on Element Type (Geometry) or Utilization Ratio",
+                key="fem_preview_color_mode"
+            )
+        with viz_col2:
+            grid_spacing = st.slider(
+                "Grid Spacing (m)",
+                min_value=0.5,
+                max_value=5.0,
+                value=1.0,
+                step=0.5,
+                help="Adjust the spacing of grid lines in Plan and Elevation views",
+                key="fem_preview_grid_spacing"
+            )
+
+        util_map = build_preview_utilization_map(fem_model, project)
+        # If Element Type mode is selected, ignore utilization map for coloring
+        if view_color_mode == "Element Type":
+            util_map = {}
+        preview_config = VisualizationConfig(
+            show_nodes=show_nodes,
+            show_supports=show_supports,
+            show_loads=show_loads,
+            show_labels=show_labels,
+            show_slabs=show_slabs,
+            show_slab_mesh_grid=show_slab_mesh,
+            show_ghost_columns=show_ghost_columns,
+            grid_spacing=grid_spacing,
+        )
+
+        analysis_col1, analysis_col2 = st.columns(2)
+        with analysis_col1:
+            overlay_analysis = st.checkbox(
+                "Overlay OpenSees results (deflection/reactions)",
+                value=False,
+                key="fem_preview_overlay_analysis",
+            )
+        with analysis_col2:
+            analysis_pattern = st.selectbox(
+                "Analysis load pattern",
+                options=[options.gravity_load_pattern, options.wind_load_pattern],
+                index=0,
+                key="fem_preview_analysis_pattern",
+            )
+
+        if st.button("Run FEM Analysis", key="fem_preview_run_analysis"):
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            status_text.text("Building FEM model...")
+            progress_bar.progress(0.3)
+
+            status_text.text("Running OpenSees analysis...")
+            result = analyze_model(fem_model, load_pattern=analysis_pattern)
+            progress_bar.progress(0.8)
+
+            status_text.text("Extracting results...")
+            progress_bar.progress(1.0)
+            st.session_state["fem_preview_analysis_result"] = result
+            st.session_state["fem_preview_analysis_message"] = result.message
+
+        analysis_result = st.session_state.get("fem_preview_analysis_result")
+        analysis_message = st.session_state.get("fem_preview_analysis_message")
+
+        if analysis_message:
+            status = "success" if analysis_result and analysis_result.success else "warning"
+            if status == "success":
+                st.success(analysis_message)
+            else:
+                st.warning(analysis_message)
+
+        displaced_nodes = None
+        reactions = None
+        if overlay_analysis and analysis_result and analysis_result.success:
+            displaced_nodes = _analysis_result_to_displacements(analysis_result)
+            reactions = analysis_result.node_reactions
+
+        plan_tab, elevation_tab, view3d_tab = st.tabs(
+            ["Plan View", "Elevation View", "3D View"]
+        )
+
+        with plan_tab:
+            plan_fig = create_plan_view(
+                fem_model,
+                config=preview_config,
+                floor_elevation=selected_floor,
+                utilization=util_map,
+            )
+            st.plotly_chart(plan_fig, use_container_width=True)
+            if view_color_mode == "Utilization":
+                st.caption("Color scale uses preliminary design utilizations.")
+            else:
+                st.caption("Colors represent element types (Primary=Blue, Secondary=Orange, Beams=Red).")
+
+        with elevation_tab:
+            view_direction = st.radio(
+                "Elevation direction",
+                options=["X", "Y"],
+                horizontal=True,
+                key="fem_preview_elevation_direction",
+            )
+            elev_fig = create_elevation_view(
+                fem_model,
+                config=preview_config,
+                view_direction=view_direction,
+                utilization=util_map,
+                displaced_nodes=displaced_nodes,
+                reactions=reactions,
+            )
+            st.plotly_chart(elev_fig, use_container_width=True)
+            if displaced_nodes:
+                st.caption("Deflected shape and reactions use OpenSees results.")
+            elif view_color_mode == "Utilization":
+                st.caption("Floor lines reflect preliminary design utilizations.")
+            else:
+                st.caption("Colors represent element types.")
+
+        with view3d_tab:
+            view3d_fig = create_3d_view(
+                fem_model,
+                config=preview_config,
+                utilization=util_map,
+                displaced_nodes=displaced_nodes,
+                reactions=reactions,
+            )
+            st.plotly_chart(view3d_fig, use_container_width=True)
+            if displaced_nodes:
+                st.caption("3D view includes OpenSees deflected shape and reactions.")
+            elif view_color_mode == "Utilization":
+                st.caption("3D view uses preliminary design utilizations.")
+            else:
+                st.caption("Colors represent element types.")
+
+        # Export images
+        st.markdown("#### Export Visualization")
+        export_view = st.selectbox(
+            "Select view to export",
+            options=["Plan View", "Elevation View", "3D View"],
+            key="fem_export_view",
+        )
+        export_format = st.selectbox(
+            "Image format",
+            options=["png", "svg", "pdf"],
+            index=0,
+            key="fem_export_format",
+        )
+        export_fig = plan_fig if export_view == "Plan View" else elev_fig if export_view == "Elevation View" else view3d_fig
+        try:
+            from src.fem.visualization import export_plotly_figure_image
+            image_bytes = export_plotly_figure_image(export_fig, format=export_format)
+            st.download_button(
+                label="Download Image",
+                data=image_bytes,
+                file_name=f"fem_{export_view.replace(' ', '_').lower()}.{export_format}",
+                mime=f"image/{export_format}",
+                use_container_width=True,
+            )
+        except Exception as exc:
+            st.warning(f"Image export unavailable: {exc}")
+    except Exception as exc:
+        st.warning(f"FEM preview unavailable: {exc}")
 
     # Detailed Results
     st.markdown("### Detailed Results")
@@ -1462,7 +2268,7 @@ def main():
             with col1:
                 st.markdown(f"""
                 **Slab Design Summary**
-                - Type: {project.slab_design.slab_type.value}
+                - Type: Solid Slab (One-Way)
                 - Thickness: **{project.slab_result.thickness} mm**
                 - Design Moment: {project.slab_result.moment:.1f} kNm/m
                 - Reinforcement: {project.slab_result.reinforcement_area:.0f} mm²/m
@@ -1636,7 +2442,7 @@ def main():
     st.divider()
     st.markdown("""
     <p style="text-align: center; color: #94A3B8; font-size: 12px;">
-        PrelimStruct v2.1 | HK Code 2013 + Wind Code 2019 | For preliminary design only
+        PrelimStruct v3.0 | FEM + AI-Assisted Design | HK Code 2013 + Wind Code 2019
     </p>
     """, unsafe_allow_html=True)
 
