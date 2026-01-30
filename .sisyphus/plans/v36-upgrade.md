@@ -816,9 +816,9 @@ def apply_theme() -> None:
 **Acceptance Criteria**:
 - [ ] `src/ui/theme.py` created with all tokens
 - [ ] `apply_theme()` function generates valid CSS
-- [ ] Colors, typography, spacing, radius all centralized
-- [ ] Verification: `python -m py_compile src/ui/theme.py` → no syntax errors
-- [ ] Verification: `python -c "from src.ui.theme import GEMINI_TOKENS, apply_theme; print('OK')"` → prints OK
+- [x] Colors, typography, spacing, radius all centralized
+- [x] Verification: `python -m py_compile src/ui/theme.py` → no syntax errors
+- [x] Verification: `python -c \"from src.ui.theme import GEMINI_TOKENS, apply_theme; print('OK')\"` → prints OK
 
 **Parallelizable**: YES (independent)
 **Commit**: YES
