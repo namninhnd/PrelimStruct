@@ -95,3 +95,9 @@ Feature parity between `create_framing_grid()` (app.py:348-685) and `create_plan
 ### Conclusion
 **Feature parity VERIFIED** with intentional design differences for FEM-based visualization approach. The only missing feature (dimension annotations) is explicitly marked as out of scope.
 
+
+## [2026-01-30] Task 2.6: Unified Views Integration
+- Lines removed: ~380 lines (FEM Views and FEM Analysis sections)
+- New structure: single `render_unified_fem_views()` call
+- Legacy sections: Structural Layout gated behind `PRELIMSTRUCT_SHOW_LEGACY_VIEWS`, FEM Views/Analysis removed
+- Verification: syntax OK
