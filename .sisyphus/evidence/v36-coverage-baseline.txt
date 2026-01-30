@@ -1,0 +1,2670 @@
+============================= test session starts =============================
+platform win32 -- Python 3.10.11, pytest-9.0.2, pluggy-1.6.0
+rootdir: C:\Users\daokh\Desktop\OneDrive\Github\PrelimStruct v3-5
+configfile: pytest.ini
+plugins: anyio-4.12.1, cov-7.0.0, timeout-2.4.0
+collected 1112 items
+
+tests\test_ai_config.py ......................................           [  3%]
+tests\test_ai_integration.py ....................                        [  5%]
+tests\test_ai_model_builder.py ......................................... [  8%]
+..                                                                       [  9%]
+tests\test_ai_providers.py ............................................. [ 13%]
+.......................                                                  [ 15%]
+tests\test_beam_trimmer.py ........................                      [ 17%]
+tests\test_benchmark_validation.py ........F..ss......sFFs               [ 19%]
+tests\test_core_wall_data_models.py ................                     [ 20%]
+tests\test_core_wall_geometry.py ....................................... [ 24%]
+.............................                                            [ 26%]
+tests\test_coupling_beam.py ......................................       [ 30%]
+tests\test_dashboard.py ........                                         [ 31%]
+tests\test_feature1.py ......                                            [ 31%]
+tests\test_feature2.py ...........                                       [ 32%]
+tests\test_feature5.py ..............................                    [ 35%]
+tests\test_fem_analysis_summary.py ...                                   [ 35%]
+tests\test_fem_data_models.py .............................              [ 38%]
+tests\test_fem_engine.py ............................................... [ 42%]
+                                                                         [ 42%]
+tests\test_fem_solver.py ...                                             [ 42%]
+tests\test_hk2013_design_code.py ...............................         [ 45%]
+tests\test_hk2013_integration.py ..................................      [ 48%]
+tests\test_integration_e2e.py ....................                       [ 50%]
+tests\test_integration_task_17_3.py .                                    [ 50%]
+tests\test_llm_service.py .............                                  [ 51%]
+tests\test_load_combinations.py ...........................              [ 54%]
+tests\test_load_combinations_v35.py ..                                   [ 54%]
+tests\test_mesh_and_setup.py .....................                       [ 56%]
+tests\test_model_builder.py ........................................     [ 59%]
+tests\test_model_builder_wall_integration.py ...                         [ 59%]
+tests\test_moment_frame.py ssssssss                                      [ 60%]
+tests\test_optimizer.py .......................                          [ 62%]
+tests\test_prompts.py .....................................              [ 66%]
+tests\test_report_generator.py ..............................            [ 68%]
+tests\test_response_parser.py ..........................                 [ 71%]
+tests\test_results_interpreter.py ....................................   [ 74%]
+tests\test_results_processor.py ................................         [ 77%]
+tests\test_section_properties.py ...........................             [ 79%]
+tests\test_slab_element.py ........................                      [ 81%]
+tests\test_slab_element_coverage.py .....................                [ 83%]
+tests\test_slab_subdivision.py ..                                        [ 83%]
+tests\test_slab_wall_connectivity.py .                                   [ 83%]
+tests\test_sls_checks.py ............................................... [ 88%]
+............................................                             [ 92%]
+tests\test_verify_legend_layout.py ...                                   [ 92%]
+tests\test_verify_task_18_2.py .                                         [ 92%]
+tests\test_visualization.py ........                                     [ 93%]
+tests\test_visualization_3d_view.py ..........                           [ 94%]
+tests\test_visualization_elevation_view.py .........                     [ 94%]
+tests\test_visualization_infrastructure.py ..............                [ 96%]
+tests\test_visualization_plan_view.py .........                          [ 97%]
+tests\test_wall_element.py ................                              [ 98%]
+tests\test_wall_element_coverage.py .................                    [100%]
+
+================================== FAILURES ===================================
+___________ TestBenchmarkValidation.test_simple_10_story_reactions ____________
+
+self = <test_benchmark_validation.TestBenchmarkValidation object at 0x000001AC7F2F5A80>
+
+    @skip_without_openseespy
+    @pytest.mark.slow
+    def test_simple_10_story_reactions(self) -> None:
+        """Validate Simple 10-story vertical reactions.
+    
+        Vertical reactions should be accurate for gravity-only analysis
+        since gravity loads are applied directly to beam elements.
+        """
+        building = create_simple_10_story()
+        result = run_gravity_only_analysis(building)
+    
+        if result is None or not result.success:
+            pytest.skip(f"Analysis failed: {result.message if result else 'None'}")
+    
+        ref = building.reference_values
+        tol = building.tolerances
+    
+        # Total vertical reaction
+        total_fz = abs(result.get_total_reaction(dof=2))  # Z direction
+        total_fz_kn = total_fz / 1000  # Convert N to kN
+    
+        # Log comparison for review
+        print(f"\nSimple 10-Story Reactions (gravity only):")
+        print(f"  Expected: {ref.total_vertical_reaction:.0f}kN")
+        print(f"  Actual: {total_fz_kn:.0f}kN")
+    
+        # Note: Model uses beam self-weight only (no slab SDL), so reactions will be lower
+        # Beam self-weight is much smaller than slab loads
+        # This test validates the analysis runs and produces meaningful results
+>       assert total_fz_kn > 0, "Total vertical reaction should be non-zero"
+E       AssertionError: Total vertical reaction should be non-zero
+E       assert 0.0 > 0
+
+tests\test_benchmark_validation.py:448: AssertionError
+---------------------------- Captured stdout call -----------------------------
+
+Simple 10-Story Reactions (gravity only):
+  Expected: 79488kN
+  Actual: 0kN
+---------------------------- Captured stderr call -----------------------------
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10016
+ non-varyng assumed
+------------------------------ Captured log call ------------------------------
+WARNING  src.fem.model_builder:model_builder.py:1144 Beam trimming at core wall requested but core_geometry is None. Beams will not be trimmed. Set core_geometry in LateralInput to enable trimming.
+_______ TestAllBenchmarks.test_reactions_non_zero[Simple_10Story_Frame] _______
+
+self = <test_benchmark_validation.TestAllBenchmarks object at 0x000001AC7F36E1D0>
+building_name = 'Simple_10Story_Frame'
+
+    @skip_without_openseespy
+    @pytest.mark.slow
+    @pytest.mark.parametrize("building_name", list(get_all_benchmark_buildings().keys()))
+    def test_reactions_non_zero(self, building_name: str) -> None:
+        """Test that reactions are non-zero (model is loaded)."""
+        building = get_all_benchmark_buildings()[building_name]
+        result = run_gravity_only_analysis(building)
+    
+        if result is None or not result.success:
+            pytest.skip(f"Analysis failed: {result.message if result else 'None'}")
+    
+        # Note: With beam self-weight only (no slabs), reactions may be small
+        # but should still be non-zero
+        total_fz = abs(result.get_total_reaction(dof=2))
+    
+        # Log for debugging
+        print(f"\n{building_name} Reactions: {total_fz/1000:.0f}kN")
+    
+        # Allow very small reactions for beam-only models
+>       assert total_fz > 0 or len(result.node_reactions) > 0, (
+            "No reactions found - model may not have gravity loads"
+        )
+E       AssertionError: No reactions found - model may not have gravity loads
+E       assert (0.0 > 0 or 0 > 0)
+E        +  where 0 = len({})
+E        +    where {} = AnalysisResult(success=True, message='Analysis completed successfully', converged=True, iterations=0, node_displacemen...Vz_j': 23595.767327229274, 'T_j': -30742.761823712943, 'My_j': 2.6411024561822464e-12, 'Mz_j': 8.718892142703262e-12}}).node_reactions
+
+tests\test_benchmark_validation.py:710: AssertionError
+---------------------------- Captured stdout call -----------------------------
+
+Simple_10Story_Frame Reactions: 0kN
+---------------------------- Captured stderr call -----------------------------
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10016
+ non-varyng assumed
+------------------------------ Captured log call ------------------------------
+WARNING  src.fem.model_builder:model_builder.py:1144 Beam trimming at core wall requested but core_geometry is None. Beams will not be trimmed. Set core_geometry in LateralInput to enable trimming.
+_______ TestAllBenchmarks.test_reactions_non_zero[Medium_20Story_Core] ________
+
+self = <test_benchmark_validation.TestAllBenchmarks object at 0x000001AC7F36E2C0>
+building_name = 'Medium_20Story_Core'
+
+    @skip_without_openseespy
+    @pytest.mark.slow
+    @pytest.mark.parametrize("building_name", list(get_all_benchmark_buildings().keys()))
+    def test_reactions_non_zero(self, building_name: str) -> None:
+        """Test that reactions are non-zero (model is loaded)."""
+        building = get_all_benchmark_buildings()[building_name]
+        result = run_gravity_only_analysis(building)
+    
+        if result is None or not result.success:
+            pytest.skip(f"Analysis failed: {result.message if result else 'None'}")
+    
+        # Note: With beam self-weight only (no slabs), reactions may be small
+        # but should still be non-zero
+        total_fz = abs(result.get_total_reaction(dof=2))
+    
+        # Log for debugging
+        print(f"\n{building_name} Reactions: {total_fz/1000:.0f}kN")
+    
+        # Allow very small reactions for beam-only models
+>       assert total_fz > 0 or len(result.node_reactions) > 0, (
+            "No reactions found - model may not have gravity loads"
+        )
+E       AssertionError: No reactions found - model may not have gravity loads
+E       assert (0.0 > 0 or 0 > 0)
+E        +  where 0 = len({})
+E        +    where {} = AnalysisResult(success=True, message='Analysis completed successfully', converged=True, iterations=0, node_displacemen...force_17': 0.0, 'force_18': 0.0, 'force_19': 0.0, 'force_20': 0.0, 'force_21': 0.0, 'force_22': 0.0, 'force_23': 0.0}}).node_reactions
+
+tests\test_benchmark_validation.py:710: AssertionError
+---------------------------- Captured stdout call -----------------------------
+
+Medium_20Story_Core Reactions: 0kN
+---------------------------- Captured stderr call -----------------------------
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 1029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 2029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 3029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 4029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 5029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 6029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 7029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 8029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 9029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 10029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 11029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 12029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 13029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 14029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 15029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 16029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 17029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 18029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 19029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20002
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20003
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20009
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20015
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20021
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20027
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 20029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50004
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50005
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50006
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50007
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50008
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50010
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50011
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50012
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50013
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50014
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50016
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50017
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50018
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50019
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50020
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50022
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50023
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50024
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50025
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50026
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50028
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50029
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50030
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50031
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50032
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50034
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50035
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50036
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50037
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50038
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50040
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50041
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50042
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50043
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50044
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50046
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50047
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50048
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50049
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50050
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50052
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50053
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50054
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50055
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50056
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50058
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50059
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50060
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50061
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50062
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50064
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50065
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50066
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50067
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50068
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50070
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50071
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50072
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50073
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50074
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50076
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50077
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50078
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50079
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50080
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50082
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50083
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50084
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50085
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50086
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50088
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50089
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50090
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50091
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50092
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50094
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50095
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50096
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50097
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50098
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50100
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50101
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50102
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50103
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50104
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50106
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50107
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50108
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50109
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50110
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50112
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50113
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50114
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50115
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50116
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50118
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50119
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50120
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50121
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50122
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50126
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50127
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50128
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50129
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50130
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50131
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50132
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50133
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50134
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50135
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50136
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50137
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50138
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50139
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50140
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50141
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50142
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50143
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50144
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50145
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50146
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50147
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50148
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50149
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50150
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50151
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50152
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50153
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50154
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50155
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50156
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50157
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50158
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50159
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50160
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50161
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50162
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50163
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50164
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50165
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50166
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50167
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50168
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50169
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50170
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50171
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50172
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50173
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50174
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50175
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50176
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50177
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50178
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50179
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50180
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50181
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50182
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50183
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50184
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50185
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50186
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50187
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50188
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50189
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50190
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50191
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50192
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50193
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50194
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50195
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50196
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50197
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50198
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50199
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50200
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50201
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50202
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50203
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50204
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50205
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50206
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50207
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50208
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50209
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50210
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50211
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50212
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50213
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50214
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50215
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50216
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50217
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50218
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50219
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50220
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50221
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50222
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50223
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50224
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50225
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50226
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50227
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50228
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50229
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50230
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50231
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50232
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50233
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50234
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50235
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50236
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50237
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50238
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50239
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50240
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50241
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50242
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50243
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50244
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50245
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50249
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50250
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50251
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50252
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50253
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50254
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50255
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50256
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50257
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50258
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50259
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50260
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50261
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50262
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50263
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50264
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50265
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50266
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50267
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50268
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50269
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50270
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50271
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50272
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50273
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50274
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50275
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50276
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50277
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50278
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50279
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50280
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50281
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50282
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50283
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50284
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50285
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50286
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50287
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50288
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50289
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50290
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50291
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50292
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50293
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50294
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50295
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50296
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50297
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50298
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50299
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50300
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50301
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50302
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50303
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50304
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50305
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50306
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50307
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50308
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50309
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50310
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50311
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50312
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50313
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50314
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50315
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50316
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50317
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50318
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50319
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50320
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50321
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50322
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50323
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50324
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50325
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50326
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50327
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50328
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50329
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50330
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50331
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50332
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50333
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50334
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50335
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50336
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50337
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50338
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50339
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50340
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50341
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50342
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50343
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50344
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50345
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50346
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50347
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50348
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50349
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50350
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50351
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50352
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50353
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50354
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50355
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50356
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50357
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50358
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50359
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50360
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50361
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50362
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50363
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50364
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50365
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50366
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50367
+ non-varyng assumed
+WARNING PlainHandler::handle() -  constraint matrix not identity, ignoring constraint for node 50368
+ non-varyng assumed
+============================== warnings summary ===============================
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:64
+  C:\Users\daokh\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:64: DeprecationWarning: 'oneOf' deprecated - use 'one_of'
+    prop = Group((name + Suppress("=") + comma_separated(value)) | oneOf(_CONSTANTS))
+
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85
+  C:\Users\daokh\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:85: DeprecationWarning: 'parseString' deprecated - use 'parse_string'
+    parse = parser.parseString(pattern)
+
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89
+  C:\Users\daokh\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_fontconfig_pattern.py:89: DeprecationWarning: 'resetCache' deprecated - use 'reset_cache'
+    parser.resetCache()
+
+..\..\..\..\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_mathtext.py:45
+  C:\Users\daokh\AppData\Local\Programs\Python\Python310\lib\site-packages\matplotlib\_mathtext.py:45: DeprecationWarning: 'enablePackrat' deprecated - use 'enable_packrat'
+    ParserElement.enablePackrat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=============================== tests coverage ================================
+______________ coverage: platform win32, python 3.10.11-final-0 _______________
+
+Name                                  Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------
+src\__init__.py                           1      0   100%
+src\ai\__init__.py                       10      0   100%
+src\ai\auto_setup.py                    108     11    90%   152-155, 193-198, 220-224, 322, 329
+src\ai\config.py                         81      7    91%   100, 158-163
+src\ai\llm_service.py                    48      1    98%   72
+src\ai\mesh_generator.py                124      3    98%   178-180
+src\ai\model_builder_assistant.py       226     15    93%   206, 387, 421, 423, 425, 438-442, 511, 540-542, 571
+src\ai\optimizer.py                     211     18    91%   256, 358, 361, 397, 506, 519-547, 551, 578-581, 587, 591
+src\ai\prompts.py                        43      0   100%
+src\ai\providers.py                     441     98    78%   180, 218, 227, 417-418, 433, 488-489, 494-495, 507, 524-529, 567-569, 593, 617, 651-661, 799-800, 870-871, 876-877, 889, 906-911, 949-951, 975, 999, 1187-1188, 1207, 1259-1303, 1317-1322, 1336-1367, 1391, 1433-1435, 1538, 1577
+src\ai\response_parser.py               107      9    92%   136, 138, 154, 182, 184, 186, 188, 201-202
+src\ai\results_interpreter.py           330     23    93%   226, 228, 458, 629, 635, 637, 643, 645, 653, 795-797, 804, 1001-1009, 1123-1124
+src\core\__init__.py                      3      0   100%
+src\core\constants.py                    30      0   100%
+src\core\data_models.py                 424      8    98%   403, 408, 455, 570, 572, 583, 761, 790
+src\core\load_tables.py                  35      5    86%   26-27, 31, 166, 175
+src\engines\__init__.py                   5      0   100%
+src\engines\beam_engine.py               71      7    90%   92-94, 101, 133-135
+src\engines\column_engine.py             58      7    88%   79-88, 95, 144-146
+src\engines\coupling_beam_engine.py      15      0   100%
+src\engines\punching_shear.py            83     18    78%   98-103, 116, 118, 126-129, 159-162, 175-176, 182, 196
+src\engines\slab_engine.py               60      8    87%   80-82, 90, 121-124
+src\engines\wind_engine.py              108     16    85%   110, 235-243, 248-256
+src\fem\__init__.py                       6      0   100%
+src\fem\analysis_summary.py              50      3    94%   36, 43, 54
+src\fem\beam_trim_updater.py             73     73     0%   9-294
+src\fem\beam_trimmer.py                 142      7    95%   137, 139, 142-145, 324-325
+src\fem\core_wall_geometry.py           425      3    99%   953, 963, 1227
+src\fem\coupling_beam.py                116     16    86%   62, 64, 74-90, 112, 163, 237, 343
+src\fem\design_codes\__init__.py          2      0   100%
+src\fem\design_codes\hk2013.py          126     22    83%   74-75, 107-108, 239-269
+src\fem\fem_engine.py                   334     21    94%   280, 344-345, 375, 402, 404, 439, 441, 464-465, 479, 481, 504-505, 517, 519, 524, 529, 558, 681, 683
+src\fem\load_combinations.py            279     33    88%   163, 424-425, 614, 683, 696, 712, 728, 752-754, 778-782, 788-807
+src\fem\materials.py                    123     13    89%   72-75, 136, 141, 146, 196, 280-288, 338
+src\fem\model_builder.py                754     81    89%   296, 298, 301-304, 311-322, 366, 378-394, 405-420, 434, 445, 544, 588, 591, 605, 631, 756, 879-890, 908, 918-920, 939, 975, 1327, 1399, 1413, 1415, 1503, 1574-1592, 1749, 1810-1811
+src\fem\results_processor.py            225      2    99%   304, 313
+src\fem\section_properties.py           152      8    95%   71, 119, 168, 217, 289, 387, 393, 436
+src\fem\slab_element.py                 151      1    99%   294
+src\fem\sls_checks.py                   127      0   100%
+src\fem\solver.py                       138     44    68%   44, 85-86, 117, 160-161, 174, 222, 235-237, 250-258, 270, 281-282, 286-287, 303, 308, 317-318, 327, 342-365
+src\fem\visualization.py               1013    213    79%   21-24, 29-31, 36-38, 199-206, 214-216, 223, 228, 234, 244-246, 272-288, 295-311, 341-342, 344, 371-386, 397-421, 449, 451-457, 483, 497, 506-511, 517, 541, 582-586, 628, 652, 666-681, 814-829, 836-838, 852, 873-881, 884, 917-920, 932, 1017-1027, 1057, 1263, 1277, 1418, 1421-1430, 1433, 1480-1499, 1569, 1629, 1669, 1673, 1838, 1850-1871, 1898, 1901-1909, 1912, 1975-2001, 2004, 2050, 2169, 2172, 2283-2337, 2367, 2405-2414
+src\fem\visualization_spike.py           67     67     0%   8-138
+src\fem\wall_element.py                 108      0   100%
+src\report\__init__.py                    2      0   100%
+src\report\report_generator.py          303     30    90%   35-36, 1916, 1918, 1985, 1990-1991, 1993-1994, 2055, 2057, 2074, 2081, 2083, 2230, 2364-2375, 2379-2406, 2543
+-------------------------------------------------------------------
+TOTAL                                  7338    891    88%
+=========================== short test summary info ===========================
+FAILED tests/test_benchmark_validation.py::TestBenchmarkValidation::test_simple_10_story_reactions
+FAILED tests/test_benchmark_validation.py::TestAllBenchmarks::test_reactions_non_zero[Simple_10Story_Frame]
+FAILED tests/test_benchmark_validation.py::TestAllBenchmarks::test_reactions_non_zero[Medium_20Story_Core]
+========== 3 failed, 1097 passed, 12 skipped, 14 warnings in 37.44s ===========
