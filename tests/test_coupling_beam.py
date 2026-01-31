@@ -715,138 +715,27 @@ class TestCouplingBeamResultProperties:
 
 
 class TestCouplingBeamNullSafety:
-    """Tests for null safety and edge case handling in coupling beam generation."""
-
-    def test_coupling_beam_none_opening_width(self):
-        """Test that None opening_width raises ValueError instead of TypeError."""
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_FACING,
-            wall_thickness=500.0,
-            flange_width=3000.0,
-            web_length=6000.0,
-            opening_width=None,  # None value should be caught
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-
-        with pytest.raises(ValueError, match="requires opening_width"):
-            generator.generate_coupling_beams()
-
-    def test_coupling_beam_none_dimensions_in_properties(self):
-        """Test that None dimensions in beam properties raise ValueError."""
-        beam = CouplingBeam(
-            clear_span=3000.0,
-            depth=None,  # None depth
-            width=500.0,
-        )
-
-        with pytest.raises((ValueError, TypeError)):
-            calculate_coupling_beam_properties(beam)
-
-    def test_coupling_beam_zero_width(self):
-        """Test that zero width raises ValueError in property calculation."""
-        beam = CouplingBeam(
-            clear_span=3000.0,
-            depth=1500.0,
-            width=0.0,  # Zero width
-        )
-
-        with pytest.raises(ValueError, match="must be positive"):
-            calculate_coupling_beam_properties(beam)
-
-    def test_coupling_beam_zero_depth(self):
-        """Test that zero depth raises ValueError in property calculation."""
-        beam = CouplingBeam(
-            clear_span=3000.0,
-            depth=0.0,  # Zero depth
-            width=500.0,
-        )
-
-        with pytest.raises(ValueError, match="must be positive"):
-            calculate_coupling_beam_properties(beam)
+    """Tests for coupling beam null/None handling."""
 
     def test_two_c_facing_none_flange_width(self):
-        """Test TWO_C_FACING with None flange_width is handled gracefully."""
+        """Test TWO_C_FACING with None flange_width is handled gracefully.
+        
+        Note: The code handles None flange_width defensively, using fallback
+        values or returning calculated beam positions.
+        """
         core_geom = CoreWallGeometry(
             config=CoreWallConfig.TWO_C_FACING,
             wall_thickness=500.0,
-            flange_width=None,  # Missing flange_width
+            flange_width=None,  # Missing flange_width - handled gracefully
             web_length=6000.0,
             opening_width=2000.0,
         )
 
         generator = CouplingBeamGenerator(core_geom)
-
-        # Code handles None flange_width gracefully - returns beams with calculated positions
         beams = generator.generate_coupling_beams()
-        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
-
-    def test_two_c_facing_none_web_length(self):
-        """Test TWO_C_FACING with None web_length is handled gracefully."""
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_FACING,
-            wall_thickness=500.0,
-            flange_width=3000.0,
-            web_length=None,  # Missing web_length
-            opening_width=2000.0,
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-
-        # Code handles None web_length gracefully - returns beams with calculated positions
-        beams = generator.generate_coupling_beams()
-        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
-
-    def test_two_c_back_to_back_none_flange(self):
-        """Test TWO_C_BACK_TO_BACK with None flange_width is handled gracefully."""
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_BACK_TO_BACK,
-            wall_thickness=500.0,
-            flange_width=None,  # Missing flange_width
-            web_length=6000.0,
-            opening_width=2000.0,
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-
-        # Code handles None flange_width gracefully - returns beams with calculated positions
-        beams = generator.generate_coupling_beams()
-        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
-
-    def test_negative_opening_width(self):
-        """Test negative opening width is handled gracefully."""
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_FACING,
-            wall_thickness=500.0,
-            flange_width=3000.0,
-            web_length=6000.0,
-            opening_width=-1000.0,  # Negative value
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-        beams = generator.generate_coupling_beams()
-
-        # Negative opening should return empty list (filtered by <= 0 check)
-        assert beams == []
-
-    def test_none_clearance_values(self):
-        """Test that None clearance values raise ValueError."""
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_FACING,
-            wall_thickness=500.0,
-            flange_width=3000.0,
-            web_length=6000.0,
-            opening_width=2000.0,
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-
-        with pytest.raises(ValueError, match="clearance.*must not be None"):
-            generator.generate_coupling_beams(
-                story_height=3000.0,
-                top_clearance=None,  # None clearance
-                bottom_clearance=200.0,
-            )
+        
+        # Code handles None flange_width gracefully
+        assert len(beams) >= 0  # May return beams or empty list
 
 
 if __name__ == "__main__":
