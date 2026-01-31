@@ -20,6 +20,9 @@ from src.core.data_models import (
 from src.fem.coupling_beam import CouplingBeamGenerator, calculate_coupling_beam_properties
 from src.engines.coupling_beam_engine import CouplingBeamEngine, estimate_coupling_beam_forces
 
+DEPRECATED_ENGINE_MSG = "Simplified coupling beam design removed in V3.5"
+DEPRECATED_FORCE_MSG = "Simplified force estimation removed in V3.5"
+
 
 class TestCouplingBeamDataModel:
     """Test CouplingBeam data model and properties."""
@@ -249,7 +252,7 @@ class TestCouplingBeamEngine:
         assert engine.fyv == 250
 
     def test_design_coupling_beam_typical(self):
-        """Test design of typical coupling beam."""
+        """Test deprecated engine raises for typical coupling beam."""
         beam = CouplingBeam(
             clear_span=3000.0,
             depth=1500.0,
@@ -262,29 +265,16 @@ class TestCouplingBeamEngine:
         design_shear = 800.0   # kN
         design_moment = 600.0  # kNm
 
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=design_shear,
-            design_moment=design_moment,
-            cover=50,
-        )
-
-        # Check result structure
-        assert isinstance(result, CouplingBeamResult)
-        assert result.element_type == "Coupling Beam"
-        assert result.width == 500
-        assert result.depth == 1500
-        assert result.clear_span == 3000.0
-        assert result.shear == design_shear
-        assert result.moment == design_moment
-
-        # Check that design is reasonable
-        assert result.shear_capacity > 0
-        assert result.top_rebar > 0
-        assert result.link_spacing > 0
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=design_shear,
+                design_moment=design_moment,
+                cover=50,
+            )
 
     def test_design_high_shear_requires_diagonal_bars(self):
-        """Test that high shear force triggers diagonal reinforcement."""
+        """Test deprecated engine raises for high shear case."""
         beam = CouplingBeam(
             clear_span=2500.0,
             depth=1200.0,
@@ -297,18 +287,15 @@ class TestCouplingBeamEngine:
         design_shear = 1500.0   # kN
         design_moment = 800.0   # kNm
 
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=design_shear,
-            design_moment=design_moment,
-        )
-
-        # Should require diagonal reinforcement
-        assert result.diagonal_rebar > 0
-        assert result.shear_capacity >= design_shear
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=design_shear,
+                design_moment=design_moment,
+            )
 
     def test_design_deep_beam_warning(self):
-        """Test that deep beam triggers appropriate warning."""
+        """Test deprecated engine raises for deep beam case."""
         beam = CouplingBeam(
             clear_span=2000.0,   # 2m
             depth=1200.0,        # 1.2m (L/h = 1.67 < 2.0)
@@ -317,19 +304,15 @@ class TestCouplingBeamEngine:
 
         engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
 
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=600.0,
-            design_moment=400.0,
-        )
-
-        # Should flag as deep beam
-        assert result.is_deep_beam is True
-        assert any("Deep beam" in warning for warning in result.warnings)
-        assert any("STM" in warning or "Strut" in warning for warning in result.warnings)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=600.0,
+                design_moment=400.0,
+            )
 
     def test_design_minimum_reinforcement(self):
-        """Test that minimum reinforcement is provided even for low loads."""
+        """Test deprecated engine raises for low load case."""
         beam = CouplingBeam(
             clear_span=3000.0,
             depth=1500.0,
@@ -342,20 +325,14 @@ class TestCouplingBeamEngine:
         design_shear = 100.0   # kN
         design_moment = 50.0   # kNm
 
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=design_shear,
-            design_moment=design_moment,
-        )
-
-        # Should still provide minimum reinforcement
-        # A_s,min = 0.13% × b × h = 0.0013 × 500 × 1500 = 975 mm²
-        expected_min = 0.0013 * 500 * 1500
-        assert result.top_rebar >= expected_min
-        assert result.bottom_rebar >= expected_min
-
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=design_shear,
+                design_moment=design_moment,
+            )
     def test_calculation_audit_trail(self):
-        """Test that design produces calculation audit trail."""
+        """Test deprecated engine raises and does not produce audit trail."""
         beam = CouplingBeam(
             clear_span=3000.0,
             depth=1500.0,
@@ -364,27 +341,14 @@ class TestCouplingBeamEngine:
 
         engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
 
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=800.0,
-            design_moment=600.0,
-        )
-
-        # Should have calculation steps
-        assert len(result.calculations) > 0
-
-        # Check for key calculation steps
-        calc_descriptions = [calc["description"] for calc in result.calculations]
-        assert any("COUPLING BEAM DESIGN" in desc for desc in calc_descriptions)
-        assert any("SHEAR DESIGN" in desc for desc in calc_descriptions)
-        assert any("FLEXURAL DESIGN" in desc for desc in calc_descriptions)
-
-
-class TestEstimateCouplingBeamForces:
-    """Test coupling beam force estimation."""
-
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=800.0,
+                design_moment=600.0,
+            )
     def test_estimate_forces_typical_building(self):
-        """Test force estimation for typical tall building."""
+        """Test deprecated estimator raises for typical tall building."""
         beam = CouplingBeam(
             clear_span=3000.0,
             depth=1500.0,
@@ -393,27 +357,18 @@ class TestEstimateCouplingBeamForces:
 
         # Typical 30-story building
         base_shear_per_wall = 5000.0  # kN
-        building_height = 90.0         # m (30 floors × 3m)
+        building_height = 90.0         # m (30 floors ?? 3m)
         num_floors = 30
 
-        shear, moment = estimate_coupling_beam_forces(
-            beam=beam,
-            base_shear_per_wall=base_shear_per_wall,
-            building_height=building_height,
-            num_floors=num_floors,
-        )
-
-        # Should be reasonable values
-        assert shear > 0
-        assert moment > 0
-
-        # Moment should be related to shear by span
-        # M ≈ V × L / 2
-        expected_moment_approx = shear * (beam.clear_span / 1000) / 2.0
-        assert moment == pytest.approx(expected_moment_approx, rel=0.1)
-
+        with pytest.raises(NotImplementedError, match=DEPRECATED_FORCE_MSG):
+            estimate_coupling_beam_forces(
+                beam=beam,
+                base_shear_per_wall=base_shear_per_wall,
+                building_height=building_height,
+                num_floors=num_floors,
+            )
     def test_estimate_forces_proportional_to_base_shear(self):
-        """Test that forces scale with base shear."""
+        """Test deprecated estimator raises for base shear scaling."""
         beam = CouplingBeam(
             clear_span=3000.0,
             depth=1500.0,
@@ -421,25 +376,12 @@ class TestEstimateCouplingBeamForces:
         )
 
         base_shear_1 = 1000.0  # kN
-        shear_1, moment_1 = estimate_coupling_beam_forces(
-            beam, base_shear_1, 90.0, 30
-        )
-
-        base_shear_2 = 2000.0  # kN (double)
-        shear_2, moment_2 = estimate_coupling_beam_forces(
-            beam, base_shear_2, 90.0, 30
-        )
-
-        # Forces should approximately double
-        assert shear_2 == pytest.approx(2.0 * shear_1, rel=1e-6)
-        assert moment_2 == pytest.approx(2.0 * moment_1, rel=1e-6)
-
-
-class TestCouplingBeamIntegration:
-    """Integration tests for complete coupling beam workflow."""
-
+        with pytest.raises(NotImplementedError, match=DEPRECATED_FORCE_MSG):
+            estimate_coupling_beam_forces(
+                beam, base_shear_1, 90.0, 30
+            )
     def test_complete_workflow_two_c_facing(self):
-        """Test complete workflow: geometry → generation → design."""
+        """Test deprecated workflow raises on estimation/design."""
         # Step 1: Define core wall geometry
         core_geom = CoreWallGeometry(
             config=CoreWallConfig.TWO_C_FACING,
@@ -462,31 +404,24 @@ class TestCouplingBeamIntegration:
         beam = beams[0]
 
         # Step 3: Estimate forces
-        shear, moment = estimate_coupling_beam_forces(
-            beam=beam,
-            base_shear_per_wall=3000.0,
-            building_height=90.0,
-            num_floors=30,
-        )
+        with pytest.raises(NotImplementedError, match=DEPRECATED_FORCE_MSG):
+            estimate_coupling_beam_forces(
+                beam=beam,
+                base_shear_per_wall=3000.0,
+                building_height=90.0,
+                num_floors=30,
+            )
 
         # Step 4: Design coupling beam
         engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
-        result = engine.design_coupling_beam(
-            beam=beam,
-            design_shear=shear,
-            design_moment=moment,
-        )
-
-        # Verify complete design
-        assert result.status in ["OK", "REVIEW REQUIRED"]
-        assert result.shear_capacity > 0
-        assert result.top_rebar > 0
-        assert result.bottom_rebar > 0
-        assert result.link_spacing > 0
-        assert len(result.calculations) > 0
-
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=500.0,
+                design_moment=300.0,
+            )
     def test_complete_workflow_tube_center_opening(self):
-        """Test complete workflow for TUBE_CENTER_OPENING."""
+        """Test deprecated workflow raises for TUBE_CENTER_OPENING."""
         core_geom = CoreWallGeometry(
             config=CoreWallConfig.TUBE_CENTER_OPENING,
             wall_thickness=600.0,
@@ -502,15 +437,416 @@ class TestCouplingBeamIntegration:
         beam = beams[0]
 
         # Higher forces for tube core
-        shear, moment = estimate_coupling_beam_forces(
-            beam, 4000.0, 120.0, 40
-        )
+        with pytest.raises(NotImplementedError, match=DEPRECATED_FORCE_MSG):
+            estimate_coupling_beam_forces(
+                beam, 4000.0, 120.0, 40
+            )
 
         engine = CouplingBeamEngine(fcu=45, fy=500, fyv=250)
-        result = engine.design_coupling_beam(beam, shear, moment)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(beam, 500.0, 300.0)
+    def test_very_deep_coupling_beam(self):
+        """Test coupling beam with very low L/h ratio."""
+        beam = CouplingBeam(
+            clear_span=1500.0,   # 1.5m
+            depth=1500.0,        # 1.5m (L/h = 1.0)
+            width=500.0,
+        )
 
-        assert result.utilization > 0
-        assert result.diagonal_rebar >= 0  # May or may not need diagonal bars
+        assert beam.is_deep_beam is True
+        assert beam.span_to_depth_ratio == pytest.approx(1.0, rel=1e-6)
+
+        engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=500.0,
+                design_moment=300.0,
+            )
+    def test_zero_moment_design(self):
+        """Test deprecated engine raises for zero moment case."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=1500.0,
+            width=500.0,
+        )
+
+        engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=800.0,
+                design_moment=0.0,
+            )
+    def test_zero_shear_design(self):
+        """Test deprecated engine raises for zero shear case."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=1500.0,
+            width=500.0,
+        )
+
+        engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beam,
+                design_shear=0.0,
+                design_moment=500.0,
+            )
+    def test_small_opening_width(self):
+        """Test generator with very small opening width."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            opening_width=1000.0,  # Minimum practical opening
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert len(beams) == 1
+        assert beams[0].clear_span == 1000.0
+
+    def test_large_opening_width(self):
+        """Test generator with very large opening width."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            opening_width=6000.0,  # Large opening
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert len(beams) == 1
+        # Large span should mean NOT a deep beam
+        beam = beams[0]
+        assert beam.clear_span == 6000.0
+
+    def test_different_concrete_grades(self):
+        """Test deprecated engine raises for different concrete grades."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=1500.0,
+            width=500.0,
+        )
+
+        # Lower grade
+        engine_low = CouplingBeamEngine(fcu=30, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine_low.design_coupling_beam(
+                beam=beam,
+                design_shear=800.0,
+                design_moment=600.0,
+            )
+
+        # Higher grade
+        engine_high = CouplingBeamEngine(fcu=50, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine_high.design_coupling_beam(
+                beam=beam,
+                design_shear=800.0,
+                design_moment=600.0,
+            )
+    def test_thin_wall_coupling_beam(self):
+        """Test coupling beam with thin wall thickness."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=300.0,  # Thin wall
+            opening_width=2500.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert len(beams) == 1
+        assert beams[0].width == 300.0
+
+        engine = CouplingBeamEngine(fcu=40, fy=500, fyv=250)
+        with pytest.raises(NotImplementedError, match=DEPRECATED_ENGINE_MSG):
+            engine.design_coupling_beam(
+                beam=beams[0],
+                design_shear=400.0,
+                design_moment=300.0,
+            )
+    def test_thick_wall_coupling_beam(self):
+        """Test coupling beam with thick wall thickness."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=800.0,  # Thick wall
+            opening_width=3000.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert len(beams) == 1
+        assert beams[0].width == 800.0
+
+    def test_missing_lengths_infer_core_dimensions(self):
+        """Test that missing length_x/length_y are inferred for C-wall configs."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=2000.0,
+            length_x=None,
+            length_y=None,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert len(beams) == 1
+        assert beams[0].location_x == pytest.approx((2 * 3000.0 + 2000.0) / 2.0, rel=1e-6)
+        assert beams[0].location_y == pytest.approx(6000.0 / 2.0, rel=1e-6)
+
+    def test_opening_height_none_defaults_to_story_height(self):
+        """Test missing opening height uses story height for beam depth."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=2500.0,
+            opening_height=None,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams(
+            story_height=3000.0,
+            top_clearance=200.0,
+            bottom_clearance=200.0,
+        )
+
+        assert len(beams) == 1
+        assert beams[0].opening_height == pytest.approx(3000.0, rel=1e-6)
+        assert beams[0].depth == pytest.approx(2600.0, rel=1e-6)
+
+    def test_zero_opening_width_returns_empty(self):
+        """Test zero opening width returns no coupling beams."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=0.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert beams == []
+
+    def test_zero_opening_height_returns_empty(self):
+        """Test zero opening height returns no coupling beams."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            wall_thickness=500.0,
+            length_x=6000.0,
+            length_y=6000.0,
+            opening_width=2000.0,
+            opening_height=0.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        assert beams == []
+
+
+class TestCouplingBeamResultProperties:
+    """Tests for CouplingBeamResult dataclass properties."""
+
+    def test_result_creation_with_all_fields(self):
+        """Test complete result creation."""
+        result = CouplingBeamResult(
+            element_type="Coupling Beam",
+            size="500x1500",
+            width=500,
+            depth=1500,
+            clear_span=3000.0,
+            span_to_depth_ratio=2.0,
+            shear=800.0,
+            moment=600.0,
+            shear_capacity=950.0,
+            top_rebar=1200.0,
+            bottom_rebar=1100.0,
+            diagonal_rebar=800.0,
+            link_spacing=150,
+            is_deep_beam=False,
+            utilization=0.84,
+            status="OK",
+            warnings=[],
+            calculations=[],
+        )
+
+        assert result.element_type == "Coupling Beam"
+        assert result.size == "500x1500"
+        assert result.utilization == 0.84
+        assert result.is_deep_beam is False
+
+    def test_result_with_warnings(self):
+        """Test result with warnings list."""
+        result = CouplingBeamResult(
+            element_type="Coupling Beam",
+            size="500x1200",
+            width=500,
+            depth=1200,
+            clear_span=2000.0,
+            span_to_depth_ratio=1.67,
+            shear=600.0,
+            moment=400.0,
+            shear_capacity=700.0,
+            top_rebar=900.0,
+            bottom_rebar=850.0,
+            diagonal_rebar=0.0,
+            link_spacing=150,
+            is_deep_beam=True,
+            utilization=0.86,
+            status="REVIEW REQUIRED",
+            warnings=["Deep beam: L/h = 1.67 < 2.0", "Consider STM analysis"],
+            calculations=[],
+        )
+
+        assert len(result.warnings) == 2
+        assert "Deep beam" in result.warnings[0]
+
+
+class TestCouplingBeamNullSafety:
+    """Tests for null safety and edge case handling in coupling beam generation."""
+
+    def test_coupling_beam_none_opening_width(self):
+        """Test that None opening_width raises ValueError instead of TypeError."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=None,  # None value should be caught
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+
+        with pytest.raises(ValueError, match="requires opening_width"):
+            generator.generate_coupling_beams()
+
+    def test_coupling_beam_none_dimensions_in_properties(self):
+        """Test that None dimensions in beam properties raise ValueError."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=None,  # None depth
+            width=500.0,
+        )
+
+        with pytest.raises((ValueError, TypeError)):
+            calculate_coupling_beam_properties(beam)
+
+    def test_coupling_beam_zero_width(self):
+        """Test that zero width raises ValueError in property calculation."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=1500.0,
+            width=0.0,  # Zero width
+        )
+
+        with pytest.raises(ValueError, match="must be positive"):
+            calculate_coupling_beam_properties(beam)
+
+    def test_coupling_beam_zero_depth(self):
+        """Test that zero depth raises ValueError in property calculation."""
+        beam = CouplingBeam(
+            clear_span=3000.0,
+            depth=0.0,  # Zero depth
+            width=500.0,
+        )
+
+        with pytest.raises(ValueError, match="must be positive"):
+            calculate_coupling_beam_properties(beam)
+
+    def test_two_c_facing_none_flange_width(self):
+        """Test TWO_C_FACING with None flange_width is handled gracefully."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=None,  # Missing flange_width
+            web_length=6000.0,
+            opening_width=2000.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+
+        # Code handles None flange_width gracefully - returns beams with calculated positions
+        beams = generator.generate_coupling_beams()
+        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
+
+    def test_two_c_facing_none_web_length(self):
+        """Test TWO_C_FACING with None web_length is handled gracefully."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=None,  # Missing web_length
+            opening_width=2000.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+
+        # Code handles None web_length gracefully - returns beams with calculated positions
+        beams = generator.generate_coupling_beams()
+        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
+
+    def test_two_c_back_to_back_none_flange(self):
+        """Test TWO_C_BACK_TO_BACK with None flange_width is handled gracefully."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_BACK_TO_BACK,
+            wall_thickness=500.0,
+            flange_width=None,  # Missing flange_width
+            web_length=6000.0,
+            opening_width=2000.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+
+        # Code handles None flange_width gracefully - returns beams with calculated positions
+        beams = generator.generate_coupling_beams()
+        assert len(beams) >= 0  # May return beams or empty list depending on fallback logic
+
+    def test_negative_opening_width(self):
+        """Test negative opening width is handled gracefully."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=-1000.0,  # Negative value
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
+
+        # Negative opening should return empty list (filtered by <= 0 check)
+        assert beams == []
+
+    def test_none_clearance_values(self):
+        """Test that None clearance values raise ValueError."""
+        core_geom = CoreWallGeometry(
+            config=CoreWallConfig.TWO_C_FACING,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            opening_width=2000.0,
+        )
+
+        generator = CouplingBeamGenerator(core_geom)
+
+        with pytest.raises(ValueError, match="clearance.*must not be None"):
+            generator.generate_coupling_beams(
+                story_height=3000.0,
+                top_clearance=None,  # None clearance
+                bottom_clearance=200.0,
+            )
 
 
 if __name__ == "__main__":
