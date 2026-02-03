@@ -1,0 +1,116 @@
+{
+  "$schema": "building_definition_v1.0.json",
+  "id": "building_02",
+  "name": "20-Story Residential Building with Two-C-Facing Core",
+  "description": "Intermediate test case: 20-story residential building with Two-C-Facing core walls. Tests coupling beam behavior and moderate lateral loads.",
+  "category": "intermediate",
+  "complexity": "medium",
+  
+  "project_metadata": {
+    "project_name": "ETABS Validation - Building 02",
+    "project_number": "VAL-002",
+    "engineer": "Validation Test Suite",
+    "date": "2026-02-03"
+  },
+  
+  "geometry": {
+    "bay_x": 7.0,
+    "bay_y": 9.0,
+    "floors": 20,
+    "story_height": 3.2,
+    "num_bays_x": 4,
+    "num_bays_y": 3,
+    "max_slab_span": 7.0,
+    "total_height_m": 64.0,
+    "plan_dimensions_m": {
+      "x": 28.0,
+      "y": 27.0
+    }
+  },
+  
+  "loads": {
+    "live_load_class": "1",
+    "live_load_sub": "1.1",
+    "dead_load": 1.5,
+    "storage_height": 0,
+    "custom_live_load": null,
+    "live_load_value_kPa": 2.0,
+    "notes": "HK Code Table 3.1 Class 1 (Residential) - 2.0 kPa"
+  },
+  
+  "materials": {
+    "fcu_slab": 35,
+    "fcu_beam": 35,
+    "fcu_column": 50,
+    "fcu_wall": 50,
+    "fy": 500,
+    "fyv": 250,
+    "exposure": "2",
+    "notes": "Residential grades - higher column/wall grade for 20 stories"
+  },
+  
+  "lateral": {
+    "core_wall_config": "two_c_facing",
+    "wall_thickness_mm": 450,
+    "terrain": "C",
+    "building_width": 28.0,
+    "building_depth": 27.0,
+    "location_type": "Center",
+    "custom_center_x": null,
+    "custom_center_y": null
+  },
+  
+  "core_wall_geometry": {
+    "config": "two_c_facing",
+    "wall_thickness_mm": 450,
+    "length_x_mm": 7000,
+    "length_y_mm": 7000,
+    "opening_width_mm": 2000,
+    "opening_height_mm": 2400,
+    "flange_width_mm": 2000,
+    "web_length_mm": 7000
+  },
+  
+  "coupling_beams": {
+    "enabled": true,
+    "clear_span_mm": 2000,
+    "depth_mm": 800,
+    "width_mm": 450,
+    "notes": "Coupling beams span across core opening at each floor"
+  },
+  
+  "member_sizes": {
+    "slab_thickness_mm": 180,
+    "beam_width_mm": 350,
+    "beam_depth_mm": 550,
+    "column_dimension_mm": 700,
+    "notes": "Estimated initial sizes for 20-story building"
+  },
+  
+  "validation_targets": {
+    "description": "Expected results from ETABS analysis (to be filled after ETABS run)",
+    "max_lateral_drift_mm": null,
+    "max_story_drift_ratio": null,
+    "base_shear_kN": null,
+    "overturning_moment_kNm": null,
+    "max_column_axial_kN": null,
+    "max_beam_moment_kNm": null,
+    "max_coupling_beam_shear_kN": null,
+    "first_mode_period_s": null,
+    "total_weight_kN": null
+  },
+  
+  "etabs_reference": {
+    "file_name": null,
+    "version": null,
+    "analysis_date": null,
+    "analyst": null
+  },
+  
+  "test_focus": [
+    "Two-C-Facing core wall configuration",
+    "Coupling beam behavior under lateral loads",
+    "20-story wind load distribution",
+    "Column axial loads for taller building"
+  ]
+}

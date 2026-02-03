@@ -1,0 +1,122 @@
+{
+  "$schema": "building_definition_v1.0.json",
+  "id": "building_03",
+  "name": "30-Story Office Tower with Tube Center Opening Core",
+  "description": "Maximum height test case: 30-story office tower (maximum limit) with Tube Center Opening core. Tests maximum wind loads and system limits.",
+  "category": "advanced",
+  "complexity": "high",
+  
+  "project_metadata": {
+    "project_name": "ETABS Validation - Building 03",
+    "project_number": "VAL-003",
+    "engineer": "Validation Test Suite",
+    "date": "2026-02-03"
+  },
+  
+  "geometry": {
+    "bay_x": 9.0,
+    "bay_y": 9.0,
+    "floors": 30,
+    "story_height": 3.5,
+    "num_bays_x": 4,
+    "num_bays_y": 4,
+    "max_slab_span": 9.0,
+    "total_height_m": 105.0,
+    "plan_dimensions_m": {
+      "x": 36.0,
+      "y": 36.0
+    }
+  },
+  
+  "loads": {
+    "live_load_class": "2",
+    "live_load_sub": "2.5",
+    "dead_load": 2.5,
+    "storage_height": 0,
+    "custom_live_load": null,
+    "live_load_value_kPa": 3.0,
+    "notes": "HK Code Table 3.1 Class 2 (Office) - 3.0 kPa with heavier finishes"
+  },
+  
+  "materials": {
+    "fcu_slab": 40,
+    "fcu_beam": 45,
+    "fcu_column": 60,
+    "fcu_wall": 60,
+    "fy": 500,
+    "fyv": 250,
+    "exposure": "2",
+    "notes": "High-grade concrete for 30-story tower per HK practice"
+  },
+  
+  "lateral": {
+    "core_wall_config": "tube_center_opening",
+    "wall_thickness_mm": 500,
+    "terrain": "D",
+    "building_width": 36.0,
+    "building_depth": 36.0,
+    "location_type": "Center",
+    "custom_center_x": null,
+    "custom_center_y": null,
+    "notes": "City Centre terrain (D) for maximum wind exposure"
+  },
+  
+  "core_wall_geometry": {
+    "config": "tube_center_opening",
+    "wall_thickness_mm": 500,
+    "length_x_mm": 9000,
+    "length_y_mm": 9000,
+    "opening_width_mm": 2500,
+    "opening_height_mm": 2700,
+    "flange_width_mm": null,
+    "web_length_mm": null,
+    "notes": "Tube core with central elevator/stair opening"
+  },
+  
+  "coupling_beams": {
+    "enabled": true,
+    "clear_span_mm": 2500,
+    "depth_mm": 1000,
+    "width_mm": 500,
+    "notes": "Deep coupling beams for maximum height"
+  },
+  
+  "member_sizes": {
+    "slab_thickness_mm": 225,
+    "beam_width_mm": 450,
+    "beam_depth_mm": 700,
+    "column_dimension_mm": 900,
+    "notes": "Heavy sections for 30-story maximum"
+  },
+  
+  "validation_targets": {
+    "description": "Expected results from ETABS analysis (to be filled after ETABS run)",
+    "max_lateral_drift_mm": null,
+    "max_story_drift_ratio": null,
+    "drift_limit_ratio": 0.002,
+    "base_shear_kN": null,
+    "overturning_moment_kNm": null,
+    "max_column_axial_kN": null,
+    "max_beam_moment_kNm": null,
+    "max_coupling_beam_shear_kN": null,
+    "first_mode_period_s": null,
+    "second_mode_period_s": null,
+    "total_weight_kN": null,
+    "notes": "HK Code drift limit: H/500 = 210mm for 105m height"
+  },
+  
+  "etabs_reference": {
+    "file_name": null,
+    "version": null,
+    "analysis_date": null,
+    "analyst": null
+  },
+  
+  "test_focus": [
+    "30-story maximum height limit",
+    "Tube center opening core configuration",
+    "Maximum wind loads (City Centre terrain)",
+    "Drift control at maximum height",
+    "Second-order effects (P-Delta)"
+  ]
+}

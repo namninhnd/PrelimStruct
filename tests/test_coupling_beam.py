@@ -18,10 +18,6 @@ from src.core.data_models import (
     CouplingBeamResult,
 )
 from src.fem.coupling_beam import CouplingBeamGenerator, calculate_coupling_beam_properties
-from src.engines.coupling_beam_engine import CouplingBeamEngine, estimate_coupling_beam_forces
-
-DEPRECATED_ENGINE_MSG = "Simplified coupling beam design removed in V3.5"
-DEPRECATED_FORCE_MSG = "Simplified force estimation removed in V3.5"
 
 
 class TestCouplingBeamDataModel:
@@ -188,8 +184,8 @@ class TestCouplingBeamGenerator:
         # I-section has no door openings
         assert len(beams) == 0
 
-    def test_missing_opening_width_raises_error(self):
-        """Test that missing opening_width raises ValueError."""
+    def test_missing_opening_width_returns_empty(self):
+        """Test that missing opening_width returns empty list (no beams)."""
         core_geom = CoreWallGeometry(
             config=CoreWallConfig.TWO_C_FACING,
             wall_thickness=500.0,
@@ -197,9 +193,10 @@ class TestCouplingBeamGenerator:
         )
 
         generator = CouplingBeamGenerator(core_geom)
+        beams = generator.generate_coupling_beams()
 
-        with pytest.raises(ValueError, match="requires opening_width"):
-            generator.generate_coupling_beams()
+        # Should return empty list when opening dimensions not provided
+        assert beams == []
 
 
 class TestCouplingBeamProperties:

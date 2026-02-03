@@ -1,0 +1,122 @@
+{
+  "$schema": "building_definition_v1.0.json",
+  "id": "building_04",
+  "name": "15-Story Podium with Maximum Bays (10x10)",
+  "description": "Edge case test: Maximum bay configuration (10x10 grid) to test mesh generation limits and computational performance.",
+  "category": "edge_case",
+  "complexity": "high",
+  
+  "project_metadata": {
+    "project_name": "ETABS Validation - Building 04",
+    "project_number": "VAL-004",
+    "engineer": "Validation Test Suite",
+    "date": "2026-02-03"
+  },
+  
+  "geometry": {
+    "bay_x": 6.0,
+    "bay_y": 6.0,
+    "floors": 15,
+    "story_height": 3.5,
+    "num_bays_x": 10,
+    "num_bays_y": 10,
+    "max_slab_span": 6.0,
+    "total_height_m": 52.5,
+    "plan_dimensions_m": {
+      "x": 60.0,
+      "y": 60.0
+    }
+  },
+  
+  "loads": {
+    "live_load_class": "4",
+    "live_load_sub": "4.1",
+    "dead_load": 2.5,
+    "storage_height": 0,
+    "custom_live_load": null,
+    "live_load_value_kPa": 4.0,
+    "notes": "HK Code Table 3.1 Class 4 (Retail) - 4.0 kPa for podium retail"
+  },
+  
+  "materials": {
+    "fcu_slab": 40,
+    "fcu_beam": 45,
+    "fcu_column": 50,
+    "fcu_wall": 50,
+    "fy": 500,
+    "fyv": 250,
+    "exposure": "2",
+    "notes": "Retail podium grades"
+  },
+  
+  "lateral": {
+    "core_wall_config": "two_c_back_to_back",
+    "wall_thickness_mm": 400,
+    "terrain": "C",
+    "building_width": 60.0,
+    "building_depth": 60.0,
+    "location_type": "Center",
+    "custom_center_x": null,
+    "custom_center_y": null,
+    "notes": "Large footprint requires multiple cores (simplified to central core)"
+  },
+  
+  "core_wall_geometry": {
+    "config": "two_c_back_to_back",
+    "wall_thickness_mm": 400,
+    "length_x_mm": 8000,
+    "length_y_mm": 8000,
+    "opening_width_mm": 2000,
+    "opening_height_mm": 2400,
+    "flange_width_mm": 2000,
+    "web_length_mm": 8000
+  },
+  
+  "member_sizes": {
+    "slab_thickness_mm": 200,
+    "beam_width_mm": 400,
+    "beam_depth_mm": 600,
+    "column_dimension_mm": 650,
+    "notes": "Standard sizes - focus is on mesh size testing"
+  },
+  
+  "mesh_generation": {
+    "total_grid_points": 121,
+    "columns_count": 121,
+    "beams_per_floor_x": 110,
+    "beams_per_floor_y": 110,
+    "total_beam_elements": 3300,
+    "expected_shell_elements_per_floor": 100,
+    "total_shell_elements": 1500,
+    "notes": "Maximum bay configuration stresses mesh generation"
+  },
+  
+  "validation_targets": {
+    "description": "Expected results from ETABS analysis (to be filled after ETABS run)",
+    "max_lateral_drift_mm": null,
+    "max_story_drift_ratio": null,
+    "base_shear_kN": null,
+    "overturning_moment_kNm": null,
+    "max_column_axial_kN": null,
+    "max_beam_moment_kNm": null,
+    "first_mode_period_s": null,
+    "total_weight_kN": null,
+    "analysis_time_s": null,
+    "notes": "Key metric: computational performance with large mesh"
+  },
+  
+  "etabs_reference": {
+    "file_name": null,
+    "version": null,
+    "analysis_date": null,
+    "analyst": null
+  },
+  
+  "test_focus": [
+    "Maximum 10x10 bay configuration",
+    "Mesh generation performance",
+    "Large node count handling",
+    "Two-C-Back-to-Back core configuration",
+    "Computational time benchmarking"
+  ]
+}

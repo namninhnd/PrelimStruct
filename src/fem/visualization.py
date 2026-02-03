@@ -2626,7 +2626,7 @@ def create_3d_view(model: ModelLike,
             ),
         ),
         showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, xanchor="center", x=0.5),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5),
         margin=dict(l=10, r=10, t=40, b=80),
     )
 
@@ -2756,6 +2756,7 @@ def get_model_statistics(model: ModelLike) -> Dict[str, Any]:
         "n_beams": len(classification["beams"]),
         "n_coupling_beams": len(classification["coupling_beams"]),
         "n_core_wall_elements": len(classification["core_walls"]),
+        "n_slab_elements": len(classification["slabs"]),
         "n_floors": len(floors),
         "floor_elevations": floors,
         "n_supports": len([n for n in model.nodes.values() if n.is_fixed or n.is_pinned]),

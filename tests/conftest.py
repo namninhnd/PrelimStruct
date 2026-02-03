@@ -150,10 +150,17 @@ class PatchedOps:
 
 @pytest.fixture
 def ops_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> PatchedOps:
-    """Provide a monkeypatched OpenSeesPy module for tests."""
     ops = PatchedOps()
     opensees_module = types.ModuleType("opensees")
     opensees_module.opensees = ops
     monkeypatch.setitem(sys.modules, "openseespy", opensees_module)
     monkeypatch.setitem(sys.modules, "openseespy.opensees", ops)
     return ops
+
+
+# Only load playwright plugin if installed
+try:
+    import pytest_playwright
+    pytest_plugins = ["pytest_playwright"]
+except ImportError:
+    pass

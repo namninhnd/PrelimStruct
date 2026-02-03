@@ -97,7 +97,8 @@ class CouplingBeamGenerator:
     ) -> Optional[Tuple[float, float, float]]:
         opening_width = self.core_geometry.opening_width
         if opening_width is None:
-            raise ValueError(f"{self.core_geometry.config} requires opening_width")
+            # No opening width specified - cannot generate coupling beams
+            return None
         if opening_width <= 0:
             return None
 

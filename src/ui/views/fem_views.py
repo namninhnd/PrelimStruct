@@ -21,6 +21,7 @@ from src.fem.visualization import (
     get_model_statistics,
     export_plotly_figure_image
 )
+from src.ui.components.reaction_table import ReactionTable
 
 logger = logging.getLogger(__name__)
 
@@ -354,30 +355,58 @@ def render_unified_fem_views(
     
     st.markdown("---")
 
-    # --- 4. Main View Tabs ---
+    # --- 4. Main View Navigation ---
     
-    tab_plan, tab_elev, tab_3d = st.tabs(["Plan View", "Elevation View", "3D View"])
+    # Ensure active view state exists
+    if "fem_active_view" not in st.session_state:
+        st.session_state.fem_active_view = "Plan View"
     
+    active_view = st.session_state.fem_active_view
+    
+    # Navigation Buttons & Floor Selector
+    # Arrange: Plan | Elevation | 3D | [Space/Selector]
+    nav_cols = st.columns([1, 1, 1, 2])
+    
+    with nav_cols[0]:
+        if st.button("Plan View", type="primary" if active_view == "Plan View" else "secondary", use_container_width=True):
+            st.session_state.fem_active_view = "Plan View"
+            st.rerun()
+            
+    with nav_cols[1]:
+        if st.button("Elevation View", type="primary" if active_view == "Elevation View" else "secondary", use_container_width=True):
+            st.session_state.fem_active_view = "Elevation View"
+            st.rerun()
+            
+    with nav_cols[2]:
+        if st.button("3D View", type="primary" if active_view == "3D View" else "secondary", use_container_width=True):
+            st.session_state.fem_active_view = "3D View"
+            st.rerun()
+            
     active_fig = None
-    active_view_name = "Plan View"
+    active_view_name = active_view
     
-    # --- Plan View ---
-    with tab_plan:
+    # Floor Selector (Plan View Only)
+    selected_z = 0.0
+    if active_view == "Plan View":
+        with nav_cols[3]:
+            if floor_levels:
+                floor_labels = [_format_floor_label(z, floor_levels) for z in floor_levels]
+                default_idx = len(floor_levels) - 1
+                selected_idx = st.selectbox(
+                    "Floor Level",
+                    options=range(len(floor_levels)),
+                    index=default_idx,
+                    format_func=lambda i: floor_labels[i],
+                    key="fem_view_plan_floor_nav",
+                    label_visibility="collapsed"
+                )
+                selected_z = floor_levels[selected_idx]
+            else:
+                st.warning("No floors found")
+
+    # --- Plan View Render ---
+    if active_view == "Plan View":
         st.session_state.fem_active_tab = "Plan View"
-        
-        if floor_levels:
-            floor_labels = [_format_floor_label(z, floor_levels) for z in floor_levels]
-            selected_idx = st.selectbox(
-                "Floor Level",
-                options=range(len(floor_levels)),
-                index=len(floor_levels) - 1,
-                format_func=lambda i: floor_labels[i],
-                key="fem_view_plan_floor"
-            )
-            selected_z = floor_levels[selected_idx]
-        else:
-            selected_z = 0.0
-            st.warning("No floors found in model.")
         
         render_forces_here = (selected_force != "None")
         
@@ -406,10 +435,9 @@ def render_unified_fem_views(
         )
         st.plotly_chart(fig_plan, use_container_width=True, key=f"plan_view_{st.session_state.fem_view_force_type}_{selected_z}")
         active_fig = fig_plan
-        active_view_name = "Plan View"
 
-    # --- Elevation View ---
-    with tab_elev:
+    # --- Elevation View Render ---
+    elif active_view == "Elevation View":
         st.session_state.fem_active_tab = "Elevation View"
         
         col_e1, col_e2 = st.columns(2)
@@ -479,9 +507,10 @@ def render_unified_fem_views(
             analysis_result=analysis_result
         )
         st.plotly_chart(fig_elev, use_container_width=True, key=f"elev_view_{st.session_state.fem_view_force_type}_{view_dir}_{grid_coord}")
+        active_fig = fig_elev
         
-    # --- 3D View ---
-    with tab_3d:
+    # --- 3D View Render ---
+    elif active_view == "3D View":
         st.session_state.fem_active_tab = "3D View"
         
         render_forces_here = False  # 3D view doesn't support force diagrams yet
@@ -510,6 +539,7 @@ def render_unified_fem_views(
             reactions=reactions
         )
         st.plotly_chart(fig_3d, use_container_width=True, key=f"3d_view_{st.session_state.fem_view_force_type}")
+        active_fig = fig_3d
 
     # --- 5. Display Options Panel (MOVED BELOW) ---
     st.divider()
@@ -562,7 +592,17 @@ def render_unified_fem_views(
             key="fem_view_color_mode"
         )
 
-    # --- 6. Model Statistics & Export ---
+    # --- 6. Reaction Table ---
+    if has_results:
+        st.divider()
+        with st.expander("Reaction Forces Table", expanded=False):
+            # ReactionTable expects AnalysisResult or Dict[str, AnalysisResult]
+            # Since we only have one result currently, we pass it directly
+            # The component handles wrapping it in a default "Load Case 1"
+            reaction_table = ReactionTable(analysis_result)
+            reaction_table.render()
+
+    # --- 7. Model Statistics & Export ---
     
     st.markdown("### Model Statistics")
     col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)

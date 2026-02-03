@@ -1,6 +1,3 @@
-# Engineering calculation engines
-from .slab_engine import SlabEngine
-from .beam_engine import BeamEngine
-from .column_engine import ColumnEngine
-from .punching_shear import PunchingShearEngine, check_flat_slab_punching
-from .wind_engine import WindEngine, CoreWallEngine, DriftEngine
+# V3.5: All calculation engines removed - FEM-only architecture
+# Engines were replaced by OpenSeesPy FEM module (src/fem/)
+

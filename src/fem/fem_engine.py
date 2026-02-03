@@ -535,10 +535,11 @@ class FEMModel:
                     f"Element type {elem.element_type.value} not supported in builder"
                 )
 
-        # Create SurfaceLoad elements for shell pressure loads
-        # These are separate elements that apply pressure to shell element faces
-        surface_load_element_tags = {}
-        for idx, surface_load in enumerate(self.surface_loads):
+        # OpenSees SurfaceLoad works only with brick elements (SSPbrick, brickUP).
+        # For ShellMITC4, convert pressure to equivalent nodal loads.
+        surface_nodal_loads = []
+        
+        for surface_load in self.surface_loads:
             shell_elem_tag = surface_load.element_tag
             
             if shell_elem_tag not in self.elements:
@@ -560,17 +561,17 @@ class FEMModel:
                     f"{len(shell_elem.node_tags)}"
                 )
             
-            # Generate unique tag for SurfaceLoad element (offset to avoid collision)
-            surface_elem_tag = 50000 + shell_elem_tag
+            n1, n2, n3, n4 = [self.nodes[tag] for tag in shell_elem.node_tags]
+            area = 0.5 * abs((n1.x - n3.x) * (n2.y - n4.y) - (n2.x - n4.x) * (n1.y - n3.y))
+            total_load = surface_load.pressure * area
+            force_per_node = -total_load / 4.0
             
-            # Create SurfaceLoad element
-            # Nodes already in counterclockwise order from model builder
-            # Pressure sign: negative = inward (compression/gravity)
-            ops.element('SurfaceLoad', surface_elem_tag,
-                       *shell_elem.node_tags, surface_load.pressure)
-            
-            # Store mapping for load pattern activation
-            surface_load_element_tags[idx] = surface_elem_tag
+            for node_tag in shell_elem.node_tags:
+                surface_nodal_loads.append((
+                    node_tag,
+                    surface_load.load_pattern,
+                    force_per_node
+                ))
 
         # Apply rigid diaphragms (planar constraints)
         if self.diaphragms and ndm < 3:
@@ -617,13 +618,17 @@ class FEMModel:
                     ops.eleLoad('-ele', uniform_load.element_tag,
                                 '-type', 'beamUniform', wy, wz)
             
-            # Activate SurfaceLoad elements in this pattern
-            for idx, surface_load in enumerate(self.surface_loads):
-                if surface_load.load_pattern != pattern_id:
+            nodal_load_dict = {}
+            for node_tag, load_pattern, force_z in surface_nodal_loads:
+                if load_pattern != pattern_id:
                     continue
-                
-                surface_elem_tag = surface_load_element_tags[idx]
-                ops.eleLoad('-ele', surface_elem_tag, '-type', '-surfaceLoad')
+                if node_tag not in nodal_load_dict:
+                    nodal_load_dict[node_tag] = 0.0
+                nodal_load_dict[node_tag] += force_z
+            
+            for node_tag, force_z in nodal_load_dict.items():
+                load_vector = [0.0, 0.0, force_z, 0.0, 0.0, 0.0]
+                ops.load(node_tag, *load_vector[:ndf])
 
         self._is_built = True
         self._ops_initialized = True
@@ -722,6 +727,35 @@ class FEMModel:
                     errors.append(f"Diaphragm slave node {slave} missing")
                 if slave == diaphragm.master_node:
                     errors.append("Diaphragm slave cannot equal master node")
+        
+        # Mesh quality checks for shell elements
+        max_aspect_ratio = 5.0
+        for elem in self.elements.values():
+            if elem.element_type == ElementType.SHELL_MITC4:
+                if len(elem.node_tags) != 4:
+                    errors.append(f"Shell element {elem.tag} has {len(elem.node_tags)} nodes (expected 4)")
+                    continue
+                
+                n1 = self.nodes[elem.node_tags[0]]
+                n2 = self.nodes[elem.node_tags[1]]
+                n3 = self.nodes[elem.node_tags[2]]
+                n4 = self.nodes[elem.node_tags[3]]
+                
+                edge1 = np.sqrt((n2.x - n1.x)**2 + (n2.y - n1.y)**2 + (n2.z - n1.z)**2)
+                edge2 = np.sqrt((n3.x - n2.x)**2 + (n3.y - n2.y)**2 + (n3.z - n2.z)**2)
+                edge3 = np.sqrt((n4.x - n3.x)**2 + (n4.y - n3.y)**2 + (n4.z - n3.z)**2)
+                edge4 = np.sqrt((n1.x - n4.x)**2 + (n1.y - n4.y)**2 + (n1.z - n4.z)**2)
+                
+                max_edge = max(edge1, edge2, edge3, edge4)
+                min_edge = min(edge1, edge2, edge3, edge4)
+                
+                if min_edge > 0:
+                    aspect_ratio = max_edge / min_edge
+                    if aspect_ratio > max_aspect_ratio:
+                        errors.append(
+                            f"Shell element {elem.tag} has excessive aspect ratio {aspect_ratio:.2f} "
+                            f"(max allowed: {max_aspect_ratio})"
+                        )
         
         return (len(errors) == 0, errors)
 

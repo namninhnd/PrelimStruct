@@ -1,0 +1,107 @@
+{
+  "$schema": "building_definition_v1.0.json",
+  "id": "building_01",
+  "name": "Simple 10-Story Office Building with I-Section Core",
+  "description": "Baseline test case: Standard 10-story office building with I-section core wall. Tests basic shell element behavior and gravity load distribution.",
+  "category": "baseline",
+  "complexity": "simple",
+  
+  "project_metadata": {
+    "project_name": "ETABS Validation - Building 01",
+    "project_number": "VAL-001",
+    "engineer": "Validation Test Suite",
+    "date": "2026-02-03"
+  },
+  
+  "geometry": {
+    "bay_x": 8.0,
+    "bay_y": 8.0,
+    "floors": 10,
+    "story_height": 3.5,
+    "num_bays_x": 3,
+    "num_bays_y": 3,
+    "max_slab_span": 8.0,
+    "total_height_m": 35.0,
+    "plan_dimensions_m": {
+      "x": 24.0,
+      "y": 24.0
+    }
+  },
+  
+  "loads": {
+    "live_load_class": "2",
+    "live_load_sub": "2.5",
+    "dead_load": 2.0,
+    "storage_height": 0,
+    "custom_live_load": null,
+    "live_load_value_kPa": 3.0,
+    "notes": "HK Code Table 3.1 Class 2 (Office) - 3.0 kPa"
+  },
+  
+  "materials": {
+    "fcu_slab": 35,
+    "fcu_beam": 40,
+    "fcu_column": 45,
+    "fcu_wall": 45,
+    "fy": 500,
+    "fyv": 250,
+    "exposure": "2",
+    "notes": "Standard office building grades per HK practice"
+  },
+  
+  "lateral": {
+    "core_wall_config": "i_section",
+    "wall_thickness_mm": 400,
+    "terrain": "C",
+    "building_width": 24.0,
+    "building_depth": 24.0,
+    "location_type": "Center",
+    "custom_center_x": null,
+    "custom_center_y": null
+  },
+  
+  "core_wall_geometry": {
+    "config": "i_section",
+    "wall_thickness_mm": 400,
+    "length_x_mm": 6000,
+    "length_y_mm": 6000,
+    "opening_width_mm": null,
+    "opening_height_mm": null,
+    "flange_width_mm": 2500,
+    "web_length_mm": 6000
+  },
+  
+  "member_sizes": {
+    "slab_thickness_mm": 200,
+    "beam_width_mm": 400,
+    "beam_depth_mm": 600,
+    "column_dimension_mm": 600,
+    "notes": "Estimated initial sizes for FEM analysis"
+  },
+  
+  "validation_targets": {
+    "description": "Expected results from ETABS analysis (to be filled after ETABS run)",
+    "max_lateral_drift_mm": null,
+    "max_story_drift_ratio": null,
+    "base_shear_kN": null,
+    "overturning_moment_kNm": null,
+    "max_column_axial_kN": null,
+    "max_beam_moment_kNm": null,
+    "first_mode_period_s": null,
+    "total_weight_kN": null
+  },
+  
+  "etabs_reference": {
+    "file_name": null,
+    "version": null,
+    "analysis_date": null,
+    "analyst": null
+  },
+  
+  "test_focus": [
+    "Basic shell element meshing for walls",
+    "Gravity load distribution to columns",
+    "I-section core wall stiffness",
+    "10-story building baseline"
+  ]
+}

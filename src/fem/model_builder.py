@@ -9,6 +9,8 @@ This module provides a 3-phase FEM model construction workflow:
 Floor-based node numbering scheme:
   - Ground level (0): nodes 1-999
   - Level N (N >= 1): nodes N*1000 to N*1000+999
+  - Shell elements (walls): nodes 50000-59999
+  - Shell elements (slabs): nodes 60000-69999
   
 Reference: https://opensees.berkeley.edu/wiki/index.php?title=Getting_Started_with_BuildingTcl
 """
@@ -28,7 +30,7 @@ from src.core.data_models import (
     CoreWallSectionProperties,
     WindResult,
 )
-from src.engines.wind_engine import WindEngine
+
 from src.fem.beam_trimmer import BeamConnectionType
 from src.fem.core_wall_geometry import (
     ISectionCoreWall,
@@ -793,7 +795,7 @@ def _extract_wall_panels(
         # Left flange (parallel to Y-axis)
         panels.append(WallPanel(
             wall_id="IW1",
-            base_point=(offset_x, offset_y, 0.0),
+            base_point=(offset_x, offset_y),
             length=length_y_m,
             thickness=thickness_m,
             height=1.0,  # Placeholder - actual height calculated by mesh generator
@@ -804,7 +806,7 @@ def _extract_wall_panels(
         # Right flange (parallel to Y-axis)
         panels.append(WallPanel(
             wall_id="IW2",
-            base_point=(offset_x + length_x_m, offset_y, 0.0),
+            base_point=(offset_x + length_x_m, offset_y),
             length=length_y_m,
             thickness=thickness_m,
             height=1.0,
@@ -816,7 +818,7 @@ def _extract_wall_panels(
         web_y = offset_y + length_y_m / 2
         panels.append(WallPanel(
             wall_id="IW3",
-            base_point=(offset_x, web_y, 0.0),
+            base_point=(offset_x, web_y),
             length=length_x_m,
             thickness=thickness_m,
             height=1.0,
@@ -832,7 +834,7 @@ def _extract_wall_panels(
         # Bottom wall (parallel to X)
         panels.append(WallPanel(
             wall_id="TW1",
-            base_point=(offset_x, offset_y, 0.0),
+            base_point=(offset_x, offset_y),
             length=length_x_m,
             thickness=thickness_m,
             height=1.0,
@@ -843,7 +845,7 @@ def _extract_wall_panels(
         # Right wall (parallel to Y)
         panels.append(WallPanel(
             wall_id="TW2",
-            base_point=(offset_x + length_x_m, offset_y, 0.0),
+            base_point=(offset_x + length_x_m, offset_y),
             length=length_y_m,
             thickness=thickness_m,
             height=1.0,
@@ -854,7 +856,7 @@ def _extract_wall_panels(
         # Top wall (parallel to X)
         panels.append(WallPanel(
             wall_id="TW3",
-            base_point=(offset_x, offset_y + length_y_m, 0.0),
+            base_point=(offset_x, offset_y + length_y_m),
             length=length_x_m,
             thickness=thickness_m,
             height=1.0,
@@ -865,7 +867,7 @@ def _extract_wall_panels(
         # Left wall (parallel to Y)
         panels.append(WallPanel(
             wall_id="TW4",
-            base_point=(offset_x, offset_y, 0.0),
+            base_point=(offset_x, offset_y),
             length=length_y_m,
             thickness=thickness_m,
             height=1.0,
@@ -884,10 +886,10 @@ def _extract_wall_panels(
         length_y_m = core_geometry.length_y / 1000.0
         
         # Create 4 walls as a box
-        panels.append(WallPanel("W1", (offset_x, offset_y, 0.0), length_x_m, thickness_m, 1.0, 0.0, fcu))
-        panels.append(WallPanel("W2", (offset_x + length_x_m, offset_y, 0.0), length_y_m, thickness_m, 1.0, 90.0, fcu))
-        panels.append(WallPanel("W3", (offset_x, offset_y + length_y_m, 0.0), length_x_m, thickness_m, 1.0, 0.0, fcu))
-        panels.append(WallPanel("W4", (offset_x, offset_y, 0.0), length_y_m, thickness_m, 1.0, 90.0, fcu))
+        panels.append(WallPanel("W1", (offset_x, offset_y), length_x_m, thickness_m, 1.0, 0.0, fcu))
+        panels.append(WallPanel("W2", (offset_x + length_x_m, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+        panels.append(WallPanel("W3", (offset_x, offset_y + length_y_m), length_x_m, thickness_m, 1.0, 0.0, fcu))
+        panels.append(WallPanel("W4", (offset_x, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
     
     return panels
 
@@ -1791,7 +1793,10 @@ def build_fem_model(project: ProjectData,
     if options.apply_wind_loads:
         wind_result = project.wind_result
         if wind_result is None:
-            wind_result = WindEngine(project).calculate_wind_loads()
+            raise ValueError(
+                "project.wind_result must be provided when apply_wind_loads=True. "
+                "V3.5: WindEngine was removed. Calculate wind loads before FEM model building."
+            )
         floor_shears = _compute_floor_shears(wind_result, geometry.story_height, geometry.floors)
         if floor_shears:
             apply_lateral_loads_to_diaphragms(

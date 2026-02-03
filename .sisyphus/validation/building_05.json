@@ -1,0 +1,122 @@
+{
+  "$schema": "building_definition_v1.0.json",
+  "id": "building_05",
+  "name": "Minimum Configuration (1x1 Bay, 3 Stories)",
+  "description": "Edge case test: Minimum viable building configuration to test boundary conditions and edge case handling.",
+  "category": "edge_case",
+  "complexity": "simple",
+  
+  "project_metadata": {
+    "project_name": "ETABS Validation - Building 05",
+    "project_number": "VAL-005",
+    "engineer": "Validation Test Suite",
+    "date": "2026-02-03"
+  },
+  
+  "geometry": {
+    "bay_x": 6.0,
+    "bay_y": 6.0,
+    "floors": 3,
+    "story_height": 3.0,
+    "num_bays_x": 1,
+    "num_bays_y": 1,
+    "max_slab_span": 6.0,
+    "total_height_m": 9.0,
+    "plan_dimensions_m": {
+      "x": 6.0,
+      "y": 6.0
+    }
+  },
+  
+  "loads": {
+    "live_load_class": "1",
+    "live_load_sub": "1.1",
+    "dead_load": 1.5,
+    "storage_height": 0,
+    "custom_live_load": null,
+    "live_load_value_kPa": 2.0,
+    "notes": "HK Code Table 3.1 Class 1 (Residential) - minimum load case"
+  },
+  
+  "materials": {
+    "fcu_slab": 35,
+    "fcu_beam": 35,
+    "fcu_column": 35,
+    "fcu_wall": 35,
+    "fy": 500,
+    "fyv": 250,
+    "exposure": "1",
+    "notes": "Minimum grades for low-rise"
+  },
+  
+  "lateral": {
+    "core_wall_config": "tube_side_opening",
+    "wall_thickness_mm": 300,
+    "terrain": "B",
+    "building_width": 6.0,
+    "building_depth": 6.0,
+    "location_type": "Center",
+    "custom_center_x": null,
+    "custom_center_y": null,
+    "notes": "Core occupies significant portion of small footprint"
+  },
+  
+  "core_wall_geometry": {
+    "config": "tube_side_opening",
+    "wall_thickness_mm": 300,
+    "length_x_mm": 3000,
+    "length_y_mm": 3000,
+    "opening_width_mm": 1200,
+    "opening_height_mm": 2100,
+    "flange_width_mm": null,
+    "web_length_mm": null,
+    "notes": "Small tube core with side stair/lift opening"
+  },
+  
+  "member_sizes": {
+    "slab_thickness_mm": 150,
+    "beam_width_mm": 300,
+    "beam_depth_mm": 450,
+    "column_dimension_mm": 400,
+    "notes": "Minimum practical sizes"
+  },
+  
+  "mesh_generation": {
+    "total_grid_points": 4,
+    "columns_count": 4,
+    "beams_per_floor_x": 2,
+    "beams_per_floor_y": 2,
+    "total_beam_elements": 12,
+    "expected_shell_elements_per_floor": 1,
+    "total_shell_elements": 3,
+    "notes": "Minimum mesh configuration"
+  },
+  
+  "validation_targets": {
+    "description": "Expected results from ETABS analysis (to be filled after ETABS run)",
+    "max_lateral_drift_mm": null,
+    "max_story_drift_ratio": null,
+    "base_shear_kN": null,
+    "overturning_moment_kNm": null,
+    "max_column_axial_kN": null,
+    "max_beam_moment_kNm": null,
+    "first_mode_period_s": null,
+    "total_weight_kN": null,
+    "notes": "Focus on boundary condition handling"
+  },
+  
+  "etabs_reference": {
+    "file_name": null,
+    "version": null,
+    "analysis_date": null,
+    "analyst": null
+  },
+  
+  "test_focus": [
+    "Minimum 1x1 bay configuration",
+    "Single column per corner",
+    "Tube side opening core configuration",
+    "Edge case boundary conditions",
+    "Low-rise behavior verification"
+  ]
+}

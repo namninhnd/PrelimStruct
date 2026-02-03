@@ -4,6 +4,7 @@ AI-Assisted Preliminary Structural Design Platform
 """
 
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
@@ -48,6 +49,7 @@ from src.fem.load_combinations import (
     LoadCombinationCategory,
     LoadCombinationDefinition,
 )
+from src.ui.components.core_wall_selector import render_core_wall_selector
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -64,6 +66,61 @@ st.set_page_config(
 # Custom CSS for styling
 st.markdown("""
 <style>
+    /* Fonts */
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;700&family=Lexend:wght@400;600;700&display=swap');
+
+    :root {
+        /* Colors */
+        --primary-blue: #1E3A5F;
+        --primary-blue-dark: #152943;
+        --accent-orange: #F59E0B;
+        --accent-orange-hover: #D97706;
+        --neutral-50: #F8FAFC;
+        --neutral-100: #F1F5F9;
+        --neutral-200: #E2E8F0;
+        --neutral-300: #CBD5E1;
+        --neutral-400: #94A3B8;
+        --neutral-500: #64748B;
+        --neutral-800: #1E293B;
+        --neutral-900: #0F172A;
+
+        /* Spacing */
+        --space-4: 4px;
+        --space-8: 8px;
+        --space-12: 12px;
+        --space-16: 16px;
+        --space-24: 24px;
+        --space-32: 32px;
+        --space-64: 64px;
+    }
+
+    /* Typography */
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+        color: var(--neutral-800);
+    }
+
+    h1, h2, h3, .section-header {
+        font-family: 'Lexend', sans-serif;
+        color: var(--primary-blue);
+        font-weight: 700;
+    }
+    
+    h1 { font-size: 32px; }
+    h2 { font-size: 24px; }
+    h3 { font-size: 20px; }
+
+    code, .metric-value {
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    /* Layout adjustments */
+    .block-container {
+        padding-top: var(--space-32);
+        padding-bottom: var(--space-64);
+        max-width: 1200px;
+    }
+
     /* Status Badge Styles */
     .status-pass {
         background-color: #10B981;
@@ -73,6 +130,7 @@ st.markdown("""
         font-weight: 600;
         font-size: 14px;
         display: inline-block;
+        font-family: 'Inter', sans-serif;
     }
     .status-fail {
         background-color: #EF4444;
@@ -82,73 +140,173 @@ st.markdown("""
         font-weight: 600;
         font-size: 14px;
         display: inline-block;
+        font-family: 'Inter', sans-serif;
     }
     .status-warning {
-        background-color: #F59E0B;
+        background-color: var(--accent-orange);
         color: white;
         padding: 4px 12px;
         border-radius: 16px;
         font-weight: 600;
         font-size: 14px;
         display: inline-block;
+        font-family: 'Inter', sans-serif;
     }
     .status-pending {
-        background-color: #6B7280;
+        background-color: var(--neutral-500);
         color: white;
         padding: 4px 12px;
         border-radius: 16px;
         font-weight: 600;
         font-size: 14px;
         display: inline-block;
+        font-family: 'Inter', sans-serif;
     }
 
     /* Metric Card */
     .metric-card {
-        background: linear-gradient(135deg, #1E3A5F 0%, #2D5A87 100%);
-        border-radius: 12px;
-        padding: 16px;
-        color: white;
-        margin-bottom: 8px;
+        background: white;
+        border: 1px solid var(--neutral-200);
+        border-radius: 8px;
+        padding: var(--space-16);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        margin-bottom: var(--space-8);
+        transition: transform 0.2s, box-shadow 0.2s;
     }
+    .metric-card:hover {
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+    }
+    
     .metric-value {
         font-size: 28px;
         font-weight: 700;
+        color: var(--primary-blue);
         margin: 0;
     }
     .metric-label {
         font-size: 14px;
-        opacity: 0.8;
+        color: var(--neutral-500);
         margin: 0;
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
     }
 
     /* Section Headers */
     .section-header {
-        color: #1E3A5F;
+        color: var(--primary-blue);
         font-weight: 700;
-        border-bottom: 2px solid #2D5A87;
-        padding-bottom: 8px;
-        margin-bottom: 16px;
+        border-bottom: 2px solid var(--neutral-200);
+        padding-bottom: var(--space-8);
+        margin-bottom: var(--space-16);
+        margin-top: var(--space-32);
     }
 
     /* Element Summary Cards */
     .element-card {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
+        background: var(--neutral-50);
+        border: 1px solid var(--neutral-200);
         border-radius: 8px;
-        padding: 12px;
-        margin-bottom: 8px;
+        padding: var(--space-12);
+        margin-bottom: var(--space-8);
     }
     .element-card strong {
-        color: #1E3A5F;
+        color: var(--primary-blue);
         font-size: 15px;
+        font-family: 'Lexend', sans-serif;
     }
     .element-card small {
-        color: #4A5568;
+        color: var(--neutral-500);
     }
 
+    /* Sidebar Styling */
+    section[data-testid="stSidebar"] {
+        background-color: var(--neutral-50);
+        border-right: 1px solid var(--neutral-200);
+    }
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3 {
+        color: var(--primary-blue);
+    }
+
+    /* Button Styling */
+    div.stButton > button {
+        background-color: var(--primary-blue);
+        color: white;
+        border-radius: 6px;
+        border: none;
+        padding: 8px 16px;
+        font-weight: 500;
+        font-family: 'Inter', sans-serif;
+        transition: all 0.2s;
+    }
+    div.stButton > button:hover {
+        background-color: var(--primary-blue-dark);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        border-color: var(--primary-blue-dark);
+    }
+    div.stButton > button:focus {
+        box-shadow: 0 0 0 2px var(--neutral-200), 0 0 0 4px var(--primary-blue);
+        border-color: var(--primary-blue);
+    }
+    div.stButton > button:active {
+        background-color: var(--primary-blue-dark);
+    }
+    
+    /* Inputs */
+    .stTextInput > div > div > input, 
+    .stNumberInput > div > div > input, 
+    .stSelectbox > div > div {
+        border-radius: 6px;
+        border-color: var(--neutral-200);
+        font-family: 'Inter', sans-serif;
+    }
+    .stTextInput > div > div > input:focus, 
+    .stNumberInput > div > div > input:focus, 
+    .stSelectbox > div > div:focus-within {
+        border-color: var(--primary-blue);
+        box-shadow: 0 0 0 1px var(--primary-blue);
+    }
+    
+    /* Remove purple from sliders/checks if possible */
+    .stCheckbox span[role="checkbox"][aria-checked="true"] {
+        background-color: var(--primary-blue) !important;
+        border-color: var(--primary-blue) !important;
+    }
+    
     /* Hide Streamlit branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
+    header {visibility: hidden;}
+
+    /* Mobile viewport handling (<768px) */
+    @media (max-width: 768px) {
+        /* Collapse sidebar by default on mobile to prevent content overlay */
+        [data-testid="stSidebar"] {
+            width: 0 !important;
+            min-width: 0 !important;
+            max-width: 0 !important;
+        }
+        
+        /* Ensure main content uses full width when sidebar collapsed */
+        .main .block-container {
+            max-width: 100% !important;
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
+        
+        /* Mobile warning banner */
+        .mobile-warning {
+            background: #FFF3CD;
+            border: 2px solid #F59E0B;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 16px;
+            color: #856404;
+            font-size: 14px;
+        }
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -624,7 +782,7 @@ def create_framing_grid(project: ProjectData, secondary_along_x: bool = False, n
                             connection_colors.append('#EF4444')  # Red for moment
                             connection_symbols_list.append('diamond')
                         elif ct == 'fixed':
-                            connection_colors.append('#7C3AED')  # Purple for fixed
+                            connection_colors.append('#334155')  # Dark Slate for fixed
                             connection_symbols_list.append('square')
                         else:  # pinned
                             connection_colors.append('#10B981')  # Green for pinned
@@ -839,6 +997,15 @@ def main():
     st.markdown("""
     <h1 style="color: #1E3A5F; margin-bottom: 0;">PrelimStruct</h1>
     <p style="color: #64748B; margin-top: 0;">AI-Assisted Preliminary Structural Design Platform</p>
+    """, unsafe_allow_html=True)
+    
+    # Mobile warning banner (visible only on mobile viewports)
+    st.markdown("""
+    <div class="mobile-warning">
+        <strong>⚠️ Desktop Recommended</strong><br>
+        This application is optimized for desktop browsers (1280px+ width). 
+        For the best experience and full access to sidebar controls, please use a desktop or tablet in landscape mode.
+    </div>
     """, unsafe_allow_html=True)
 
     # Initialize session state
@@ -1056,25 +1223,12 @@ def main():
         custom_y = None
 
         if has_core:
-            # Core wall configuration dropdown
-            config_options = {
-                CoreWallConfig.I_SECTION: "I-Section (2 Walls Blended)",
-                CoreWallConfig.TWO_C_FACING: "Two C-Walls Facing",
-                CoreWallConfig.TWO_C_BACK_TO_BACK: "Two C-Walls Back-to-Back",
-                CoreWallConfig.TUBE_CENTER_OPENING: "Tube with Center Opening",
-                CoreWallConfig.TUBE_SIDE_OPENING: "Tube with Side Opening"
-            }
-
             # Get current config or default to I_SECTION
             current_config = st.session_state.project.lateral.core_wall_config or CoreWallConfig.I_SECTION
-            selected_config_label = st.selectbox(
-                "Core Wall Configuration",
-                options=list(config_options.values()),
-                index=list(config_options.keys()).index(current_config),
-                help="Select the core wall configuration type for FEM modeling"
-            )
-            selected_core_wall_config = list(config_options.keys())[list(config_options.values()).index(selected_config_label)]
-
+            
+            # Visual Core Wall Selector
+            selected_core_wall_config = render_core_wall_selector(current_config)
+            
             # Wall thickness input
             wall_thickness = st.number_input(
                 "Wall Thickness (mm)",
@@ -1887,7 +2041,7 @@ def main():
 
             # Show preview in expander
             with st.expander("Preview Report"):
-                st.components.v1.html(html_content, height=800, scrolling=True)
+                components.html(html_content, height=800, scrolling=True)
 
     # Footer
     st.divider()

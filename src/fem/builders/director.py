@@ -14,7 +14,7 @@ import logging
 from typing import Dict, List, Optional, Set, Tuple
 
 from src.core.data_models import ProjectData
-from src.engines.wind_engine import WindEngine
+
 from src.fem.model_builder import trim_beam_segment_against_polygon
 from src.fem.builders.beam_builder import BeamBuilder
 from src.fem.builders.column_builder import ColumnBuilder
@@ -364,7 +364,10 @@ class FEMModelDirector:
         if self.options.apply_wind_loads:
             wind_result = self.project.wind_result
             if wind_result is None:
-                wind_result = WindEngine(self.project).calculate_wind_loads()
+                raise ValueError(
+                    "project.wind_result must be provided when apply_wind_loads=True. "
+                    "V3.5: WindEngine was removed. Calculate wind loads before FEM model building."
+                )
             
             floor_shears = _compute_floor_shears(
                 wind_result,

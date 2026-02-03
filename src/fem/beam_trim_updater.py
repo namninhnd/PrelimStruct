@@ -1,7 +1,10 @@
 """
 Beam Design Update After Trimming
 
-This module provides functionality to recalculate beam design parameters
+DEPRECATED IN V3.5: This module is deprecated as part of the move to FEM-only architecture.
+BeamEngine and simplified calculation methods are removed. This file is kept for reference only.
+
+This module provided functionality to recalculate beam design parameters
 after trimming at core wall edges. When beams are trimmed, their effective
 span changes, which affects moments, shears, and required reinforcement.
 """
@@ -10,19 +13,15 @@ from typing import Tuple
 from dataclasses import replace
 
 from src.core.data_models import BeamResult, ProjectData
-from src.engines.beam_engine import BeamEngine
+# from src.engines.beam_engine import BeamEngine  # V3.5: Removed - FEM-only architecture
 from src.fem.beam_trimmer import TrimmedBeam, BeamConnectionType
 
 
 class BeamTrimUpdater:
-    """Update beam design calculations after trimming.
+    """DEPRECATED IN V3.5: Update beam design calculations after trimming.
     
-    This class recalculates beam design parameters (moments, shears, reinforcement)
-    for trimmed spans. The updated design accounts for:
-    - Reduced span length after trimming
-    - Updated tributary width if applicable
-    - Modified end conditions (moment vs. pinned connections)
-    - Recalculated load distribution
+    This class is deprecated as part of the FEM-only architecture.
+    Use FEM analysis for trimmed beams instead.
     """
     
     def __init__(self, project: ProjectData):
@@ -32,7 +31,10 @@ class BeamTrimUpdater:
             project: ProjectData containing design parameters
         """
         self.project = project
-        self.beam_engine = BeamEngine(project)
+        raise DeprecationWarning(
+            "BeamTrimUpdater is deprecated in v3.5. "
+            "Use FEM analysis for trimmed beam design."
+        )
     
     def update_beam_design(
         self,
