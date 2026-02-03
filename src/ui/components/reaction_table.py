@@ -29,19 +29,19 @@ class ReactionTable:
         # result.node_reactions is Dict[int, List[float]] -> [Fx, Fy, Fz, Mx, My, Mz]
         for node_id, forces in result.node_reactions.items():
             row = {
-                "Node": node_id,
+                "Node ID": node_id,
                 "Fx (kN)": forces[0] / 1000.0,
                 "Fy (kN)": forces[1] / 1000.0,
                 "Fz (kN)": forces[2] / 1000.0,
-                "Mx (kNm)": forces[3] / 1000.0,
-                "My (kNm)": forces[4] / 1000.0,
-                "Mz (kNm)": forces[5] / 1000.0,
+                "Mx (kN-m)": forces[3] / 1000.0,
+                "My (kN-m)": forces[4] / 1000.0,
+                "Mz (kN-m)": forces[5] / 1000.0,
             }
             data.append(row)
         
         df = pd.DataFrame(data)
         if not df.empty:
-            df = df.set_index("Node").sort_index()
+            df = df.set_index("Node ID").sort_index()
             
             # Calculate totals
             totals = df.sum()
@@ -53,7 +53,7 @@ class ReactionTable:
 
     def render(self):
         """Render the component in Streamlit."""
-        st.markdown("### Reaction Forces")
+        st.markdown("### Reaction Table")
 
         if not self.results:
             st.info("No analysis results available.")
@@ -80,30 +80,46 @@ class ReactionTable:
         st.dataframe(df.style.format("{:.2f}"), use_container_width=True)
         
         # Export Buttons
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         
-        # CSV Export
-        csv = df.to_csv().encode('utf-8')
-        col1.download_button(
-            label="Download CSV",
-            data=csv,
-            file_name=f"reactions_{selected_case.replace(' ', '_')}.csv",
-            mime="text/csv",
-            key=f'download-csv-{selected_case}'
-        )
-        
-        # Excel Export
-        buffer = io.BytesIO()
-        try:
-            with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='Reactions')
-            
-            col2.download_button(
-                label="Download Excel",
-                data=buffer.getvalue(),
-                file_name=f"reactions_{selected_case.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f'download-excel-{selected_case}'
+        with col1:
+            # CSV Export
+            csv = df.to_csv().encode('utf-8')
+            st.download_button(
+                label="Download CSV",
+                data=csv,
+                file_name=f"reactions_{selected_case.replace(' ', '_')}.csv",
+                mime="text/csv",
+                key=f'download-csv-{selected_case}'
             )
-        except Exception as e:
-            col2.error(f"Excel export failed: {str(e)}")
+        
+        with col2:
+            # Excel Export
+            buffer = io.BytesIO()
+            try:
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name='Reactions')
+                
+                st.download_button(
+                    label="Download Excel",
+                    data=buffer.getvalue(),
+                    file_name=f"reactions_{selected_case.replace(' ', '_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f'download-excel-{selected_case}'
+                )
+            except Exception as e:
+                st.error(f"Excel export failed: {str(e)}")
+
+        with col3:
+            # Copy to Clipboard
+            if st.button("📋 Copy to Clipboard", key=f"copy-clip-{selected_case}"):
+                try:
+                    import pyperclip
+                    # Convert to CSV-like string (tab separated for Excel/Sheets)
+                    clip_text = df.to_csv(sep='\t')
+                    pyperclip.copy(clip_text)
+                    st.toast("✅ Copied to clipboard!", icon="📋")
+                except ImportError:
+                    st.error("pyperclip not installed.")
+                except Exception as e:
+                    st.error(f"Copy failed: {str(e)}")

@@ -1,0 +1,13 @@
+{
+  "building_id": "building_01",
+  "results": {
+    "max_lateral_drift_mm": 0.015471050250048501,
+    "base_shear_kN": -2.6830093702301382e-14,
+    "total_weight_kN": 86817.60000001671,
+    "max_column_axial_kN": 8972.542758853404,
+    "max_story_drift_ratio": 4.420300071442429e-07,
+    "overturning_moment_kNm": 0.0,
+    "max_beam_moment_kNm": 0.0,
+    "first_mode_period_s": 0.0
+  }
+}

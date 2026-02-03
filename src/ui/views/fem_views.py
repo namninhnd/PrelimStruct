@@ -207,8 +207,9 @@ def render_unified_fem_views(
     omit_columns_map = st.session_state.get("omit_columns", {})
     suggested_omit = [col for col, omit in omit_columns_map.items() if omit]
     
-    # Wind toggle (triggers rebuild)
-    include_wind = st.session_state.get("fem_include_wind", True)
+    # Wind toggle (triggers rebuild) - only enable if wind_result exists
+    has_wind_result = project.wind_result is not None
+    include_wind = st.session_state.get("fem_include_wind", True) and has_wind_result
     
     options = ModelBuilderOptions(
         include_core_wall=True,

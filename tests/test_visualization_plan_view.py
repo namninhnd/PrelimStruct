@@ -7,7 +7,7 @@ plotly = pytest.importorskip("plotly")
 from plotly.graph_objects import Figure
 
 from src.fem.fem_engine import Element, ElementType, FEMModel, Load, Node, UniformLoad
-from src.fem.visualization import COLORS, VisualizationConfig, create_plan_view
+from src.fem.visualization import VisualizationConfig, create_plan_view
 
 
 def _build_plan_model() -> FEMModel:
@@ -75,10 +75,9 @@ def test_plan_view_without_utilization_uses_default_beam_color() -> None:
 
     fig = create_plan_view(model, config=config, floor_elevation=3.0, utilization=None)
 
-    # Check for beam traces (could be "Beams" or "Primary Beams")
     beam_traces = [trace for trace in fig.data if trace.name in ("Beams", "Primary Beams")]
     assert beam_traces, "Expected at least one beam trace"
-    assert beam_traces[0].line.color == COLORS["beam"]
+    assert beam_traces[0].line.color == "#3B82F6"
 
 
 def test_plan_view_shows_supports() -> None:

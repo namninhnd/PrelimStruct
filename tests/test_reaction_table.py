@@ -18,8 +18,8 @@ def test_reaction_table_dataframe_generation():
     # Check dimensions: 2 nodes + 1 total = 3 rows
     assert len(df) == 3
     
-    # Check columns
-    expected_cols = ["Fx (kN)", "Fy (kN)", "Fz (kN)", "Mx (kNm)", "My (kNm)", "Mz (kNm)"]
+    # Check columns (using kN-m for moments per SI convention)
+    expected_cols = ["Fx (kN)", "Fy (kN)", "Fz (kN)", "Mx (kN-m)", "My (kN-m)", "Mz (kN-m)"]
     for col in expected_cols:
         assert col in df.columns
         

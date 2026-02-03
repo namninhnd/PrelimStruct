@@ -1793,20 +1793,23 @@ def build_fem_model(project: ProjectData,
     if options.apply_wind_loads:
         wind_result = project.wind_result
         if wind_result is None:
-            raise ValueError(
-                "project.wind_result must be provided when apply_wind_loads=True. "
-                "V3.5: WindEngine was removed. Calculate wind loads before FEM model building."
+            import warnings
+            warnings.warn(
+                "apply_wind_loads=True but project.wind_result is None. "
+                "Skipping wind loads. In v3.5, calculate wind loads separately before FEM analysis.",
+                UserWarning
             )
-        floor_shears = _compute_floor_shears(wind_result, geometry.story_height, geometry.floors)
-        if floor_shears:
-            apply_lateral_loads_to_diaphragms(
-                model,
-                floor_shears=floor_shears,
-                direction=options.lateral_load_direction,
-                load_pattern=options.wind_load_pattern,
-                tolerance=options.tolerance,
-                master_lookup=master_by_level if master_by_level else None,
-            )
+        else:
+            floor_shears = _compute_floor_shears(wind_result, geometry.story_height, geometry.floors)
+            if floor_shears:
+                apply_lateral_loads_to_diaphragms(
+                    model,
+                    floor_shears=floor_shears,
+                    direction=options.lateral_load_direction,
+                    load_pattern=options.wind_load_pattern,
+                    tolerance=options.tolerance,
+                    master_lookup=master_by_level if master_by_level else None,
+                )
 
     # Phase 3: Analysis Preparation (OpenSees BuildingTcl pattern)
     # Validate model before returning

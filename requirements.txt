@@ -28,3 +28,4 @@ vfo>=0.0.19
 # AI Assistant (Feature 11)
 httpx>=0.25.0
 python-dotenv>=1.0.0
+pyperclip

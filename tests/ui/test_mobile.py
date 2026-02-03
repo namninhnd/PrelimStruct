@@ -1,4 +1,15 @@
 import pytest
+import os
+
+# Skip if playwright not installed OR if e2e tests not explicitly requested
+pytest.importorskip("pytest_playwright")
+
+# Skip unless E2E_TESTS=1 is set (requires running Streamlit server)
+pytestmark = pytest.mark.skipif(
+    os.environ.get("E2E_TESTS") != "1",
+    reason="E2E tests require running Streamlit server. Set E2E_TESTS=1 to enable."
+)
+
 from playwright.sync_api import Page, expect
 
 

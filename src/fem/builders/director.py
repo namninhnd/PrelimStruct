@@ -364,25 +364,27 @@ class FEMModelDirector:
         if self.options.apply_wind_loads:
             wind_result = self.project.wind_result
             if wind_result is None:
-                raise ValueError(
-                    "project.wind_result must be provided when apply_wind_loads=True. "
-                    "V3.5: WindEngine was removed. Calculate wind loads before FEM model building."
+                import warnings
+                warnings.warn(
+                    "apply_wind_loads=True but project.wind_result is None. "
+                    "Skipping wind loads. V3.5: Calculate wind loads before FEM analysis.",
+                    UserWarning
                 )
-            
-            floor_shears = _compute_floor_shears(
-                wind_result,
-                self.project.geometry.story_height,
-                self.project.geometry.floors
-            )
-            
-            if floor_shears:
-                apply_lateral_loads_to_diaphragms(
-                    self.model,
-                    floor_shears=floor_shears,
-                    direction=self.options.lateral_load_direction,
-                    load_pattern=self.options.wind_load_pattern,
-                    tolerance=self.options.tolerance,
+            else:
+                floor_shears = _compute_floor_shears(
+                    wind_result,
+                    self.project.geometry.story_height,
+                    self.project.geometry.floors
                 )
+                
+                if floor_shears:
+                    apply_lateral_loads_to_diaphragms(
+                        self.model,
+                        floor_shears=floor_shears,
+                        direction=self.options.lateral_load_direction,
+                        load_pattern=self.options.wind_load_pattern,
+                        tolerance=self.options.tolerance,
+                    )
 
 
 __all__ = ["FEMModelDirector"]

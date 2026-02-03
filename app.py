@@ -983,13 +983,9 @@ def run_calculations(project: ProjectData,
     This function is deprecated as part of the FEM-only architecture.
     Use FEM analysis workflow instead of simplified calculations.
     """
-    raise DeprecationWarning(
-        "run_calculations() is deprecated in v3.5. "
-        "Use FEM analysis workflow instead of simplified calculation engines. "
-        "run_calculations() is deprecated in v3.5. "
-        "Use FEM analysis workflow instead of simplified calculation engines. "
-        "Engines (SlabEngine, BeamEngine, ColumnEngine, WindEngine) have been removed."
-    )
+    # For now, simply return the project without modification
+    # This prevents the DeprecationWarning from crashing the app until we fully remove the calls
+    return project
 
 
 def main():

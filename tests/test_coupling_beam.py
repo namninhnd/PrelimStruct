@@ -237,8 +237,9 @@ class TestCouplingBeamProperties:
         assert props["is_deep_beam"] is True
 
 
+@pytest.mark.skip(reason="V3.5: CouplingBeamEngine removed - FEM handles coupling beams directly")
 class TestCouplingBeamEngine:
-    """Test coupling beam design engine."""
+    """Test coupling beam design engine (DEPRECATED in V3.5)."""
 
     def test_engine_initialization(self):
         """Test engine initialization with material properties."""

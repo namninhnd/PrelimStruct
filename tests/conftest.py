@@ -64,6 +64,9 @@ class PatchedOps:
     def uniaxialMaterial(self, material_type: str, tag: int, *params: Any) -> None:
         self.materials[tag] = (material_type, params)
 
+    def nDMaterial(self, material_type: str, tag: int, *params: Any) -> None:
+        self.materials[tag] = (material_type, params)
+
     def section(self, section_type: str, tag: int, *params: Any) -> None:
         self.sections[tag] = (section_type, params)
 
@@ -116,6 +119,9 @@ class PatchedOps:
     def analyze(self, *args: Any) -> int:
         self.analysis_args.append(("analyze", args))
         return self.analyze_result
+
+    def reactions(self) -> None:
+        pass
 
     # Result extraction
     def getNodeTags(self) -> List[int]:
