@@ -753,33 +753,39 @@ def _render_load_combinations() -> Dict[str, Any]:
                         st.session_state.selected_combinations.discard(c.name)
                     st.rerun()
             
-            # Display checkboxes
+            # Scrollable container for combinations (using container with max height)
             if len(combos) > 10:
-                # Wind combos - use 3 columns for compact display
-                cols = st.columns(3)
-                for i, combo in enumerate(combos):
-                    col_idx = i % 3
-                    with cols[col_idx]:
-                        is_selected = combo.name in st.session_state.selected_combinations
-                        label = f"{combo.name}"
-                        if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
-                                      help=combo.to_equation()):
-                            st.session_state.selected_combinations.add(combo.name)
-                        else:
-                            st.session_state.selected_combinations.discard(combo.name)
+                combo_container = st.container(height=300)
             else:
-                # Other categories - use 2 columns
-                cols = st.columns(2) if len(combos) > 1 else st.columns(1)
-                for i, combo in enumerate(combos):
-                    col_idx = i % len(cols)
-                    with cols[col_idx]:
-                        is_selected = combo.name in st.session_state.selected_combinations
-                        label = f"{combo.name}: {combo.to_equation()}"
-                        if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
-                                      help=combo.description):
-                            st.session_state.selected_combinations.add(combo.name)
-                        else:
-                            st.session_state.selected_combinations.discard(combo.name)
+                combo_container = st.container()
+            
+            with combo_container:
+                if len(combos) > 10:
+                    # Wind combos - use 3 columns for compact display
+                    cols = st.columns(3)
+                    for i, combo in enumerate(combos):
+                        col_idx = i % 3
+                        with cols[col_idx]:
+                            is_selected = combo.name in st.session_state.selected_combinations
+                            label = f"{combo.name}"
+                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
+                                          help=combo.to_equation()):
+                                st.session_state.selected_combinations.add(combo.name)
+                            else:
+                                st.session_state.selected_combinations.discard(combo.name)
+                else:
+                    # Other categories - use 2 columns
+                    cols = st.columns(2) if len(combos) > 1 else st.columns(1)
+                    for i, combo in enumerate(combos):
+                        col_idx = i % len(cols)
+                        with cols[col_idx]:
+                            is_selected = combo.name in st.session_state.selected_combinations
+                            label = f"{combo.name}: {combo.to_equation()}"
+                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
+                                          help=combo.description):
+                                st.session_state.selected_combinations.add(combo.name)
+                            else:
+                                st.session_state.selected_combinations.discard(combo.name)
         
         return selected_count
     

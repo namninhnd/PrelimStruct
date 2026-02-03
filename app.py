@@ -21,11 +21,11 @@ from src.core.data_models import (
 from src.core.constants import CARBON_FACTORS
 from src.core.load_tables import LIVE_LOAD_TABLE
 
-# Import engines
-from src.engines.slab_engine import SlabEngine
-from src.engines.beam_engine import BeamEngine
-from src.engines.column_engine import ColumnEngine
-from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
+# V3.5: Engine imports removed - FEM-only architecture
+# from src.engines.slab_engine import SlabEngine
+# from src.engines.beam_engine import BeamEngine
+# from src.engines.column_engine import ColumnEngine
+# from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
 
 # Import FEM modules
 from src.fem.core_wall_geometry import (
@@ -820,149 +820,18 @@ def run_calculations(project: ProjectData,
                      override_col: int = 0,
                      secondary_along_x: bool = False,
                      num_secondary_beams: int = 3) -> ProjectData:
-    """Run all structural calculations with optional overrides"""
-    # Create engines
-    slab_engine = SlabEngine(project)
-    beam_engine = BeamEngine(project)
-    column_engine = ColumnEngine(project)
-
-    # Slab design
-    project.slab_result = slab_engine.calculate()
-
-    # Apply slab override if specified
-    if override_slab > 0:
-        project.slab_result.thickness = override_slab
-        project.slab_result.self_weight = (override_slab / 1000) * 24.5
-        project.slab_result.status = "OVERRIDE"
-        # Recalculate utilization: compare to minimum required thickness
-        min_span = min(project.geometry.bay_x, project.geometry.bay_y)
-        min_required = (min_span * 1000) / 26  # Basic span/depth ratio
-        project.slab_result.utilization = min_required / override_slab if override_slab > 0 else 1.0
-
-    # Beam design - determine spans based on secondary beam direction
-    # Secondary beams are INTERNAL to the bay, primary beams are on the perimeter
-    if secondary_along_x:
-        # Secondary beams along X (internal), Primary beams along Y (perimeter)
-        # Secondary beams span in X-direction, supported by primary beams at Y=0 and Y=bay_y
-        secondary_span = project.geometry.bay_x
-        primary_span = project.geometry.bay_y
-        # Tributary width for secondary beam = spacing between secondary beams
-        if num_secondary_beams > 0:
-            secondary_tributary = project.geometry.bay_y / (num_secondary_beams + 1)
-        else:
-            secondary_tributary = project.geometry.bay_y / 2
-        # Primary beam carries load from secondary beams
-        primary_tributary = project.geometry.bay_y / 2
-    else:
-        # Secondary beams along Y (internal), Primary beams along X (perimeter)
-        # Secondary beams span in Y-direction, supported by primary beams at X=0 and X=bay_x
-        secondary_span = project.geometry.bay_y
-        primary_span = project.geometry.bay_x
-        # Tributary width for secondary beam
-        if num_secondary_beams > 0:
-            secondary_tributary = project.geometry.bay_x / (num_secondary_beams + 1)
-        else:
-            secondary_tributary = project.geometry.bay_x / 2
-        # Primary beam carries load from secondary beams
-        primary_tributary = project.geometry.bay_x / 2
-
-    project.primary_beam_result = beam_engine.calculate_primary_beam(primary_tributary)
-    project.secondary_beam_result = beam_engine.calculate_secondary_beam(secondary_tributary)
-
-    # Apply primary beam overrides if specified
-    if override_pri_beam_w > 0 or override_pri_beam_d > 0:
-        if override_pri_beam_w > 0:
-            project.primary_beam_result.width = override_pri_beam_w
-        if override_pri_beam_d > 0:
-            project.primary_beam_result.depth = override_pri_beam_d
-        project.primary_beam_result.status = "OVERRIDE"
-        # Recalculate utilization based on moment capacity
-        width = project.primary_beam_result.width
-        depth = project.primary_beam_result.depth
-        d_eff = depth - 50  # effective depth
-        if d_eff > 0 and width > 0:
-            # Moment capacity: M_cap = 0.156 * fcu * b * d^2
-            fcu = project.materials.fcu_beam
-            M_cap = 0.156 * fcu * width * (d_eff ** 2) / 1e6  # kNm
-            moment = project.primary_beam_result.moment
-            # Shear capacity check
-            v = project.primary_beam_result.shear * 1000 / (width * d_eff)
-            v_max = 0.8 * (fcu ** 0.5)
-            shear_util = v / v_max if v_max > 0 else 0
-            moment_util = moment / M_cap if M_cap > 0 else 1.0
-            project.primary_beam_result.utilization = max(moment_util, shear_util)
-
-    # Apply secondary beam overrides if specified
-    if override_sec_beam_w > 0 or override_sec_beam_d > 0:
-        if override_sec_beam_w > 0:
-            project.secondary_beam_result.width = override_sec_beam_w
-        if override_sec_beam_d > 0:
-            project.secondary_beam_result.depth = override_sec_beam_d
-        project.secondary_beam_result.status = "OVERRIDE"
-        # Recalculate utilization based on moment capacity
-        width = project.secondary_beam_result.width
-        depth = project.secondary_beam_result.depth
-        d_eff = depth - 50  # effective depth
-        if d_eff > 0 and width > 0:
-            fcu = project.materials.fcu_beam
-            M_cap = 0.156 * fcu * width * (d_eff ** 2) / 1e6  # kNm
-            moment = project.secondary_beam_result.moment
-            v = project.secondary_beam_result.shear * 1000 / (width * d_eff)
-            v_max = 0.8 * (fcu ** 0.5)
-            shear_util = v / v_max if v_max > 0 else 0
-            moment_util = moment / M_cap if M_cap > 0 else 1.0
-            project.secondary_beam_result.utilization = max(moment_util, shear_util)
-
-    # Column design (interior for now)
-    project.column_result = column_engine.calculate(ColumnPosition.INTERIOR)
-
-    # Apply column override if specified
-    if override_col > 0:
-        project.column_result.dimension = override_col
-        project.column_result.status = "OVERRIDE"
-        # Recalculate utilization based on axial capacity
-        fcu = project.materials.fcu_column
-        fy = 500  # Steel yield strength
-        Ac = override_col * override_col  # Column area mm²
-        # Axial capacity: N_cap = 0.35 * fcu * Ac + 0.67 * fy * 0.02 * Ac (2% steel)
-        N_cap = (0.35 * fcu * Ac + 0.67 * fy * 0.02 * Ac) / 1000  # kN
-        axial_load = project.column_result.axial_load
-        project.column_result.utilization = axial_load / N_cap if N_cap > 0 else 1.0
-
-    # Wind / Lateral analysis
-    if project.lateral.building_width == 0:
-        project.lateral.building_width = project.geometry.bay_x
-    if project.lateral.building_depth == 0:
-        project.lateral.building_depth = project.geometry.bay_y
-
-    wind_engine = WindEngine(project)
-    project.wind_result = wind_engine.calculate_wind_loads()
-
-    # Core wall check and drift calculation (if core defined)
-    if project.lateral.core_geometry:
-        # Calculate drift using DriftEngine
-        drift_engine = DriftEngine(project)
-        project.wind_result = drift_engine.calculate_drift(project.wind_result)
-
-        # Check core wall stresses
-        core_engine = CoreWallEngine(project)
-        project.core_wall_result = core_engine.check_core_wall(project.wind_result)
-    else:
-        # Moment frame system - distribute lateral loads to columns
-        column_loads = wind_engine.distribute_lateral_to_columns(project.wind_result)
-        if column_loads and project.column_result:
-            # Update column with lateral loads
-            first_col_load = list(column_loads.values())[0]
-            project.column_result.lateral_shear = first_col_load[0]
-            project.column_result.lateral_moment = first_col_load[1]
-            project.column_result.has_lateral_loads = True
-
-            # V3.5: check_combined_load() removed - combined_utilization set by ColumnEngine.calculate()
-
-    # Calculate carbon emission
-    project.concrete_volume, project.carbon_emission = calculate_carbon_emission(project)
-
-    return project
+    """DEPRECATED IN V3.5: Run all structural calculations with optional overrides
+    
+    This function is deprecated as part of the FEM-only architecture.
+    Use FEM analysis workflow instead of simplified calculations.
+    """
+    raise DeprecationWarning(
+        "run_calculations() is deprecated in v3.5. "
+        "Use FEM analysis workflow instead of simplified calculation engines. "
+        "run_calculations() is deprecated in v3.5. "
+        "Use FEM analysis workflow instead of simplified calculation engines. "
+        "Engines (SlabEngine, BeamEngine, ColumnEngine, WindEngine) have been removed."
+    )
 
 
 def main():
@@ -1658,32 +1527,38 @@ def main():
                 # Scrollable container for combinations (using container with max height)
                 # For wind combos (many), display in 3 columns; others in 2 columns
                 if len(combos) > 10:
-                    # Wind combos - use 3 columns for compact display
-                    cols = st.columns(3)
-                    for i, combo in enumerate(combos):
-                        col_idx = i % 3
-                        with cols[col_idx]:
-                            is_selected = combo.name in st.session_state.selected_combinations
-                            # Shorter label for wind combos
-                            label = f"{combo.name}"
-                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}", 
-                                          help=combo.to_equation()):
-                                st.session_state.selected_combinations.add(combo.name)
-                            else:
-                                st.session_state.selected_combinations.discard(combo.name)
+                    combo_container = st.container(height=300)
                 else:
-                    # Other categories - use 2 columns
-                    cols = st.columns(2) if len(combos) > 1 else st.columns(1)
-                    for i, combo in enumerate(combos):
-                        col_idx = i % len(cols)
-                        with cols[col_idx]:
-                            is_selected = combo.name in st.session_state.selected_combinations
-                            label = f"{combo.name}: {combo.to_equation()}"
-                            if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
-                                          help=combo.description):
-                                st.session_state.selected_combinations.add(combo.name)
-                            else:
-                                st.session_state.selected_combinations.discard(combo.name)
+                    combo_container = st.container()
+                
+                with combo_container:
+                    if len(combos) > 10:
+                        # Wind combos - use 3 columns for compact display
+                        cols = st.columns(3)
+                        for i, combo in enumerate(combos):
+                            col_idx = i % 3
+                            with cols[col_idx]:
+                                is_selected = combo.name in st.session_state.selected_combinations
+                                # Shorter label for wind combos
+                                label = f"{combo.name}"
+                                if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}", 
+                                              help=combo.to_equation()):
+                                    st.session_state.selected_combinations.add(combo.name)
+                                else:
+                                    st.session_state.selected_combinations.discard(combo.name)
+                    else:
+                        # Other categories - use 2 columns
+                        cols = st.columns(2) if len(combos) > 1 else st.columns(1)
+                        for i, combo in enumerate(combos):
+                            col_idx = i % len(cols)
+                            with cols[col_idx]:
+                                is_selected = combo.name in st.session_state.selected_combinations
+                                label = f"{combo.name}: {combo.to_equation()}"
+                                if st.checkbox(label, value=is_selected, key=f"combo_{combo.name}",
+                                              help=combo.description):
+                                    st.session_state.selected_combinations.add(combo.name)
+                                else:
+                                    st.session_state.selected_combinations.discard(combo.name)
             
             return selected_count
         
