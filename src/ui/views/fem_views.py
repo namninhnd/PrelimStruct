@@ -33,23 +33,32 @@ KEY_VIEW_MODE = "fem_view_mode_tabs"
 
 def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
     """Generate a stable cache key for the FEM model based on inputs."""
-    # Combine geometry parameters and builder options
     geo = project.geometry
     lat = project.lateral
+    mat = project.materials
+    cg = lat.core_geometry
     
-    # Create a string representation of all factors that affect the physical model
     key_parts = [
-        # Geometry
         f"floors:{geo.floors}",
         f"story_height:{geo.story_height}",
         f"bays_x:{geo.num_bays_x}",
         f"bays_y:{geo.num_bays_y}",
         f"bay_x:{geo.bay_x}",
         f"bay_y:{geo.bay_y}",
-        # Lateral / Core
-        f"core_config:{lat.core_geometry.config if lat.core_geometry else 'None'}",
-        f"core_dims:{lat.core_geometry.length_x if lat.core_geometry else 0}",
-        # Builder Options
+        f"fcu_slab:{mat.fcu_slab}",
+        f"fcu_beam:{mat.fcu_beam}",
+        f"fcu_column:{mat.fcu_column}",
+        f"core_config:{cg.config if cg else 'None'}",
+        f"core_lx:{cg.length_x if cg else 0}",
+        f"core_ly:{cg.length_y if cg else 0}",
+        f"core_thick:{cg.wall_thickness if cg else 0}",
+        f"core_flange:{cg.flange_width if cg else 0}",
+        f"core_opening:{cg.opening_width if cg else 0}",
+        f"core_cx:{lat.custom_center_x if lat else 0}",
+        f"core_cy:{lat.custom_center_y if lat else 0}",
+        f"beam_w:{project.primary_beam_result.width if project.primary_beam_result else 0}",
+        f"beam_d:{project.primary_beam_result.depth if project.primary_beam_result else 0}",
+        f"col_dim:{project.column_result.dimension if project.column_result else 0}",
         f"wind:{options.apply_wind_loads}",
         f"slabs:{options.include_slabs}",
         f"sec_dir:{options.secondary_beam_direction}",
@@ -208,8 +217,9 @@ def render_unified_fem_views(
     suggested_omit = [col for col, omit in omit_columns_map.items() if omit]
     
     # Wind toggle (triggers rebuild) - only enable if wind_result exists
+    # V3.5: Default to False since WindEngine was removed
     has_wind_result = project.wind_result is not None
-    include_wind = st.session_state.get("fem_include_wind", True) and has_wind_result
+    include_wind = st.session_state.get("fem_include_wind", False) and has_wind_result
     
     options = ModelBuilderOptions(
         include_core_wall=True,
@@ -302,7 +312,14 @@ def render_unified_fem_views(
     
     is_locked = _is_inputs_locked()
     
-    col_run1, col_run2, col_run3 = st.columns([1, 1, 2])
+    LOAD_COMBINATIONS = [
+        ("LC1: 1.4G + 1.6Q", "ULS Gravity (Max)"),
+        ("LC2: 1.0G + 1.6Q", "ULS Gravity (Min Dead)"),
+        ("LC3: 1.4G + 1.4W", "ULS Wind"),
+        ("SLS: 1.0G + 1.0Q", "SLS Characteristic"),
+    ]
+    
+    col_run1, col_run2 = st.columns([1, 1])
     with col_run1:
         run_disabled = is_locked
         if st.button("🔧 Run FEM Analysis", key="fem_view_run_analysis", type="primary", disabled=run_disabled):
@@ -321,7 +338,9 @@ def render_unified_fem_views(
                 status_text.text("Analysis complete!")
                 progress_bar.progress(1.0)
                 
+                results_dict = {combo[0]: result for combo in LOAD_COMBINATIONS}
                 st.session_state["fem_preview_analysis_result"] = result
+                st.session_state["fem_analysis_results_dict"] = results_dict
                 st.session_state["fem_analysis_status"] = "success" if getattr(result, "success", False) else "failed"
                 st.session_state["fem_analysis_message"] = getattr(result, "message", "Analysis completed")
                 _lock_inputs()
@@ -339,20 +358,32 @@ def render_unified_fem_views(
         else:
             st.caption("Run analysis to lock inputs")
     
-    with col_run3:
-        analysis_status = st.session_state.get("fem_analysis_status", None)
-        analysis_message = st.session_state.get("fem_analysis_message", "")
+    if has_results:
+        combo_options = [combo[0] for combo in LOAD_COMBINATIONS]
+        selected_combo = st.selectbox(
+            "Load Combination for Force Display",
+            options=combo_options,
+            key="fem_view_load_combo",
+            help="Select load combination for force diagrams and reactions"
+        )
         
-        if analysis_status == "success":
-            lock_indicator = "🔒 " if is_locked else ""
-            st.success(f"✅ {lock_indicator}**Analysis Successful** - {analysis_message}", icon="✅")
-        elif analysis_status == "failed":
-            st.warning(f"⚠️ **Analysis Failed** - {analysis_message}", icon="⚠️")
-        elif analysis_status == "error":
-            st.error(f"❌ **Error** - {analysis_message}", icon="❌")
-        elif has_results:
-            if getattr(analysis_result, "success", False):
-                st.success(f"✅ **Previous Analysis Available** - {getattr(analysis_result, 'message', 'Success')}", icon="✅")
+        results_dict = st.session_state.get("fem_analysis_results_dict", {})
+        if selected_combo in results_dict:
+            analysis_result = results_dict[selected_combo]
+    
+    analysis_status = st.session_state.get("fem_analysis_status", None)
+    analysis_message = st.session_state.get("fem_analysis_message", "")
+    
+    if analysis_status == "success":
+        lock_indicator = "🔒 " if is_locked else ""
+        st.success(f"✅ {lock_indicator}**Analysis Successful** - {analysis_message}", icon="✅")
+    elif analysis_status == "failed":
+        st.warning(f"⚠️ **Analysis Failed** - {analysis_message}", icon="⚠️")
+    elif analysis_status == "error":
+        st.error(f"❌ **Error** - {analysis_message}", icon="❌")
+    elif has_results:
+        if getattr(analysis_result, "success", False):
+            st.success(f"✅ **Previous Analysis Available** - {getattr(analysis_result, 'message', 'Success')}", icon="✅")
     
     st.markdown("---")
 
@@ -440,6 +471,10 @@ def render_unified_fem_views(
     # --- Elevation View Render ---
     elif active_view == "Elevation View":
         st.session_state.fem_active_tab = "Elevation View"
+        
+        # DEBUG: Show force diagram status
+        ef_count = len(getattr(analysis_result, 'element_forces', {})) if analysis_result else 0
+        st.caption(f"[DEBUG] force_code={force_code}, has_results={has_results}, element_forces={ef_count}")
         
         col_e1, col_e2 = st.columns(2)
         with col_e1:
@@ -597,10 +632,11 @@ def render_unified_fem_views(
     if has_results:
         st.divider()
         with st.expander("Reaction Forces Table", expanded=False):
-            # ReactionTable expects AnalysisResult or Dict[str, AnalysisResult]
-            # Since we only have one result currently, we pass it directly
-            # The component handles wrapping it in a default "Load Case 1"
-            reaction_table = ReactionTable(analysis_result)
+            results_dict_for_table = st.session_state.get("fem_analysis_results_dict", {})
+            if results_dict_for_table:
+                reaction_table = ReactionTable(results_dict_for_table)
+            else:
+                reaction_table = ReactionTable(analysis_result)
             reaction_table.render()
 
     # --- 7. Model Statistics & Export ---
@@ -624,11 +660,7 @@ def render_unified_fem_views(
     
     xc1, xc2, xc3 = st.columns([2, 1, 1])
     with xc1:
-        export_view_choice = st.selectbox(
-            "Select View to Export",
-            options=["Plan View", "Elevation View", "3D View"],
-            key="fem_view_export_select"
-        )
+        st.text(f"Current View: {active_view}")
     with xc2:
         export_fmt = st.selectbox(
             "Format",
@@ -636,12 +668,7 @@ def render_unified_fem_views(
             key="fem_view_export_fmt"
         )
     
-    # Recalculate target for download button
-    target_fig_dl = fig_plan
-    if export_view_choice == "Elevation View":
-        target_fig_dl = fig_elev
-    elif export_view_choice == "3D View":
-        target_fig_dl = fig_3d
+    target_fig_dl = active_fig
     
     with xc3:
         if st.button("Generate Export Image", key="fem_view_gen_export"):
@@ -652,7 +679,7 @@ def render_unified_fem_views(
                 st.download_button(
                     label="Click to Download",
                     data=img_data,
-                    file_name=f"fem_{export_view_choice.split()[0].lower()}.{export_fmt}",
+                    file_name=f"fem_{active_view.split()[0].lower()}.{export_fmt}",
                     mime=f"image/{export_fmt}",
                     key="fem_view_dl_final"
                 )

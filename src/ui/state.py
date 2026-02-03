@@ -20,7 +20,7 @@ STATE_DEFAULTS = {
     
     # FEM View State
     "fem_active_view": "plan",  # Current view mode: "plan" | "elevation" | "3d"
-    "fem_include_wind": True,  # Include wind loads in FEM views
+    "fem_include_wind": False,  # V3.5: Default False since WindEngine was removed
     "fem_view_elev_dir": "X",  # Elevation direction for FEM Views section
     
     # FEM Analysis Cache
@@ -37,7 +37,7 @@ STATE_DEFAULTS = {
     "fem_preview_show_ghost": True,  # Show ghost columns near core wall
     
     # FEM Preview Model Options
-    "fem_preview_include_wind": True,  # Include wind loads in FEM preview model
+    "fem_preview_include_wind": False,  # V3.5: Default False since WindEngine was removed
     
     # FEM Preview View Settings
     "fem_preview_color_mode": "Element Type",  # Color scheme: "Element Type" | "Utilization"

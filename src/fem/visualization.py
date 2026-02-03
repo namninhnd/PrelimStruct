@@ -782,8 +782,8 @@ def render_section_forces(
                 hoverinfo='skip'
             ))
         
-        # Annotations at 5 points
-        for pos_frac in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        # Annotations at 3 points (ends + midpoint)
+        for pos_frac in [0.0, 0.5, 1.0]:
             force_at_pos = force_i + pos_frac * (force_j - force_i)
             
             if abs(force_at_pos) < 1e-9:
@@ -900,8 +900,8 @@ def render_section_forces_plan(
                 hoverinfo='skip'
             ))
         
-        # Annotations at 5 points
-        for pos_frac in [0.0, 0.25, 0.5, 0.75, 1.0]:
+        # Annotations at 3 points (ends + midpoint)
+        for pos_frac in [0.0, 0.5, 1.0]:
             force_at_pos = force_i + pos_frac * (force_j - force_i)
             
             if abs(force_at_pos) < 1e-9:
@@ -1687,8 +1687,10 @@ def create_elevation_view(model: ModelLike,
     Args:
         model: Structural model data to visualize
         config: Visualization configuration
-        view_direction: "X" for XZ view, "Y" for YZ view
-        gridline_coord: Optional gridline coordinate filter
+        view_direction: "X" for XZ view (looking along Y), "Y" for YZ view (looking along X)
+        gridline_coord: Optional gridline coordinate filter. When view_direction="X",
+                       this filters by Y coordinate. When view_direction="Y", filters by X.
+                       If None, all elements are projected (flattened).
         utilization: Optional dict of element tag -> utilization ratio for coloring
         displaced_nodes: Optional dict of node tag -> (dx, dy, dz) displacements
         reactions: Optional dict of node tag -> [Fx, Fy, Fz, Mx, My, Mz] reactions
@@ -1705,16 +1707,31 @@ def create_elevation_view(model: ModelLike,
 
     fig = go.Figure()
     use_utilization = utilization is not None and len(utilization) > 0
+    
+    # Gridline filtering tolerance (m)
+    gridline_tol = 0.5
 
     # Select coordinate mapping based on view direction
     if view_direction == "X":
         get_h = lambda n: n.x  # Horizontal axis
         get_v = lambda n: n.z  # Vertical axis
+        get_filter_coord = lambda n: n.y  # Filter by Y when viewing XZ plane
         h_label = "X (m)"
     else:
         get_h = lambda n: n.y
         get_v = lambda n: n.z
+        get_filter_coord = lambda n: n.x  # Filter by X when viewing YZ plane
         h_label = "Y (m)"
+    
+    def element_passes_filter(node_i: Node, node_j: Node) -> bool:
+        """Check if element passes gridline filter."""
+        if gridline_coord is None:
+            return True  # No filter, show all
+        # Check if both nodes are on or near the gridline
+        coord_i = get_filter_coord(node_i)
+        coord_j = get_filter_coord(node_j)
+        return (abs(coord_i - gridline_coord) < gridline_tol and 
+                abs(coord_j - gridline_coord) < gridline_tol)
 
     # Draw columns (vertical elements)
     col_h: List[Optional[float]] = []
@@ -1725,6 +1742,9 @@ def create_elevation_view(model: ModelLike,
     for elem_tag in classification["columns"]:
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
+        
+        if not element_passes_filter(node_i, node_j):
+            continue
 
         if use_utilization:
             util = utilization.get(elem_tag, 0.0)
@@ -1779,6 +1799,10 @@ def create_elevation_view(model: ModelLike,
                 continue
             
             if gx is not None and gy is not None:
+                filter_val = gy if view_direction == "X" else gx
+                if gridline_coord is not None and abs(filter_val - gridline_coord) >= gridline_tol:
+                    continue
+                    
                 h_val = gx if view_direction == "X" else gy
                 ghost_h.extend([h_val, h_val, None])
                 ghost_v.extend([z_min, z_max, None])
@@ -1804,6 +1828,9 @@ def create_elevation_view(model: ModelLike,
     for elem_tag in classification["beams"]:
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
+        
+        if not element_passes_filter(node_i, node_j):
+            continue
 
         # Project beams based on view direction
         if view_direction == "X":
@@ -1869,6 +1896,10 @@ def create_elevation_view(model: ModelLike,
     for elem_tag in classification["coupling_beams"]:
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
+        
+        if not element_passes_filter(node_i, node_j):
+            continue
+            
         cb_h.extend([get_h(node_i), get_h(node_j), None])
         cb_v.extend([get_v(node_i), get_v(node_j), None])
 
@@ -2062,12 +2093,17 @@ def create_elevation_view(model: ModelLike,
 
     if config.section_force_type and analysis_result:
         from src.fem.results_processor import ResultsProcessor
+        import logging
+        _logger = logging.getLogger(__name__)
+        _logger.warning(f"[FORCE_DIAG_ELEV] force_type={config.section_force_type}")
+        _logger.warning(f"[FORCE_DIAG_ELEV] element_forces_count={len(getattr(analysis_result, 'element_forces', {}))}")
         
         forces = ResultsProcessor.extract_section_forces(
             result=analysis_result,
             model=model,
             force_type=config.section_force_type
         )
+        _logger.warning(f"[FORCE_DIAG_ELEV] extracted_elements={len(forces.elements)}")
         
         auto_scale = calculate_auto_scale_factor(
             forces=forces,

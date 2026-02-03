@@ -177,7 +177,7 @@ class ModelBuilderOptions:
     include_slabs: bool = True
     trim_beams_at_core: bool = True
     apply_gravity_loads: bool = True
-    apply_wind_loads: bool = True
+    apply_wind_loads: bool = False  # V3.5: Default False since WindEngine removed
     apply_rigid_diaphragms: bool = True
     secondary_beam_direction: str = "Y"  # "X" or "Y" - direction of secondary beams
     num_secondary_beams: int = 0  # Number of internal secondary beams per bay (default: no subdivisions)
