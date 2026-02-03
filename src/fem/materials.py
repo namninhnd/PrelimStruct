@@ -360,6 +360,121 @@ def get_elastic_beam_section(concrete: ConcreteProperties,
     }
 
 
+def get_plane_stress_material(concrete: ConcreteProperties,
+                               material_tag: int) -> dict:
+    """Generate ElasticIsotropic NDMaterial for PlaneStress shell elements.
+    
+    This creates a plane-stress elastic isotropic material suitable for
+    ShellMITC4 elements with PlateFiberSection.
+    
+    Args:
+        concrete: ConcreteProperties object
+        material_tag: Unique material tag for OpenSeesPy
+    
+    Returns:
+        Dictionary with OpenSeesPy NDMaterial parameters:
+        - material_type: "ElasticIsotropic"
+        - tag: material tag
+        - E: Young's modulus (Pa)
+        - nu: Poisson's ratio (0.2 for concrete)
+        - rho: Mass density (kg/m³)
+    
+    Example:
+        >>> concrete = create_concrete_material(ConcreteGrade.C40)
+        >>> params = get_plane_stress_material(concrete, material_tag=10)
+        >>> params['material_type']
+        'ElasticIsotropic'
+    """
+    return {
+        'material_type': 'ElasticIsotropic',
+        'tag': material_tag,
+        'E': concrete.E_Pa,
+        'nu': 0.2,  # Poisson's ratio for concrete (HK Code typical)
+        'rho': concrete.density_kg_m3,
+    }
+
+
+def get_plate_fiber_section(nd_material_tag: int,
+                            thickness: float,
+                            section_tag: int) -> dict:
+    """Generate PlateFiberSection for ShellMITC4 elements.
+    
+    PlateFiberSection integrates through thickness using 5 Gauss points.
+    This is used with ShellMITC4 elements for wall modeling.
+    
+    Args:
+        nd_material_tag: Tag of previously defined NDMaterial (PlaneStress)
+        thickness: Wall/slab thickness in meters
+        section_tag: Unique section tag for OpenSeesPy
+    
+    Returns:
+        Dictionary with OpenSeesPy section parameters:
+        - section_type: "PlateFiber"
+        - tag: section tag
+        - matTag: NDMaterial tag
+        - h: thickness (m)
+    
+    Example:
+        >>> params = get_plate_fiber_section(nd_material_tag=10, thickness=0.3, section_tag=20)
+        >>> params['section_type']
+        'PlateFiber'
+    """
+    if thickness <= 0:
+        raise ValueError("Thickness must be positive")
+    
+    return {
+        'section_type': 'PlateFiber',
+        'tag': section_tag,
+        'matTag': nd_material_tag,
+        'h': thickness,  # meters
+    }
+
+
+def get_elastic_membrane_plate_section(
+    concrete: ConcreteProperties,
+    thickness: float,
+    section_tag: int
+) -> dict:
+    """Generate Elastic Membrane Plate Section for slab shell elements.
+    
+    This is a simpler section type than PlateFiber that directly combines
+    membrane and plate behavior. Suitable for linear elastic analysis of slabs.
+    
+    OpenSees command: section('ElasticMembranePlateSection', tag, E, nu, h, rho)
+    
+    Args:
+        concrete: ConcreteProperties object
+        thickness: Slab thickness in meters
+        section_tag: Unique section tag for OpenSeesPy
+    
+    Returns:
+        Dictionary with OpenSeesPy section parameters:
+        - section_type: "ElasticMembranePlateSection"
+        - tag: section tag
+        - E: Young's modulus (Pa)
+        - nu: Poisson's ratio (0.2 for concrete)
+        - h: thickness (m)
+        - rho: mass density (kg/m³)
+    
+    Example:
+        >>> concrete = create_concrete_material(ConcreteGrade.C40)
+        >>> params = get_elastic_membrane_plate_section(concrete, 0.15, section_tag=30)
+        >>> params['section_type']
+        'ElasticMembranePlateSection'
+    """
+    if thickness <= 0:
+        raise ValueError("Thickness must be positive")
+    
+    return {
+        'section_type': 'ElasticMembranePlateSection',
+        'tag': section_tag,
+        'E': concrete.E_Pa,
+        'nu': 0.2,  # Poisson's ratio for concrete
+        'h': thickness,  # meters
+        'rho': concrete.density_kg_m3,
+    }
+
+
 # Material tag counter for automatic tag generation
 _material_tag_counter = 0
 _section_tag_counter = 0

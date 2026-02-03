@@ -17,7 +17,7 @@ class PatchedOps:
         self.reset()
         self.analyze_result = 0
         self.displacements: Dict[int, List[float]] = {}
-        self._node_reactions: Dict[int, List[float]] = {}  # Renamed to avoid conflict with reactions() method
+        self.reactions: Dict[int, List[float]] = {}
         self.element_forces: Dict[int, List[float]] = {}
         self.element_responses: Dict[Tuple[int, str], Any] = {}
         self.eigenvalues: List[float] = []
@@ -62,10 +62,6 @@ class PatchedOps:
 
     # Materials and sections
     def uniaxialMaterial(self, material_type: str, tag: int, *params: Any) -> None:
-        self.materials[tag] = (material_type, params)
-
-    def nDMaterial(self, material_type: str, tag: int, *params: Any) -> None:
-        """NDMaterial for shell elements (e.g., ElasticIsotropic, PlaneStress)."""
         self.materials[tag] = (material_type, params)
 
     def section(self, section_type: str, tag: int, *params: Any) -> None:
@@ -133,14 +129,7 @@ class PatchedOps:
         return self.displacements.get(node_tag, [0.0] * 6)
 
     def nodeReaction(self, node_tag: int) -> List[float]:
-        return self._node_reactions.get(node_tag, [0.0] * 6)
-
-    def reactions(self) -> None:
-        """Compute reactions (required before nodeReaction in real OpenSeesPy).
-        
-        In mock, reactions are pre-populated in _node_reactions, so this is a no-op.
-        """
-        pass
+        return self.reactions.get(node_tag, [0.0] * 6)
 
     def getEleTags(self) -> List[int]:
         return sorted(self.elements.keys())

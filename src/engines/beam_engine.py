@@ -1,40 +1,40 @@
 """
 Beam Design Engine - HK Code 2013 Compliant
-Implements pattern loading, shear hard-stop, and deep beam detection.
+
+V3.5: FEM-only - Simplified calculations removed.
+Use FEM results from src/fem/ module instead.
+
+This module is deprecated for preliminary calculations.
+All beam design should be performed using:
+- src/fem/model_builder.py for geometry to FEM conversion
+- src/fem/fem_engine.py for OpenSeesPy analysis
+- src/fem/results_processor.py for post-processing
 """
 
-import math
-from typing import Dict, Any, List, Tuple, Optional
-
-from ..core.constants import (
-    CONCRETE_DENSITY,
-    STEEL_YIELD_STRENGTH,
-    LINK_YIELD_STRENGTH,
-    GAMMA_C,
-    GAMMA_S,
-    MIN_BEAM_WIDTH,
-    MIN_BEAM_DEPTH,
-    MAX_BEAM_DEPTH,
-    MAX_BEAM_WIDTH,
-    DEEP_BEAM_RATIO,
-    SHEAR_STRESS_MAX_FACTOR,
-    SHEAR_STRESS_MAX_LIMIT,
-)
-from ..core.data_models import (
-    ProjectData,
-    BeamResult,
-)
+from typing import Dict, Any, List
+from ..core.data_models import ProjectData, BeamResult, FEMElementType
+from ..core.load_tables import get_cover
 
 
 class BeamEngine:
     """
-    Beam design calculator per HK Code 2013.
-    Includes pattern loading factor and shear capacity checks.
+    V3.5 DEPRECATED: Beam design now handled by FEM module.
+
+    This class is retained for backward compatibility but should not be used.
+    Use src.fem.FEMModel for all beam analysis.
     """
 
     def __init__(self, project: ProjectData):
         self.project = project
         self.calculations: List[Dict[str, Any]] = []
+
+        # V3.5: FEM-only
+        self._add_calc_step(
+            "V3.5 Migration Notice",
+            "Simplified beam design has been removed.\n"
+            "Use FEM module (src/fem/) for all structural analysis.",
+            "PrelimStruct V3.5 - FEM-only architecture"
+        )
 
     def _add_calc_step(self, description: str, calculation: str, reference: str = ""):
         """Add a calculation step to the audit trail"""
@@ -44,536 +44,121 @@ class BeamEngine:
             "reference": reference
         })
 
-    def calculate_primary_beam(self, tributary_width: float) -> BeamResult:
+    def calculate_primary_beam(self, tributary_width: float):
         """
-        Design primary (main) beam.
-        Spans in the longer direction, supporting secondary beams or slabs.
+        Perform primary beam design checks using FEM results.
+        
+        Args:
+           tributary_width: Ignored in FEM mode (used for compatibility signature)
         """
-        self.calculations = []
-        geometry = self.project.geometry
+        return self._calculate_beam_from_fem("Primary Beam")
 
-        # Primary beam spans the longer direction
-        L_beam = max(geometry.bay_x, geometry.bay_y)
+    def calculate_secondary_beam(self, tributary_width: float):
+        """
+        Perform secondary beam design checks using FEM results.
+        
+        Args:
+           tributary_width: Ignored in FEM mode (used for compatibility signature)
+        """
+        return self._calculate_beam_from_fem("Secondary Beam")
 
-        self._add_calc_step(
-            "PRIMARY BEAM DESIGN",
-            f"Span = {L_beam} m, Tributary width = {tributary_width} m",
-            "Main girder spanning longer direction"
+    def _calculate_beam_from_fem(self, label: str) -> BeamResult:
+        """Internal method to verify beam design from FEM forces."""
+        # Default result
+        h = 600 # Estimate
+        b = 300
+        result = BeamResult(
+            element_type="Beam",
+            size=f"{b}x{h}",
+            status="FAIL",
+            width=b,
+            depth=h
         )
 
-        return self._design_beam(L_beam, tributary_width, "Primary")
+        if not self.project.fem_result:
+            result.warnings.append("No FEM results found. Run analysis first.")
+            return result
 
-    def calculate_secondary_beam(self, tributary_width: float) -> BeamResult:
-        """
-        Design secondary beam.
-        Spans in the shorter direction, supporting slab directly.
-        """
-        self.calculations = []
-        geometry = self.project.geometry
+        # Extract max M and V
+        max_M = 0.0
+        max_V = 0.0
+        
+        # Identify beam elements
+        # For now, just take ALL beam elements. In refined version, filter by 'primary'/'secondary' tag if available
+        # But ProjectData doesn't store 'primary' vs 'secondary' tags in Element yet (generic mesh).
+        # So we just envelope all beams.
+        beam_ids = set()
+        if self.project.fem_model and self.project.fem_model.mesh:
+            for elem in self.project.fem_model.mesh.elements:
+                if elem.element_type == FEMElementType.BEAM:
+                    beam_ids.add(elem.element_id)
+        
+        check_ids = beam_ids if beam_ids else None
 
-        # Secondary beam spans the shorter direction
-        L_beam = min(geometry.bay_x, geometry.bay_y)
+        for lc_result in self.project.fem_result.load_case_results:
+            for elem_id, forces in lc_result.element_forces.items():
+                if check_ids and elem_id not in check_ids:
+                    continue
+                
+                # Check M and V
+                # OpenSees BeamColumn: Mz, Vy usually
+                m_abs = 0.0
+                v_abs = 0.0
+                
+                # Try to find moments
+                for key in ["Mz", "Mz_i", "Mz_j", "M_max"]:
+                    if key in forces: m_abs = max(m_abs, abs(forces[key]))
+                
+                # Try to find shear
+                for key in ["Vy", "Vy_i", "Vy_j", "V_max"]:
+                    if key in forces: v_abs = max(v_abs, abs(forces[key]))
+                    
+                if m_abs > max_M: max_M = m_abs
+                if v_abs > max_V: max_V = v_abs
 
-        self._add_calc_step(
-            "SECONDARY BEAM DESIGN",
-            f"Span = {L_beam} m, Tributary width = {tributary_width} m",
-            "Secondary beam spanning shorter direction"
-        )
-
-        return self._design_beam(L_beam, tributary_width, "Secondary")
-
-    def _design_beam(
-        self, L_beam: float, tributary_width: float, beam_type: str
-    ) -> BeamResult:
-        """
-        Core beam design logic.
-        Implements iterative sizing with shear checks.
-        """
-        materials = self.project.materials
-        reinforcement = self.project.reinforcement
-
-        # Get slab load
-        slab_load = self._get_slab_load()
-
-        # Calculate line load on beam
-        line_load = slab_load * tributary_width
-
-        self._add_calc_step(
-            "Calculate beam line load",
-            f"w_slab = {slab_load:.2f} kPa\n"
-            f"w_beam = {slab_load:.2f} × {tributary_width} = {line_load:.2f} kN/m",
-            "UDL from slab on beam"
-        )
-
-        # Check for deep beam before proceeding
-        is_deep_beam, _ = self._check_deep_beam(L_beam, MIN_BEAM_DEPTH)
-
-        if is_deep_beam:
-            return self._create_deep_beam_result(L_beam, beam_type)
-
-        # Calculate maximum allowable shear stress
-        v_max = self._get_max_shear_stress(materials.fcu_beam)
-
-        # Initial beam sizing based on span/depth ratio
-        h_initial = max(MIN_BEAM_DEPTH, math.ceil((L_beam * 1000) / 18))
-        b_initial = max(MIN_BEAM_WIDTH, math.ceil(h_initial / 2 / 25) * 25)
-
-        self._add_calc_step(
-            "Initial beam sizing (L/d = 18)",
-            f"h_initial = max({MIN_BEAM_DEPTH}, {L_beam * 1000:.0f}/18) = {h_initial} mm\n"
-            f"b_initial = max({MIN_BEAM_WIDTH}, h/2) = {b_initial} mm",
-            "HK Code 2013 - Table 7.4"
-        )
-
-        # Iterative sizing loop
-        result = self._iterate_beam_size(
-            L_beam, line_load, b_initial, h_initial,
-            materials.fcu_beam, materials.cover_beam,
-            reinforcement.min_rho_beam, reinforcement.max_rho_beam,
-            v_max, beam_type
-        )
-
+        result.moment = max_M
+        result.shear = max_V
+        
+        # Design Check (HK Code 2013)
+        cover = self.project.materials.cover_beam
+        bar_dia = 20
+        d = h - cover - bar_dia/2
+        fcu = self.project.materials.fcu_beam
+        fy = self.project.materials.fy
+        fyv = self.project.materials.fyv
+        
+        # Flexure
+        K = (max_M * 1e6) / (b * d**2 * fcu)
+        if K > 0.156:
+             result.status = "FAIL"
+             result.warnings.append(f"Section over-reinforced (K={K:.3f})")
+             return result
+             
+        import math
+        z_d = 0.5 + math.sqrt(0.25 - K/0.9)
+        z = min(0.95 * d, z_d * d)
+        As_req = (max_M * 1e6) / (0.87 * fy * z)
+        
+        # Shear
+        # v = V / (b*d)
+        v = (max_V * 1000) / (b * d)
+        v_c = 0.6 # Simplified shear capacity for prelim check
+        vc_max = min(0.8 * math.sqrt(fcu), 7.0)
+        
+        if v > vc_max:
+             result.status = "FAIL"
+             result.warnings.append(f"Shear too high (v={v:.2f} MPa > {vc_max:.2f})")
+        elif v > v_c:
+             result.shear_reinforcement_required = True
+             # Calculate links
+             # Asv/sv = b(v-vc) / (0.87fyv)
+             result.shear_reinforcement_area = (b * (v - v_c)) / (0.87 * fyv) * 1000 # per m
+             result.status = "OK"
+        else:
+             result.status = "OK"
+             
+        result.shear_capacity = v_c * b * d / 1000.0 # kN
+        
         return result
 
-    def _get_slab_load(self) -> float:
-        """Get design load from slab (or estimate if not calculated yet)"""
-        if self.project.slab_result:
-            slab_self_weight = self.project.slab_result.self_weight
-        else:
-            # Estimate 200mm slab
-            slab_self_weight = 0.2 * CONCRETE_DENSITY
-
-        gk = slab_self_weight + self.project.loads.dead_load
-        qk = self.project.loads.live_load
-
-        # ULS factored load
-        return 1.4 * gk + 1.6 * qk
-
-    def _get_max_shear_stress(self, fcu: int) -> float:
-        """Calculate maximum allowable shear stress (v_max)"""
-        v_max = min(SHEAR_STRESS_MAX_FACTOR * math.sqrt(fcu), SHEAR_STRESS_MAX_LIMIT)
-
-        self._add_calc_step(
-            "Calculate maximum shear stress limit",
-            f"v_max = min(0.8√fcu, 7.0) = min(0.8×√{fcu}, 7.0) = {v_max:.2f} MPa",
-            "HK Code 2013 - Clause 6.1.2.4"
-        )
-
-        return v_max
-
-    def _check_deep_beam(self, L_beam: float, h_beam: int) -> Tuple[bool, float]:
-        """Check if beam qualifies as deep beam (L/d < 2.0)"""
-        ratio = (L_beam * 1000) / h_beam
-        is_deep = ratio < DEEP_BEAM_RATIO
-
-        return is_deep, ratio
-
-    def _create_deep_beam_result(self, L_beam: float, beam_type: str) -> BeamResult:
-        """Create result for deep beam case (requires STM analysis)"""
-        self._add_calc_step(
-            "DEEP BEAM DETECTED",
-            f"L/d ratio < {DEEP_BEAM_RATIO} - Strut-and-Tie Model (STM) required",
-            "HK Code 2013 - Clause 6.7"
-        )
-
-        return BeamResult(
-            element_type=f"{beam_type} Beam",
-            size="DEEP BEAM - STM Required",
-            utilization=0.0,
-            status="DEEP BEAM",
-            warnings=["Deep beam detected - standard beam theory not applicable",
-                     "Strut-and-Tie Model (STM) analysis required"],
-            calculations=self.calculations,
-            is_deep_beam=True,
-        )
-
-    def _iterate_beam_size(
-        self,
-        L_beam: float,
-        line_load: float,
-        b_initial: int,
-        h_initial: int,
-        fcu: int,
-        cover: int,
-        min_rho: float,
-        max_rho: float,
-        v_max: float,
-        beam_type: str
-    ) -> BeamResult:
-        """
-        Iteratively size beam to satisfy BOTH shear AND flexure requirements.
-        Implements shear "hard stop" check and flexural capacity check.
-        Continues iteration until utilization <= 1.0.
-        """
-        b = b_initial
-        h = h_initial
-        iteration = 0
-        max_iterations = 30  # Increased for larger beams
-        design_ok = False
-        max_size_reached = False
-        shear_reinf_required = False
-        shear_reinf_area = 0.0
-        link_spacing = 0
-
-        # Get pattern load factor from user input
-        pattern_factor = self.project.beam_design.pattern_load_factor
-
-        while not design_ok and iteration < max_iterations and not max_size_reached:
-            iteration += 1
-
-            # Calculate beam self-weight
-            self_weight = (b / 1000) * (h / 1000) * CONCRETE_DENSITY
-
-            # Total load including self-weight
-            total_load = line_load + self_weight
-
-            # Apply pattern loading factor for moment (user-defined)
-            moment = pattern_factor * total_load * (L_beam ** 2) / 8
-
-            # Shear at support
-            shear = total_load * L_beam / 2
-
-            # Effective depth
-            d_eff = h - cover - 10 - 16  # cover + link + bar/2 (T32)
-            d_eff = max(d_eff, 250)
-
-            # Check deep beam condition
-            is_deep, ld_ratio = self._check_deep_beam(L_beam, h)
-            if is_deep:
-                return self._create_deep_beam_result(L_beam, beam_type)
-
-            # === FLEXURAL CHECK FIRST ===
-            K = (moment * 1e6) / (b * d_eff ** 2 * fcu)
-            K_bal = 0.156
-            flex_ok = K <= K_bal
-
-            if not flex_ok:
-                self._add_calc_step(
-                    f"Iteration {iteration}: Flexure check",
-                    f"Size: {b}×{h}mm, d_eff={d_eff}mm\n"
-                    f"M = {moment:.1f} kNm\n"
-                    f"K = {K:.4f} > K_bal = {K_bal} - INCREASE SIZE",
-                    "HK Code 2013 - Clause 6.1.2.4"
-                )
-
-                # Increase depth by 50mm, width by 25mm (half)
-                h = min(MAX_BEAM_DEPTH, h + 50)
-                b = min(MAX_BEAM_WIDTH, b + 25)
-
-                h = math.ceil(h / 25) * 25
-                b = math.ceil(b / 25) * 25
-
-                if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
-                    max_size_reached = True
-                    self._add_calc_step(
-                        "Maximum beam size reached",
-                        f"Max size {b}×{h}mm still exceeds flexural capacity",
-                        "Consider compression reinforcement or reduced span"
-                    )
-                continue
-
-            # === SHEAR "HARD STOP" CHECK ===
-            v_actual = (shear * 1000) / (b * d_eff)
-
-            if v_actual > v_max:
-                # Hard stop - section cannot be designed with links
-                self._add_calc_step(
-                    f"Iteration {iteration}: SHEAR HARD STOP",
-                    f"v = V/(bd) = {shear * 1000:.0f}/({b}×{d_eff}) = {v_actual:.2f} MPa\n"
-                    f"v_max = {v_max:.2f} MPa\n"
-                    f"v > v_max - RESIZE REQUIRED",
-                    "HK Code 2013 - Clause 6.1.2.4 - Cannot design shear links"
-                )
-
-                # Increase width by 50mm up to beam height, then increase height by 50mm
-                if b + 50 <= h:
-                    b = min(MAX_BEAM_WIDTH, b + 50)
-                else:
-                    h = min(MAX_BEAM_DEPTH, h + 50)
-
-                h = math.ceil(h / 25) * 25
-                b = math.ceil(b / 25) * 25
-
-                if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
-                    max_size_reached = True
-                    self._add_calc_step(
-                        "Maximum beam size reached",
-                        f"Max size {b}×{h}mm still exceeds v_max",
-                        "Consider deeper beam or transfer structure"
-                    )
-
-                continue
-
-            # === CONCRETE SHEAR CAPACITY CHECK ===
-            v_c, V_capacity = self._calculate_shear_capacity(
-                b, d_eff, fcu, min_rho
-            )
-
-            shear_ok = True  # Will be set to True with or without reinforcement
-
-            if shear > V_capacity:
-                # Check if shear reinforcement can make up the difference
-                if v_actual <= v_max:
-                    # Can use shear reinforcement
-                    shear_reinf_required = True
-                    V_s = shear - V_capacity
-                    shear_reinf_area, link_spacing = self._design_shear_reinforcement(
-                        V_s, d_eff, b
-                    )
-
-                    self._add_calc_step(
-                        f"Iteration {iteration}: Shear reinforcement required",
-                        f"V = {shear:.1f} kN > V_c = {V_capacity:.1f} kN\n"
-                        f"v = {v_actual:.2f} MPa ≤ v_max = {v_max:.2f} MPa (OK for links)",
-                        "HK Code 2013 - Clause 6.1.2.5"
-                    )
-            else:
-                shear_ratio = shear / V_capacity
-
-                self._add_calc_step(
-                    f"Iteration {iteration}: Shear capacity adequate",
-                    f"Size: {b}×{h}mm\n"
-                    f"V = {shear:.1f} kN ≤ V_c = {V_capacity:.1f} kN\n"
-                    f"Utilization = {shear_ratio:.2f}",
-                    "HK Code 2013 - Clause 6.1.2.4"
-                )
-
-                # Check if nominal shear reinforcement needed
-                if shear > 0.5 * V_capacity:
-                    shear_reinf_required = True
-                    shear_reinf_area, link_spacing = self._design_min_shear_reinforcement(
-                        b, d_eff
-                    )
-
-            # Calculate preliminary utilization to verify design is OK
-            _, V_capacity_check = self._calculate_shear_capacity(b, d_eff, fcu, min_rho)
-            shear_util = shear / V_capacity_check if V_capacity_check > 0 else 1.5
-
-            # When shear reinforcement is provided, effective capacity is higher
-            if shear_reinf_required and v_actual <= v_max:
-                # Links can handle shear beyond concrete capacity
-                shear_util = min(shear_util, 0.95)  # Links OK, reduce utilization
-
-            # Check both flexure AND shear utilization are acceptable
-            final_util_ok = (K / K_bal <= 1.0) and (shear_util <= 1.0)
-
-            if not final_util_ok and not max_size_reached:
-                # Need to resize even if basic checks passed
-                self._add_calc_step(
-                    f"Iteration {iteration}: Utilization check",
-                    f"K/K_bal = {K/K_bal:.2f}, Shear util = {shear_util:.2f}\n"
-                    f"Resizing to reduce utilization",
-                    "Target utilization <= 1.0"
-                )
-                h = min(MAX_BEAM_DEPTH, h + 50)
-                b = min(MAX_BEAM_WIDTH, b + 25)
-                h = math.ceil(h / 25) * 25
-                b = math.ceil(b / 25) * 25
-
-                if h >= MAX_BEAM_DEPTH and b >= MAX_BEAM_WIDTH:
-                    max_size_reached = True
-                continue
-
-            # Both flexure and shear OK with utilization <= 1.0
-            design_ok = flex_ok and shear_ok and final_util_ok
-
-        # Final calculations
-        self_weight = (b / 1000) * (h / 1000) * CONCRETE_DENSITY
-        total_load = line_load + self_weight
-        moment = pattern_factor * total_load * (L_beam ** 2) / 8
-        shear = total_load * L_beam / 2
-        d_eff = h - cover - 10 - 16
-
-        # Calculate flexural reinforcement
-        As_req, flex_utilization = self._calculate_flexural_reinforcement(
-            moment, b, d_eff, fcu
-        )
-
-        # Final result
-        self._add_calc_step(
-            "Final beam design",
-            f"Size: {b} × {h} mm\n"
-            f"Moment: {moment:.2f} kNm (with {pattern_factor}× pattern factor)\n"
-            f"Shear: {shear:.2f} kN",
-            "Design complete"
-        )
-
-        # Determine status
-        warnings = []
-        status = "OK"
-
-        if max_size_reached and not design_ok:
-            status = "FAIL"
-            warnings.append("Maximum beam size reached - capacity exceeded")
-            warnings.append("Consider deeper beam, transfer structure, or reduced span")
-
-        if flex_utilization > 1.0:
-            status = "FAIL"
-            warnings.append(f"Flexural utilization {flex_utilization:.2f} exceeds 1.0")
-
-        _, V_capacity = self._calculate_shear_capacity(b, d_eff, fcu, min_rho)
-
-        # Calculate shear utilization
-        shear_utilization = shear / V_capacity if V_capacity > 0 else 1.5
-
-        # When shear reinforcement is provided and shear stress is acceptable,
-        # the links handle the excess shear - effective utilization is lower
-        if shear_reinf_required:
-            v_check = (shear * 1000) / (b * d_eff)
-            v_max_check = min(SHEAR_STRESS_MAX_FACTOR * math.sqrt(fcu), SHEAR_STRESS_MAX_LIMIT)
-            if v_check <= v_max_check:
-                # Links can handle the difference
-                shear_utilization = min(shear_utilization, 0.95)
-
-        # Check if shear still exceeds capacity with links
-        if shear_utilization > 1.0 and not shear_reinf_required:
-            status = "FAIL"
-            warnings.append(f"Shear utilization {shear_utilization:.2f} exceeds 1.0")
-
-        return BeamResult(
-            element_type=f"{beam_type} Beam",
-            size=f"{b} × {h} mm",
-            utilization=max(flex_utilization, shear_utilization),
-            status=status,
-            warnings=warnings,
-            calculations=self.calculations,
-            width=b,
-            depth=h,
-            moment=round(moment, 2),
-            shear=round(shear, 2),
-            shear_capacity=round(V_capacity, 2),
-            shear_reinforcement_required=shear_reinf_required,
-            shear_reinforcement_area=round(shear_reinf_area, 1),
-            link_spacing=link_spacing,
-            is_deep_beam=False,
-            iteration_count=iteration,
-        )
-
-    def _calculate_shear_capacity(
-        self, b: int, d: int, fcu: int, rho: float
-    ) -> Tuple[float, float]:
-        """
-        Calculate concrete shear capacity per HK Code Cl 6.1.2.4.
-        Returns (v_c in MPa, V_c in kN)
-        """
-        # Reinforcement ratio factor (limited to 3%)
-        rho_factor = min(100 * (rho / 100), 3.0)
-
-        # Depth factor
-        depth_factor = (400 / max(d, 250)) ** 0.25
-
-        # Concrete strength factor (limited to 40 MPa)
-        fcu_factor = (min(fcu, 40) / 25) ** (1/3)
-
-        # v_c per Clause 6.1.2.4
-        v_c = 0.79 * (rho_factor ** (1/3)) * depth_factor * fcu_factor / 1.25
-
-        # Shear capacity in kN
-        V_c = v_c * b * d / 1000
-
-        self._add_calc_step(
-            "Calculate concrete shear capacity",
-            f"ρ factor = min(100×{rho/100:.4f}, 3.0) = {rho_factor:.3f}\n"
-            f"Depth factor = (400/{d})^0.25 = {depth_factor:.3f}\n"
-            f"fcu factor = ({min(fcu, 40)}/25)^(1/3) = {fcu_factor:.3f}\n"
-            f"v_c = 0.79 × {rho_factor:.3f}^(1/3) × {depth_factor:.3f} × {fcu_factor:.3f} / 1.25 = {v_c:.3f} MPa\n"
-            f"V_c = {v_c:.3f} × {b} × {d} / 1000 = {V_c:.1f} kN",
-            "HK Code 2013 - Clause 6.1.2.4"
-        )
-
-        return v_c, V_c
-
-    def _design_shear_reinforcement(
-        self, V_s: float, d: int, b: int
-    ) -> Tuple[float, int]:
-        """
-        Design shear reinforcement for additional shear V_s.
-        Returns (A_sv/s in mm²/m, practical link spacing in mm)
-        """
-        # A_sv/s = V_s × 10³ / (0.87 × f_yv × d)
-        A_sv_s = (V_s * 1000) / (0.87 * LINK_YIELD_STRENGTH * d)
-
-        # Minimum shear reinforcement
-        A_sv_min = (0.4 * b) / (0.87 * LINK_YIELD_STRENGTH)
-
-        A_sv_s = max(A_sv_s, A_sv_min)
-
-        # Calculate practical link spacing (T10 2-leg links)
-        link_dia = 10
-        area_per_link = math.pi * (link_dia / 2) ** 2 * 2  # 2 legs
-        required_spacing = (area_per_link * 1000) / A_sv_s
-
-        # Apply spacing limits
-        max_spacing = min(int(0.75 * d), 300)
-        min_spacing = 100
-        link_spacing = min(max_spacing, max(min_spacing, int(required_spacing / 25) * 25))
-
-        self._add_calc_step(
-            "Design shear reinforcement",
-            f"V_s = {V_s:.1f} kN\n"
-            f"A_sv/s = V_s × 10³ / (0.87 × {LINK_YIELD_STRENGTH} × {d}) = {A_sv_s:.1f} mm²/m\n"
-            f"Provide T{link_dia} links @ {link_spacing}mm c/c (2 legs)",
-            "HK Code 2013 - Clause 6.1.2.5"
-        )
-
-        return A_sv_s, link_spacing
-
-    def _design_min_shear_reinforcement(
-        self, b: int, d: int
-    ) -> Tuple[float, int]:
-        """Design minimum/nominal shear reinforcement"""
-        A_sv_min = (0.4 * b) / (0.87 * LINK_YIELD_STRENGTH)
-
-        # T10 2-leg links
-        link_dia = 10
-        area_per_link = math.pi * (link_dia / 2) ** 2 * 2
-        required_spacing = (area_per_link * 1000) / A_sv_min
-
-        max_spacing = min(int(0.75 * d), 300)
-        link_spacing = min(max_spacing, max(100, int(required_spacing / 25) * 25))
-
-        self._add_calc_step(
-            "Design minimum shear reinforcement",
-            f"A_sv,min = 0.4 × {b} / (0.87 × {LINK_YIELD_STRENGTH}) = {A_sv_min:.1f} mm²/m\n"
-            f"Provide T{link_dia} links @ {link_spacing}mm c/c",
-            "HK Code 2013 - Clause 6.1.2.5"
-        )
-
-        return A_sv_min, link_spacing
-
-    def _calculate_flexural_reinforcement(
-        self, moment: float, b: int, d: int, fcu: int
-    ) -> Tuple[float, float]:
-        """
-        Calculate required flexural reinforcement.
-        Returns (As_required in mm², utilization ratio)
-        """
-        fy = STEEL_YIELD_STRENGTH
-
-        # K = M / (bd²fcu)
-        K = (moment * 1e6) / (b * d ** 2 * fcu)
-        K_bal = 0.156
-
-        utilization = K / K_bal
-
-        if K > K_bal:
-            self._add_calc_step(
-                "Flexural design",
-                f"K = {K:.4f} > K_bal = {K_bal}\n"
-                f"Compression reinforcement required or section too small",
-                "HK Code 2013 - Clause 6.1.2.4"
-            )
-            As_req = 0
-        else:
-            z = d * (0.5 + math.sqrt(0.25 - K / 0.9))
-            z = min(z, 0.95 * d)
-            As_req = (moment * 1e6) / (0.87 * fy * z)
-
-            self._add_calc_step(
-                "Flexural design",
-                f"K = {K:.4f}, z = {z:.0f} mm\n"
-                f"As,req = M / (0.87 × fy × z) = {As_req:.0f} mm²",
-                "HK Code 2013 - Clause 6.1.2.4"
-            )
-
-        return As_req, utilization
+    # V3.5: All private helper methods removed - use FEM module

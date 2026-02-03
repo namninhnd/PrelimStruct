@@ -4,7 +4,7 @@ Data Models for PrelimStruct - Preliminary Structural Design Platform
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from .constants import (
     GAMMA_G, GAMMA_Q, GAMMA_W,
@@ -12,18 +12,6 @@ from .constants import (
     CONCRETE_DENSITY,
 )
 from .load_tables import get_cover, get_live_load
-
-
-class SlabType(Enum):
-    """Slab spanning type"""
-    ONE_WAY = "one-way"
-    TWO_WAY = "two-way"
-
-
-class SpanDirection(Enum):
-    """Main span direction for one-way slabs"""
-    ALONG_X = "alongX"
-    ALONG_Y = "alongY"
 
 
 class ExposureClass(Enum):
@@ -43,13 +31,6 @@ class TerrainCategory(Enum):
     CITY_CENTRE = "D"       # City centre with tall buildings
 
 
-class CoreLocation(Enum):
-    """Core wall location in building plan"""
-    CENTER = "center"       # Core at building center (symmetric)
-    SIDE = "side"           # Core at building side (one-way eccentricity)
-    CORNER = "corner"       # Core at building corner (two-way eccentricity)
-
-
 class CoreWallConfig(Enum):
     """Core wall configuration types for FEM modeling.
     
@@ -63,6 +44,61 @@ class CoreWallConfig(Enum):
     TUBE_SIDE_OPENING = "tube_side_opening"     # Tube/box with side flange opening
 
 
+class WindLoadCase(Enum):
+    """HK Code 2019 Wind Load Cases (24 Cases).
+    
+    Format: W{Case}_{Angle}_{Eccentricity}
+    Angles: 0, 45, 90, 135, 180, 225, 270, 315
+    Eccentricity: C (Center), P (Positive), N (Negative)
+    """
+    # 0 Degree (X-Direction)
+    W01_000_C = "W1"
+    W02_000_P = "W2"
+    W03_000_N = "W3"
+    # 45 Degree
+    W04_045_C = "W4"
+    W05_045_P = "W5"
+    W06_045_N = "W6"
+    # 90 Degree (Y-Direction)
+    W07_090_C = "W7"
+    W08_090_P = "W8"
+    W09_090_N = "W9"
+    # 135 Degree
+    W10_135_C = "W10"
+    W11_135_P = "W11"
+    W12_135_N = "W12"
+    # 180 Degree (-X Direction)
+    W13_180_C = "W13"
+    W14_180_P = "W14"
+    W15_180_N = "W15"
+    # 225 Degree
+    W16_225_C = "W16"
+    W17_225_P = "W17"
+    W18_225_N = "W18"
+    # 270 Degree (-Y Direction)
+    W19_270_C = "W19"
+    W20_270_P = "W20"
+    W21_270_N = "W21"
+    # 315 Degree
+    W22_315_C = "W22"
+    W23_315_P = "W23"
+    W24_315_N = "W24"
+
+
+class SeismicLoadCase(Enum):
+    """Eurocode 8 Seismic Load Cases."""
+    E1_X_POS = "E1"  # X Direction
+    E2_Y_POS = "E2"  # Y Direction
+    E3_Z_POS = "E3"  # Vertical (Optional)
+
+
+class LoadCaseCategory(Enum):
+    """Load case categories for organization."""
+    GRAVITY = "GRAVITY"
+    WIND = "WIND"
+    SEISMIC = "SEISMIC"
+
+
 class ColumnPosition(Enum):
     """Column position for eccentricity calculation"""
     INTERIOR = "interior"
@@ -71,10 +107,279 @@ class ColumnPosition(Enum):
 
 
 class LoadCombination(Enum):
-    """Load combination types"""
-    ULS_GRAVITY = "uls_gravity"      # 1.4Gk + 1.6Qk
-    ULS_WIND = "uls_wind"            # 1.0Gk + 1.4Wk
-    SLS_DEFLECTION = "sls_deflection"  # 1.0Gk + 1.0Qk
+    """Load combination types per HK Code 2013 Table 2.1 and Eurocode 8."""
+    # ULS Gravity-Dominant Combinations (HK Code 2013 Table 2.1, Case 1)
+    ULS_GRAVITY_1 = "uls_gravity_1"  # 1.4Gk + 1.6Qk
+    ULS_GRAVITY_2 = "uls_gravity_2"  # 1.0Gk + 1.6Qk (min dead load)
+    
+    # ULS Wind Combinations (HK Code 2013 Table 2.1, Case 2)
+    ULS_WIND_1 = "uls_wind_1"        # 1.4Gk + 1.4Wk (dead + wind, no live)
+    ULS_WIND_2 = "uls_wind_2"        # 1.0Gk + 1.4Wk (min dead + wind)
+    ULS_WIND_3 = "uls_wind_3"        # 1.2Gk + 1.2Qk + 1.2Wk (combined action)
+    ULS_WIND_4 = "uls_wind_4"        # 1.2Gk + 1.2Qk - 1.2Wk (wind reversal)
+    
+    # ULS Seismic Combinations (Eurocode 8, EN 1998-1 Cl 4.2.4)
+    ULS_SEISMIC_X_POS = "uls_seismic_x_pos"  # 1.0Gk + 0.3Qk + 1.0Ed_x
+    ULS_SEISMIC_X_NEG = "uls_seismic_x_neg"  # 1.0Gk + 0.3Qk - 1.0Ed_x
+    ULS_SEISMIC_Y_POS = "uls_seismic_y_pos"  # 1.0Gk + 0.3Qk + 1.0Ed_y
+    ULS_SEISMIC_Y_NEG = "uls_seismic_y_neg"  # 1.0Gk + 0.3Qk - 1.0Ed_y
+    ULS_SEISMIC_XY_1 = "uls_seismic_xy_1"    # 1.0Gk + 0.3Qk + 0.3Ed_x + 1.0Ed_y
+    ULS_SEISMIC_XY_2 = "uls_seismic_xy_2"    # 1.0Gk + 0.3Qk + 1.0Ed_x + 0.3Ed_y
+    
+    # ULS Accidental Combinations (HK Code 2013 Table 2.1, Case 3)
+    ULS_ACCIDENTAL = "uls_accidental"  # 1.0Gk + 0.5Qk + 1.0Ad (notional loads)
+    
+    # SLS Combinations (HK Code 2013 Cl 3.4, 7.2-7.3)
+    SLS_CHARACTERISTIC = "sls_characteristic"  # 1.0Gk + 1.0Qk (deflection check)
+    SLS_FREQUENT = "sls_frequent"              # 1.0Gk + 0.5Qk (crack width check)
+    SLS_QUASI_PERMANENT = "sls_quasi_permanent"  # 1.0Gk + 0.3Qk (long-term deflection)
+
+
+class FEMElementType(Enum):
+    """FEM element types for mesh generation."""
+    BEAM = "beam"
+    PLATE = "plate"
+    SOLID = "solid"
+    COUPLING_BEAM = "coupling_beam"
+
+
+@dataclass
+class SupportCondition:
+    """Boundary condition definition for FEM supports.
+
+    Attributes:
+        node_tag: Node identifier matching mesh nodes
+        restraints: Fixity flags [ux, uy, uz, rx, ry, rz] (1=fixed, 0=free)
+        label: Optional description (e.g., "base_fixity")
+    """
+    node_tag: int
+    restraints: List[int] = field(default_factory=lambda: [0, 0, 0, 0, 0, 0])
+    label: str = ""
+
+    def __post_init__(self):
+        """Validate restraint definition."""
+        if len(self.restraints) != 6:
+            raise ValueError(
+                "SupportCondition.restraints must have 6 components [ux, uy, uz, rx, ry, rz]"
+            )
+        if not all(value in (0, 1) for value in self.restraints):
+            raise ValueError(
+                "SupportCondition.restraints must use 0 (free) or 1 (fixed) values"
+            )
+
+    @property
+    def is_fully_fixed(self) -> bool:
+        """Check if all translational and rotational DOFs are fixed."""
+        return all(value == 1 for value in self.restraints)
+
+
+@dataclass
+class NodalLoad:
+    """Nodal load definition for FEM analysis.
+
+    Attributes:
+        node_tag: Node identifier matching mesh nodes
+        load_values: Load vector [Fx, Fy, Fz, Mx, My, Mz] in N and N-m
+        load_pattern: Load pattern identifier (e.g., combination name)
+    """
+    node_tag: int
+    load_values: List[float]
+    load_pattern: str = "DEFAULT"
+
+    def __post_init__(self):
+        """Validate load definition."""
+        if len(self.load_values) != 6:
+            raise ValueError(
+                "NodalLoad.load_values must have 6 components [Fx, Fy, Fz, Mx, My, Mz]"
+            )
+
+
+@dataclass
+class MeshElement:
+    """Mesh element connectivity for FEM model.
+
+    Attributes:
+        element_id: Unique element identifier
+        element_type: Element formulation type (beam, plate, solid, coupling_beam)
+        node_tags: Node tags defining connectivity
+        section_id: Optional section identifier for property mapping
+        material_id: Optional material identifier for property mapping
+    """
+    element_id: int
+    element_type: FEMElementType
+    node_tags: List[int]
+    section_id: Optional[str] = None
+    material_id: Optional[str] = None
+
+    def __post_init__(self):
+        """Validate element connectivity."""
+        if len(self.node_tags) < 2:
+            raise ValueError("MeshElement requires at least two node tags for connectivity")
+
+
+@dataclass
+class MeshData:
+    """Mesh data container for FEM model generation.
+
+    Attributes:
+        node_coordinates: Mapping of node tag to (x, y, z) coordinates in meters
+        elements: List of mesh elements with connectivity and property references
+        supports: Boundary condition definitions for supports
+        loads: Nodal loads applied to the mesh
+    """
+    node_coordinates: Dict[int, Tuple[float, float, float]] = field(default_factory=dict)
+    elements: List[MeshElement] = field(default_factory=list)
+    supports: List[SupportCondition] = field(default_factory=list)
+    loads: List[NodalLoad] = field(default_factory=list)
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Summarize mesh contents for reporting."""
+        return {
+            "n_nodes": len(self.node_coordinates),
+            "n_elements": len(self.elements),
+            "n_supports": len(self.supports),
+            "n_loads": len(self.loads),
+        }
+
+    def get_fixed_nodes(self) -> List[int]:
+        """Return node tags that are fully fixed."""
+        return [support.node_tag for support in self.supports if support.is_fully_fixed]
+
+    def validate_connectivity(self) -> Tuple[bool, List[str]]:
+        """Validate that all element node_tags reference existing nodes.
+
+        Returns:
+            Tuple of (is_valid, error_messages):
+                - is_valid: True if all node references are valid
+                - error_messages: List of error descriptions for invalid references
+        """
+        errors: List[str] = []
+        valid_node_tags = set(self.node_coordinates.keys())
+
+        for element in self.elements:
+            for node_tag in element.node_tags:
+                if node_tag not in valid_node_tags:
+                    errors.append(
+                        f"Element {element.element_id} references non-existent node {node_tag}"
+                    )
+
+        # Also validate support node references
+        for support in self.supports:
+            if support.node_tag not in valid_node_tags:
+                errors.append(
+                    f"Support at node {support.node_tag} references non-existent node"
+                )
+
+        # Also validate load node references
+        for load in self.loads:
+            if load.node_tag not in valid_node_tags:
+                errors.append(
+                    f"Load at node {load.node_tag} references non-existent node"
+                )
+
+        return (len(errors) == 0, errors)
+
+
+@dataclass
+class FEMAnalysisSettings:
+    """Analysis configuration for FEM runs."""
+    analysis_type: str = "linear_static"
+    n_dimensions: int = 3
+    dof_per_node: int = 6
+    include_p_delta: bool = False
+    apply_rigid_diaphragms: bool = True
+    load_combinations: List[LoadCombination] = field(
+        default_factory=lambda: [
+            LoadCombination.ULS_GRAVITY_1,
+            LoadCombination.ULS_WIND_1,
+            LoadCombination.SLS_CHARACTERISTIC,
+        ]
+    )
+    solver: str = "openseespy"
+
+
+@dataclass
+class FEMModelInput:
+    """Input schema for FEM model generation."""
+    mesh: MeshData = field(default_factory=MeshData)
+    element_types: List[FEMElementType] = field(
+        default_factory=lambda: [FEMElementType.BEAM]
+    )
+    analysis_settings: FEMAnalysisSettings = field(default_factory=FEMAnalysisSettings)
+    description: str = ""
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Provide lightweight summary for reporting or serialization."""
+        mesh_summary = self.mesh.get_summary()
+        mesh_summary.update({
+            "element_types": [etype.value for etype in self.element_types],
+            "analysis_type": self.analysis_settings.analysis_type,
+            "n_dimensions": self.analysis_settings.n_dimensions,
+            "dof_per_node": self.analysis_settings.dof_per_node,
+        })
+        return mesh_summary
+
+
+@dataclass
+class LoadCaseResult:
+    """Result container for a single load combination."""
+    combination: LoadCombination
+    case_name: str = "DEFAULT"  # Specific combination name (e.g., "LC1", "W1_MAX")
+    node_displacements: Dict[int, List[float]] = field(default_factory=dict)
+    element_forces: Dict[int, Dict[str, float]] = field(default_factory=dict)
+    reactions: Dict[int, List[float]] = field(default_factory=dict)
+    stresses: Dict[int, float] = field(default_factory=dict)
+    strains: Dict[int, float] = field(default_factory=dict)
+
+
+@dataclass
+class EnvelopeValue:
+    """Envelope metrics across load combinations.
+
+    Attributes:
+        max_value: Maximum value across all load combinations
+        min_value: Minimum value across all load combinations
+        governing_max_case: Load combination that governs the maximum value
+        governing_min_case: Load combination that governs the minimum value
+        governing_max_location: Node/element tag where max occurs (for post-processing)
+        governing_min_location: Node/element tag where min occurs (for post-processing)
+    """
+    max_value: float = 0.0
+    min_value: float = 0.0
+    governing_max_case: Optional[LoadCombination] = None
+    governing_min_case: Optional[LoadCombination] = None
+    governing_max_location: Optional[int] = None
+    governing_min_location: Optional[int] = None
+
+
+@dataclass
+class EnvelopedResult:
+    """Enveloped FEM results (max/min across combinations)."""
+    displacements: EnvelopeValue = field(default_factory=EnvelopeValue)
+    reactions: EnvelopeValue = field(default_factory=EnvelopeValue)
+    stresses: EnvelopeValue = field(default_factory=EnvelopeValue)
+    strains: EnvelopeValue = field(default_factory=EnvelopeValue)
+
+
+@dataclass
+class FEMResult:
+    """FEM analysis results with load case breakdown and envelope."""
+    load_case_results: List[LoadCaseResult] = field(default_factory=list)
+    enveloped_results: EnvelopedResult = field(default_factory=EnvelopedResult)
+
+    def get_summary(self) -> Dict[str, Any]:
+        """Provide summary of FEM results for reporting."""
+        return {
+            "n_load_cases": len(self.load_case_results),
+            "enveloped": {
+                "max_displacement": self.enveloped_results.displacements.max_value,
+                "min_displacement": self.enveloped_results.displacements.min_value,
+                "max_stress": self.enveloped_results.stresses.max_value,
+                "min_stress": self.enveloped_results.stresses.min_value,
+                "max_reaction": self.enveloped_results.reactions.max_value,
+                "min_reaction": self.enveloped_results.reactions.min_value,
+            },
+        }
 
 
 @dataclass
@@ -101,19 +406,37 @@ class GeometryInput:
     def total_width_y(self) -> float:
         """Total building width in Y direction"""
         return self.bay_y * self.num_bays_y
+    
+    @property
+    def x_gridlines(self) -> List[float]:
+        """X-coordinate gridline positions."""
+        return [i * self.bay_x for i in range(self.num_bays_x + 1)]
+    
+    @property
+    def y_gridlines(self) -> List[float]:
+        """Y-coordinate gridline positions."""
+        return [i * self.bay_y for i in range(self.num_bays_y + 1)]
+
 
 
 @dataclass
 class LoadInput:
     """Loading inputs"""
-    live_load_class: str        # HK Code Table 3.1 class (e.g., "2")
+    live_load_class: str        # HK Code Table 3.1 class (e.g., "2") or "9" for custom
     live_load_sub: str          # HK Code Table 3.2 subdivision (e.g., "2.5")
     dead_load: float            # Superimposed dead load (kPa)
     storage_height: float = 0   # For height-dependent storage loads (m)
+    custom_live_load: Optional[float] = None  # Custom LL value in kPa (Class 9)
 
     @property
     def live_load(self) -> float:
-        """Get live load value from code tables"""
+        """Get live load value from code tables or custom input.
+        
+        If live_load_class is "9" (Other/Custom), returns the custom_live_load value.
+        Otherwise, looks up the value from HK Code Tables 3.1/3.2.
+        """
+        if self.live_load_class == "9" and self.custom_live_load is not None:
+            return self.custom_live_load
         return get_live_load(self.live_load_class, self.live_load_sub, self.storage_height)
 
 
@@ -253,6 +576,9 @@ class CouplingBeam:
 
         HK Code 2013 Cl 6.1.1.2: Deep beam when L/h < 2.0
         """
+        # Guard against None or zero values for defensive coding
+        if self.clear_span is None or self.depth is None:
+            return float('inf')
         if self.depth == 0:
             return float('inf')
         return self.clear_span / self.depth
@@ -263,14 +589,16 @@ class CouplingBeam:
 
         HK Code 2013 Cl 6.1.1.2: Deep beam when clear span ≤ 2 × overall depth
         """
+        # Guard against None values
+        if self.clear_span is None or self.depth is None:
+            return False
         return self.span_to_depth_ratio < 2.0
 
 
 @dataclass
 class SlabDesignInput:
     """Slab-specific design inputs"""
-    slab_type: SlabType = SlabType.TWO_WAY
-    span_direction: SpanDirection = SpanDirection.ALONG_X
+    pass
 
 
 @dataclass
@@ -282,12 +610,6 @@ class BeamDesignInput:
 @dataclass
 class LateralInput:
     """Lateral stability inputs"""
-    # Legacy fields (for backward compatibility with v2.1)
-    core_dim_x: float = 0       # Core wall outer dimension in X (m)
-    core_dim_y: float = 0       # Core wall outer dimension in Y (m)
-    core_thickness: float = 0.5  # Core wall thickness (m), default 500mm
-    core_location: CoreLocation = CoreLocation.CENTER  # Core location in plan
-    
     # v3.0 FEM fields
     core_wall_config: Optional[CoreWallConfig] = None  # Core wall configuration type
     wall_thickness: float = 500.0  # Wall thickness (mm) for FEM modeling
@@ -298,6 +620,11 @@ class LateralInput:
     terrain: TerrainCategory = TerrainCategory.URBAN
     building_width: float = 0   # Total building width (m)
     building_depth: float = 0   # Total building depth (m)
+
+    # Core Wall Location (Task 17.2)
+    location_type: str = "Center"  # "Center" or "Custom"
+    custom_center_x: Optional[float] = None
+    custom_center_y: Optional[float] = None
 
 
 @dataclass
@@ -338,8 +665,8 @@ class BeamResult(DesignResult):
     is_trimmed: bool = False                    # True if beam was trimmed at core wall
     original_span: Optional[float] = None       # Original span before trimming (m)
     trimmed_span: Optional[float] = None        # Trimmed span after trimming (m)
-    start_connection: Optional[str] = None      # Connection type at start ("moment", "pinned", "fixed")
-    end_connection: Optional[str] = None        # Connection type at end ("moment", "pinned", "fixed")
+    start_connection: Optional[str] = None      # Connection at start ("moment"/"pinned"/"fixed")
+    end_connection: Optional[str] = None        # Connection at end ("moment"/"pinned"/"fixed")
 
 
 @dataclass
@@ -423,7 +750,7 @@ class ProjectData:
     lateral: LateralInput = field(default_factory=LateralInput)
 
     # Design settings
-    load_combination: LoadCombination = LoadCombination.ULS_GRAVITY
+    load_combination: LoadCombination = LoadCombination.ULS_GRAVITY_1
 
     # Results (populated after calculation)
     slab_result: Optional[SlabResult] = None
@@ -432,6 +759,8 @@ class ProjectData:
     column_result: Optional[ColumnResult] = None
     core_wall_result: Optional[CoreWallResult] = None
     wind_result: Optional[WindResult] = None
+    fem_model: Optional[FEMModelInput] = None
+    fem_result: Optional[FEMResult] = None
 
     # Summary metrics
     concrete_volume: float = 0.0    # m³
@@ -463,9 +792,9 @@ class ProjectData:
         gk = self.total_dead_load
         qk = self.total_live_load
 
-        if self.load_combination == LoadCombination.ULS_GRAVITY:
+        if self.load_combination == LoadCombination.ULS_GRAVITY_1:
             return GAMMA_G * gk + GAMMA_Q * qk
-        elif self.load_combination == LoadCombination.SLS_DEFLECTION:
+        elif self.load_combination == LoadCombination.SLS_CHARACTERISTIC:
             return GAMMA_G_SLS * gk + GAMMA_Q_SLS * qk
         else:
             # Wind combination - return gravity portion only
@@ -502,7 +831,9 @@ class ProjectData:
             "summary": {
                 "concrete_volume": self.concrete_volume,
                 "carbon_emission": self.carbon_emission,
-            }
+            },
+            "fem_model": self.fem_model.get_summary() if self.fem_model else None,
+            "fem_result": self.fem_result.get_summary() if self.fem_result else None,
         }
 
 

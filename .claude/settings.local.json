@@ -6,7 +6,13 @@
       "Bash(python -m pytest tests/test_core_wall_geometry.py::TestTwoCBackToBackCoreWall -v)",
       "Bash(python -m pytest:*)",
       "Bash(pytest:*)",
-      "Bash(python -c:*)"
+      "Bash(python -c:*)",
+      "Bash(gh auth:*)",
+      "Bash(git init:*)",
+      "Bash(dir:*)",
+      "Bash(powershell -Command \"Get-ChildItem -Force -Name .cleo*\")",
+      "Bash(powershell -Command \"cleo add ''Test task'' 2>&1\")",
+      "Bash(cleo help:*)"
     ]
   }
 }

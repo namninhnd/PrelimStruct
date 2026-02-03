@@ -14,7 +14,6 @@ from src.core.data_models import (
     CoreWallGeometry,
     CoreWallSectionProperties,
     LateralInput,
-    CoreLocation,
     TerrainCategory,
 )
 
@@ -143,25 +142,18 @@ class TestCoreWallSectionProperties:
 class TestLateralInputUpdates:
     """Tests for updated LateralInput dataclass with v3.0 fields."""
 
-    def test_backward_compatibility(self):
-        """Test that legacy v2.1 fields still work."""
-        lateral = LateralInput(
-            core_dim_x=6.0,
-            core_dim_y=6.0,
-            core_thickness=0.5,
-            core_location=CoreLocation.CENTER,
-            terrain=TerrainCategory.URBAN,
-            building_width=30.0,
-            building_depth=20.0,
-        )
-        
-        assert lateral.core_dim_x == 6.0
-        assert lateral.core_dim_y == 6.0
-        assert lateral.core_thickness == 0.5
-        assert lateral.core_location == CoreLocation.CENTER
-        assert lateral.terrain == TerrainCategory.URBAN
-        assert lateral.building_width == 30.0
-        assert lateral.building_depth == 20.0
+    def test_legacy_fields_removed(self):
+        """Test that legacy v2.1 fields are no longer accepted."""
+        with pytest.raises(TypeError):
+            LateralInput(
+                core_dim_x=6.0,
+                core_dim_y=6.0,
+                core_thickness=0.5,
+                core_location="center",
+                terrain=TerrainCategory.URBAN,
+                building_width=30.0,
+                building_depth=20.0,
+            )
 
     def test_v3_fields_default_values(self):
         """Test v3.0 FEM fields have correct default values."""
@@ -196,23 +188,6 @@ class TestLateralInputUpdates:
         assert lateral.wall_thickness == 600.0
         assert lateral.core_geometry == geom
         assert lateral.section_properties == props
-
-    def test_mixed_v2_and_v3_fields(self):
-        """Test that v2.1 and v3.0 fields can coexist."""
-        lateral = LateralInput(
-            # v2.1 fields
-            core_dim_x=6.0,
-            core_dim_y=6.0,
-            core_location=CoreLocation.CENTER,
-            # v3.0 fields
-            core_wall_config=CoreWallConfig.TUBE_CENTER_OPENING,
-            wall_thickness=500.0,
-        )
-        
-        # Both should be accessible
-        assert lateral.core_dim_x == 6.0
-        assert lateral.core_wall_config == CoreWallConfig.TUBE_CENTER_OPENING
-
 
 class TestCoreWallConfigurationTypes:
     """Tests for different core wall configuration types."""

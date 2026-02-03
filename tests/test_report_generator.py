@@ -23,8 +23,8 @@ from src.core.data_models import (
     ProjectData, GeometryInput, LoadInput, MaterialInput,
     ReinforcementInput, SlabDesignInput, BeamDesignInput,
     LateralInput, SlabResult, BeamResult, ColumnResult,
-    WindResult, CoreWallResult, LoadCombination, SlabType,
-    ExposureClass, TerrainCategory, CoreLocation
+    WindResult, CoreWallResult, LoadCombination,
+    ExposureClass, TerrainCategory, CoreWallGeometry, CoreWallConfig
 )
 from src.report.report_generator import (
     ReportGenerator, generate_report, generate_framing_svg, SVG_ICONS
@@ -61,16 +61,21 @@ def sample_project():
             exposure=ExposureClass.MODERATE
         ),
         reinforcement=ReinforcementInput(),
-        slab_design=SlabDesignInput(slab_type=SlabType.TWO_WAY),
+        slab_design=SlabDesignInput(),
         beam_design=BeamDesignInput(),
         lateral=LateralInput(
-            core_dim_x=6.0,
-            core_dim_y=4.0,
-            core_thickness=0.5,
             terrain=TerrainCategory.URBAN,
-            core_location=CoreLocation.CENTER
+            building_width=8.0,
+            building_depth=6.0,
+            core_geometry=CoreWallGeometry(
+                config=CoreWallConfig.TUBE_CENTER_OPENING,
+                length_x=6000.0,
+                length_y=4000.0,
+                opening_width=2000.0,
+                opening_height=2400.0,
+            ),
         ),
-        load_combination=LoadCombination.ULS_GRAVITY
+        load_combination=LoadCombination.ULS_GRAVITY_1
     )
 
     # Add slab result
@@ -196,16 +201,14 @@ def moment_frame_project():
             exposure=ExposureClass.MILD
         ),
         reinforcement=ReinforcementInput(),
-        slab_design=SlabDesignInput(slab_type=SlabType.TWO_WAY),
+        slab_design=SlabDesignInput(),
         beam_design=BeamDesignInput(),
         lateral=LateralInput(
-            core_dim_x=0,  # No core
-            core_dim_y=0,
-            core_thickness=0,
             terrain=TerrainCategory.CITY_CENTRE,
-            core_location=CoreLocation.CENTER
+            building_width=6.0,
+            building_depth=6.0,
         ),
-        load_combination=LoadCombination.ULS_GRAVITY
+        load_combination=LoadCombination.ULS_GRAVITY_1
     )
 
     # Add minimal results
@@ -561,7 +564,7 @@ class TestLoadCombinations:
 
     def test_uls_gravity_display(self, sample_project):
         """Test ULS gravity combination display."""
-        sample_project.load_combination = LoadCombination.ULS_GRAVITY
+        sample_project.load_combination = LoadCombination.ULS_GRAVITY_1
         generator = ReportGenerator(sample_project)
         name = generator._get_load_combination_name()
 
@@ -570,7 +573,7 @@ class TestLoadCombinations:
 
     def test_uls_wind_display(self, sample_project):
         """Test ULS wind combination display."""
-        sample_project.load_combination = LoadCombination.ULS_WIND
+        sample_project.load_combination = LoadCombination.ULS_WIND_1
         generator = ReportGenerator(sample_project)
         name = generator._get_load_combination_name()
 

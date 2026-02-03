@@ -15,7 +15,9 @@ class ElementType(Enum):
     """FEM element types for structural analysis."""
     BEAM_COLUMN = "beam_column"          # Frame element (beams and columns)
     ELASTIC_BEAM = "elastic_beam"        # Elastic beam element
-    SHELL = "shell"                      # Shell element (walls, slabs)
+    SECONDARY_BEAM = "secondary_beam"    # Secondary beam element
+    SHELL = "shell"                      # Shell element (walls, slabs) - legacy
+    SHELL_MITC4 = "shell_mitc4"          # ShellMITC4 4-node quad shell element
     COUPLING_BEAM = "coupling_beam"      # Deep coupling beam
 
 
@@ -132,6 +134,40 @@ class UniformLoad:
     load_pattern: int = 1
 
 
+@dataclass
+class SurfaceLoad:
+    """Surface pressure load on shell/slab elements.
+    
+    Attributes:
+        element_tag: Shell element where load is applied
+        pressure: Load magnitude in Pa (N/m²) - positive = downward
+        load_pattern: Load pattern identifier
+    """
+    element_tag: int
+    pressure: float  # Pa (N/m²)
+    load_pattern: int = 1
+
+
+@dataclass
+class RigidDiaphragm:
+    """Rigid diaphragm constraint tying slave nodes to a master node.
+    
+    Attributes:
+        master_node: Master node tag for in-plane constraint
+        slave_nodes: Slave node tags constrained to the master in plan
+        perp_dirn: Perpendicular axis (OpenSeesPy uses 3 for XY plane)
+    """
+    master_node: int
+    slave_nodes: List[int]
+    perp_dirn: int = 3
+
+    def __post_init__(self):
+        if not self.slave_nodes:
+            raise ValueError("RigidDiaphragm must have at least one slave node")
+        if self.master_node in self.slave_nodes:
+            raise ValueError("Master node cannot also be a slave node in the diaphragm")
+
+
 class FEMModel:
     """OpenSeesPy FEM model manager.
     
@@ -153,8 +189,11 @@ class FEMModel:
         self.elements: Dict[int, Element] = {}
         self.loads: List[Load] = []
         self.uniform_loads: List[UniformLoad] = []
+        self.surface_loads: List[SurfaceLoad] = []
         self.materials: Dict[int, Dict] = {}
         self.sections: Dict[int, Dict] = {}
+        self.diaphragms: List[RigidDiaphragm] = []
+        self.omitted_columns: List[Dict] = []  # Ghost columns for visualization: [{"x": float, "y": float, "id": str}]
         self._is_built = False
         self._ops_initialized = False
     
@@ -232,6 +271,65 @@ class FEMModel:
             raise ValueError(f"Element {uniform_load.element_tag} does not exist")
         self.uniform_loads.append(uniform_load)
     
+    def add_surface_load(self, surface_load: SurfaceLoad) -> None:
+        """Add surface pressure load to model.
+        
+        Args:
+            surface_load: SurfaceLoad object to add
+        """
+        if surface_load.element_tag not in self.elements:
+            raise ValueError(f"Element {surface_load.element_tag} does not exist")
+        self.surface_loads.append(surface_load)
+
+    def add_rigid_diaphragm(self, diaphragm: RigidDiaphragm) -> None:
+        """Add rigid diaphragm tying slave nodes to a master node.
+
+        Args:
+            diaphragm: RigidDiaphragm definition
+
+        Raises:
+            ValueError: If nodes do not exist in the model
+        """
+        if diaphragm.master_node not in self.nodes:
+            raise ValueError(f"Master node {diaphragm.master_node} does not exist")
+        for slave in diaphragm.slave_nodes:
+            if slave not in self.nodes:
+                raise ValueError(f"Slave node {slave} does not exist")
+        self.diaphragms.append(diaphragm)
+
+    @staticmethod
+    def _get_uniform_load_components(uniform_load: UniformLoad,
+                                     ndm: int) -> Tuple[float, float]:
+        """Map uniform load to local y/z components for OpenSeesPy.
+
+        Args:
+            uniform_load: Load definition
+            ndm: Number of model dimensions
+
+        Returns:
+            Tuple (wy, wz) to be passed to OpenSeesPy `eleLoad`.
+        """
+        wy = 0.0
+        wz = 0.0
+        load_type = uniform_load.load_type.lower()
+
+        if load_type == "gravity":
+            if ndm == 2:
+                wy = -uniform_load.magnitude
+            else:
+                wz = -uniform_load.magnitude
+        elif load_type == "y":
+            wy = uniform_load.magnitude
+        elif load_type == "z":
+            wz = uniform_load.magnitude
+        else:
+            raise ValueError(
+                f"Unsupported uniform load type '{uniform_load.load_type}'. "
+                "Use 'Gravity', 'Y', or 'Z'."
+            )
+
+        return wy, wz
+    
     def build_openseespy_model(self, ndm: int = 3, ndf: int = 6) -> None:
         """Build OpenSeesPy model from definitions.
         
@@ -277,6 +375,10 @@ class FEMModel:
             elif mat_type == 'Steel01':
                 ops.uniaxialMaterial('Steel01', tag,
                                     params['fy'], params['E0'], params['b'])
+            elif mat_type == 'ElasticIsotropic':
+                # NDMaterial for shell elements (PlaneStress)
+                ops.nDMaterial('ElasticIsotropic', tag,
+                              params['E'], params['nu'], params['rho'])
         
         # Create sections
         for tag, params in self.sections.items():
@@ -289,28 +391,240 @@ class FEMModel:
                 else:
                     # 2D elastic section
                     ops.section('Elastic', tag, params['E'], params['A'], params['Iz'])
+            elif sec_type == 'PlateFiber':
+                # PlateFiberSection for ShellMITC4 elements
+                ops.section('PlateFiber', tag, params['matTag'], params['h'])
+            elif sec_type == 'ElasticMembranePlateSection':
+                # ElasticMembranePlateSection for slab shell elements
+                ops.section('ElasticMembranePlateSection', tag,
+                           params['E'], params['nu'], params['h'], params['rho'])
         
         # Create elements
         for elem in self.elements.values():
-            if elem.element_type == ElementType.ELASTIC_BEAM:
-                # Elastic beam-column element
+            if elem.element_type in [ElementType.ELASTIC_BEAM, ElementType.SECONDARY_BEAM]:
+                # Elastic beam-column element (includes secondary beams)
                 if elem.section_tag is None:
                     raise ValueError(f"Element {elem.tag} missing section_tag")
-                
-                # Geometric transformation (1 = Linear, 2 = P-Delta, 3 = Corotational)
-                geom_transf = elem.geometry.get('geom_transf', 1)
-                
+                if elem.section_tag not in self.sections:
+                    raise ValueError(
+                        f"Element {elem.tag} references unknown section {elem.section_tag}"
+                    )
+
+                section = self.sections[elem.section_tag]
+                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+
                 if ndm == 3:
-                    # Need to define geometric transformation for 3D
-                    # Using Linear transformation by default
-                    ops.geomTransf('Linear', elem.tag, 0, 0, 1)  # vertical axis
-                    ops.element('elasticBeamColumn', elem.tag,
-                               *elem.node_tags, elem.section_tag, elem.tag)
+                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['G'],
+                        section['J'],
+                        section['Iy'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
                 else:
-                    ops.geomTransf('Linear', elem.tag)
-                    ops.element('elasticBeamColumn', elem.tag,
-                               *elem.node_tags, elem.section_tag, elem.tag)
+                    ops.geomTransf('Linear', geom_transf_tag)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
+            elif elem.element_type == ElementType.BEAM_COLUMN:
+                if elem.section_tag is None:
+                    raise ValueError(f"Element {elem.tag} missing section_tag")
+                if elem.section_tag not in self.sections:
+                    raise ValueError(
+                        f"Element {elem.tag} references unknown section {elem.section_tag}"
+                    )
+
+                section = self.sections[elem.section_tag]
+                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+
+                if ndm == 3:
+                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['G'],
+                        section['J'],
+                        section['Iy'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
+                else:
+                    ops.geomTransf('Linear', geom_transf_tag)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
+            elif elem.element_type in (ElementType.SHELL, ElementType.COUPLING_BEAM):
+                # SHELL and COUPLING_BEAM elements are modeled as elastic beam-column
+                # elements with equivalent section properties (for core walls and
+                # deep coupling beams in preliminary analysis)
+                if elem.section_tag is None:
+                    raise ValueError(f"Element {elem.tag} missing section_tag")
+                if elem.section_tag not in self.sections:
+                    raise ValueError(
+                        f"Element {elem.tag} references unknown section {elem.section_tag}"
+                    )
+
+                section = self.sections[elem.section_tag]
+                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+
+                if ndm == 3:
+                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['G'],
+                        section['J'],
+                        section['Iy'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
+                else:
+                    ops.geomTransf('Linear', geom_transf_tag)
+                    ops.element(
+                        'elasticBeamColumn',
+                        elem.tag,
+                        *elem.node_tags,
+                        section['A'],
+                        section['E'],
+                        section['Iz'],
+                        geom_transf_tag,
+                    )
+            elif elem.element_type == ElementType.SHELL_MITC4:
+                # ShellMITC4 4-node quad shell element
+                if elem.section_tag is None:
+                    raise ValueError(f"Element {elem.tag} missing section_tag")
+                if len(elem.node_tags) != 4:
+                    raise ValueError(
+                        f"ShellMITC4 element {elem.tag} requires exactly 4 nodes, "
+                        f"got {len(elem.node_tags)}"
+                    )
+                if ndm != 3:
+                    raise ValueError("ShellMITC4 elements require ndm=3 (3D model)")
+                
+                # ShellMITC4 uses section tag directly, no geomTransf needed
+                ops.element('ShellMITC4', elem.tag, *elem.node_tags, elem.section_tag)
+            else:
+                raise ValueError(
+                    f"Element type {elem.element_type.value} not supported in builder"
+                )
+
+        # Create SurfaceLoad elements for shell pressure loads
+        # These are separate elements that apply pressure to shell element faces
+        surface_load_element_tags = {}
+        for idx, surface_load in enumerate(self.surface_loads):
+            shell_elem_tag = surface_load.element_tag
+            
+            if shell_elem_tag not in self.elements:
+                raise ValueError(
+                    f"SurfaceLoad references non-existent element {shell_elem_tag}"
+                )
+            
+            shell_elem = self.elements[shell_elem_tag]
+            
+            if shell_elem.element_type != ElementType.SHELL_MITC4:
+                raise ValueError(
+                    f"SurfaceLoad can only be applied to ShellMITC4 elements, "
+                    f"got {shell_elem.element_type}"
+                )
+            
+            if len(shell_elem.node_tags) != 4:
+                raise ValueError(
+                    f"SurfaceLoad requires 4 nodes, element {shell_elem_tag} has "
+                    f"{len(shell_elem.node_tags)}"
+                )
+            
+            # Generate unique tag for SurfaceLoad element (offset to avoid collision)
+            surface_elem_tag = 50000 + shell_elem_tag
+            
+            # Create SurfaceLoad element
+            # Nodes already in counterclockwise order from model builder
+            # Pressure sign: negative = inward (compression/gravity)
+            ops.element('SurfaceLoad', surface_elem_tag,
+                       *shell_elem.node_tags, surface_load.pressure)
+            
+            # Store mapping for load pattern activation
+            surface_load_element_tags[idx] = surface_elem_tag
+
+        # Apply rigid diaphragms (planar constraints)
+        if self.diaphragms and ndm < 3:
+            raise ValueError("Rigid diaphragms require ndm=3 (3D model)")
+        for diaphragm in self.diaphragms:
+            ops.rigidDiaphragm(
+                diaphragm.perp_dirn,
+                diaphragm.master_node,
+                *diaphragm.slave_nodes,
+            )
         
+        # Apply loads grouped by pattern
+        patterns = {load.load_pattern for load in self.loads}
+        patterns.update({u.load_pattern for u in self.uniform_loads})
+        patterns.update({s.load_pattern for s in self.surface_loads})
+
+        for pattern_id in sorted(patterns):
+            ops.timeSeries('Linear', pattern_id)
+            ops.pattern('Plain', pattern_id, pattern_id)
+
+            # Point loads
+            for load in self.loads:
+                if load.load_pattern != pattern_id:
+                    continue
+
+                if len(load.load_values) < ndf:
+                    raise ValueError(
+                        f"Load on node {load.node_tag} has insufficient DOFs "
+                        f"(expected at least {ndf}, got {len(load.load_values)})"
+                    )
+                load_vector = load.load_values[:ndf]
+                ops.load(load.node_tag, *load_vector)
+
+            # Uniform loads
+            for uniform_load in self.uniform_loads:
+                if uniform_load.load_pattern != pattern_id:
+                    continue
+
+                wy, wz = self._get_uniform_load_components(uniform_load, ndm)
+                if ndm == 2:
+                    ops.eleLoad('-ele', uniform_load.element_tag,
+                                '-type', 'beamUniform', wy)
+                else:
+                    ops.eleLoad('-ele', uniform_load.element_tag,
+                                '-type', 'beamUniform', wy, wz)
+            
+            # Activate SurfaceLoad elements in this pattern
+            for idx, surface_load in enumerate(self.surface_loads):
+                if surface_load.load_pattern != pattern_id:
+                    continue
+                
+                surface_elem_tag = surface_load_element_tags[idx]
+                ops.eleLoad('-ele', surface_elem_tag, '-type', '-surfaceLoad')
+
         self._is_built = True
         self._ops_initialized = True
     
@@ -357,6 +671,7 @@ class FEMModel:
             'n_sections': len(self.sections),
             'n_loads': len(self.loads),
             'n_uniform_loads': len(self.uniform_loads),
+            'n_surface_loads': len(self.surface_loads),
             'n_fixed_nodes': len(self.get_fixed_nodes()),
             'is_built': self._is_built,
         }
@@ -397,6 +712,16 @@ class FEMModel:
                     errors.append(
                         f"Element {elem.tag} references non-existent section {elem.section_tag}"
                     )
+
+        # Validate diaphragms
+        for diaphragm in self.diaphragms:
+            if diaphragm.master_node not in self.nodes:
+                errors.append(f"Diaphragm master node {diaphragm.master_node} missing")
+            for slave in diaphragm.slave_nodes:
+                if slave not in self.nodes:
+                    errors.append(f"Diaphragm slave node {slave} missing")
+                if slave == diaphragm.master_node:
+                    errors.append("Diaphragm slave cannot equal master node")
         
         return (len(errors) == 0, errors)
 

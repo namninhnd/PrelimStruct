@@ -48,6 +48,71 @@ class CouplingBeamGenerator:
         self.core_geometry = core_geometry
         self.wall_thickness = core_geometry.wall_thickness
 
+    def _resolve_core_dimensions(self) -> Tuple[float, float]:
+        length_x = self.core_geometry.length_x
+        length_y = self.core_geometry.length_y
+
+        if length_x is not None and length_y is not None:
+            return length_x, length_y
+
+        config = self.core_geometry.config
+
+        if config == CoreWallConfig.TWO_C_FACING:
+            if self.core_geometry.flange_width is None or self.core_geometry.web_length is None:
+                raise ValueError("TWO_C_FACING requires flange_width and web_length")
+            if self.core_geometry.opening_width is None:
+                raise ValueError("TWO_C_FACING requires opening_width to infer length_x")
+            computed_length_x = (
+                2.0 * self.core_geometry.flange_width + self.core_geometry.opening_width
+            )
+            computed_length_y = self.core_geometry.web_length
+            return (
+                computed_length_x if length_x is None else length_x,
+                computed_length_y if length_y is None else length_y,
+            )
+
+        if config == CoreWallConfig.TWO_C_BACK_TO_BACK:
+            if self.core_geometry.flange_width is None or self.core_geometry.web_length is None:
+                raise ValueError("TWO_C_BACK_TO_BACK requires flange_width and web_length")
+            connection = self.core_geometry.opening_width or 0.0
+            computed_length_x = (
+                2.0 * self.core_geometry.flange_width + 2.0 * self.wall_thickness + connection
+            )
+            computed_length_y = self.core_geometry.web_length
+            return (
+                computed_length_x if length_x is None else length_x,
+                computed_length_y if length_y is None else length_y,
+            )
+
+        if config in (CoreWallConfig.TUBE_CENTER_OPENING, CoreWallConfig.TUBE_SIDE_OPENING):
+            raise ValueError(f"{config} requires length_x and length_y")
+
+        raise ValueError(f"Unable to resolve core dimensions for configuration: {config}")
+
+    def _resolve_opening_dimensions(
+        self,
+        story_height: float,
+        top_clearance: float,
+        bottom_clearance: float,
+    ) -> Optional[Tuple[float, float, float]]:
+        opening_width = self.core_geometry.opening_width
+        if opening_width is None:
+            raise ValueError(f"{self.core_geometry.config} requires opening_width")
+        if opening_width <= 0:
+            return None
+
+        opening_height = self.core_geometry.opening_height
+        if opening_height is None:
+            opening_height = story_height
+        if opening_height <= 0:
+            return None
+
+        beam_depth = opening_height - top_clearance - bottom_clearance
+        if beam_depth <= 0:
+            return None
+
+        return opening_width, opening_height, beam_depth
+
     def generate_coupling_beams(
         self,
         story_height: float = 3000.0,
@@ -116,28 +181,23 @@ class CouplingBeamGenerator:
         Returns:
             List containing one coupling beam spanning the central opening
         """
-        if self.core_geometry.opening_width is None:
-            raise ValueError("TWO_C_FACING requires opening_width")
-
-        opening_width = self.core_geometry.opening_width
-        opening_height = (
-            self.core_geometry.opening_height
-            if self.core_geometry.opening_height is not None
-            else story_height - top_clearance - bottom_clearance
+        opening_data = self._resolve_opening_dimensions(
+            story_height, top_clearance, bottom_clearance
         )
+        if opening_data is None:
+            return []
+        opening_width, opening_height, beam_depth = opening_data
 
         # Clear span is the opening width (distance between wall faces)
         clear_span = opening_width
 
         # Beam depth is constrained by opening height minus clearances
-        beam_depth = opening_height - top_clearance - bottom_clearance
-
-        # Beam width equals wall thickness
         beam_width = self.wall_thickness
 
         # Location at center of core (simplified - would need actual coordinates)
-        location_x = self.core_geometry.length_x / 2.0
-        location_y = self.core_geometry.length_y / 2.0
+        length_x, length_y = self._resolve_core_dimensions()
+        location_x = length_x / 2.0
+        location_y = length_y / 2.0
 
         coupling_beam = CouplingBeam(
             clear_span=clear_span,
@@ -170,31 +230,28 @@ class CouplingBeamGenerator:
         Returns:
             List containing two coupling beams (one per opening)
         """
-        if self.core_geometry.opening_width is None:
-            raise ValueError("TWO_C_BACK_TO_BACK requires opening_width")
-
-        opening_width = self.core_geometry.opening_width
-        opening_height = (
-            self.core_geometry.opening_height
-            if self.core_geometry.opening_height is not None
-            else story_height - top_clearance - bottom_clearance
+        opening_data = self._resolve_opening_dimensions(
+            story_height, top_clearance, bottom_clearance
         )
+        if opening_data is None:
+            return []
+        opening_width, opening_height, beam_depth = opening_data
 
         clear_span = opening_width
-        beam_depth = opening_height - top_clearance - bottom_clearance
         beam_width = self.wall_thickness
 
         # Two beams: one at each opening
         # Simplified locations (would need actual wall geometry)
         beams = []
+        length_x, length_y = self._resolve_core_dimensions()
 
         # Beam 1: Left opening
         beam1 = CouplingBeam(
             clear_span=clear_span,
             depth=beam_depth,
             width=beam_width,
-            location_x=self.core_geometry.length_x / 4.0,
-            location_y=self.core_geometry.length_y / 2.0,
+            location_x=length_x / 4.0,
+            location_y=length_y / 2.0,
             floor_level=0,
             opening_height=opening_height,
         )
@@ -205,8 +262,8 @@ class CouplingBeamGenerator:
             clear_span=clear_span,
             depth=beam_depth,
             width=beam_width,
-            location_x=3.0 * self.core_geometry.length_x / 4.0,
-            location_y=self.core_geometry.length_y / 2.0,
+            location_x=3.0 * length_x / 4.0,
+            location_y=length_y / 2.0,
             floor_level=0,
             opening_height=opening_height,
         )
@@ -233,23 +290,20 @@ class CouplingBeamGenerator:
         Returns:
             List containing one coupling beam
         """
-        if self.core_geometry.opening_width is None:
-            raise ValueError("TUBE_CENTER_OPENING requires opening_width")
-
-        opening_width = self.core_geometry.opening_width
-        opening_height = (
-            self.core_geometry.opening_height
-            if self.core_geometry.opening_height is not None
-            else story_height - top_clearance - bottom_clearance
+        opening_data = self._resolve_opening_dimensions(
+            story_height, top_clearance, bottom_clearance
         )
+        if opening_data is None:
+            return []
+        opening_width, opening_height, beam_depth = opening_data
 
         clear_span = opening_width
-        beam_depth = opening_height - top_clearance - bottom_clearance
         beam_width = self.wall_thickness
 
         # Center location
-        location_x = self.core_geometry.length_x / 2.0
-        location_y = self.core_geometry.length_y / 2.0
+        length_x, length_y = self._resolve_core_dimensions()
+        location_x = length_x / 2.0
+        location_y = length_y / 2.0
 
         coupling_beam = CouplingBeam(
             clear_span=clear_span,
@@ -282,23 +336,20 @@ class CouplingBeamGenerator:
         Returns:
             List containing one coupling beam
         """
-        if self.core_geometry.opening_width is None:
-            raise ValueError("TUBE_SIDE_OPENING requires opening_width")
-
-        opening_width = self.core_geometry.opening_width
-        opening_height = (
-            self.core_geometry.opening_height
-            if self.core_geometry.opening_height is not None
-            else story_height - top_clearance - bottom_clearance
+        opening_data = self._resolve_opening_dimensions(
+            story_height, top_clearance, bottom_clearance
         )
+        if opening_data is None:
+            return []
+        opening_width, opening_height, beam_depth = opening_data
 
         clear_span = opening_width
-        beam_depth = opening_height - top_clearance - bottom_clearance
         beam_width = self.wall_thickness
 
         # Side opening location (simplified)
-        location_x = self.core_geometry.length_x
-        location_y = self.core_geometry.length_y / 2.0
+        length_x, length_y = self._resolve_core_dimensions()
+        location_x = length_x
+        location_y = length_y / 2.0
 
         coupling_beam = CouplingBeam(
             clear_span=clear_span,

@@ -5,9 +5,8 @@ This module implements the HK2013 design code as an extension of the
 ConcreteProperties library DesignCode base class.
 """
 
+from dataclasses import dataclass, field
 import math
-import numpy as np
-from scipy.interpolate import interp1d
 from concreteproperties.design_codes.design_code import DesignCode
 from concreteproperties.concrete_section import ConcreteSection
 from concreteproperties.material import Concrete, SteelBar
@@ -20,6 +19,187 @@ except ImportError:
     # Fallback if the utils module structure is different
     DEFAULT_UNITS = None
     si_n_mm = None
+
+
+def _calculate_elastic_modulus_mpa(compressive_strength: float) -> float:
+    """Calculate elastic modulus in MPa per HK Code 2013 Cl 3.1.7."""
+    return (3.46 * math.sqrt(compressive_strength) + 3.21) * 1000
+
+
+def _calculate_stress_block_parameters(
+    compressive_strength: float,
+) -> tuple[float, float]:
+    """Calculate HK Code 2013 stress block parameters (Cl 6.1.2.4(b)).
+
+    Args:
+        compressive_strength: Characteristic cube strength f_cu in MPa.
+
+    Returns:
+        Tuple of (alpha, gamma) stress block coefficients.
+    """
+    if compressive_strength <= 60:
+        return 0.67, 0.45
+
+    alpha = 0.67 - (compressive_strength - 60) / 400
+    gamma = 0.45 - (compressive_strength - 60) / 800
+    return max(alpha, 0.50), max(gamma, 0.35)
+
+
+def _get_steel_fracture_strain(ductility_class: str) -> float:
+    """Map HK Code 2013 ductility classes to fracture strain (Cl 2.4.3.2)."""
+    ductility = ductility_class.upper()
+    fracture_strains = {"A": 0.025, "B": 0.05, "C": 0.075}
+    if ductility not in fracture_strains:
+        msg = "ductility_class must be 'A', 'B', or 'C'."
+        raise ValueError(msg)
+    return fracture_strains[ductility]
+
+
+class HKConcreteServiceProfile(ssp.ConcreteServiceProfile):
+    """HK Code 2013 service stress-strain profile (linear, no tension).
+
+    HK Code 2013 Cl 3.1.7 (elastic modulus) and Cl 6.1.2.4 (0.67 f_cu service
+    stress) with no tensile capacity.
+    """
+
+    def __init__(
+        self,
+        compressive_strength: float,
+        ultimate_strain: float = 0.0035,
+        stress_factor: float = 0.67,
+        elastic_modulus: float | None = None,
+    ) -> None:
+        """Build linear no-tension profile anchored at 0.67f_cu."""
+        if compressive_strength < 25 or compressive_strength > 80:
+            msg = "compressive_strength must be between 25 MPa and 80 MPa."
+            raise ValueError(msg)
+
+        self.compressive_strength = compressive_strength
+        self.ultimate_strain = ultimate_strain
+        self.stress_factor = stress_factor
+        self.elastic_modulus = elastic_modulus or _calculate_elastic_modulus_mpa(
+            compressive_strength
+        )
+
+        service_strength = self.stress_factor * self.compressive_strength
+        compressive_strain = service_strength / self.elastic_modulus
+
+        strains = [-1e-6, 0.0, compressive_strain, self.ultimate_strain]
+        stresses = [0.0, 0.0, service_strength, service_strength]
+
+        super().__init__(
+            strains=strains,
+            stresses=stresses,
+            ultimate_strain=ultimate_strain,
+        )
+
+
+class HKConcreteUltimateProfile(ssp.ConcreteUltimateProfile):
+    """HK Code 2013 ultimate rectangular stress block (Cl 6.1.2.4)."""
+
+    def __init__(
+        self,
+        compressive_strength: float,
+        ultimate_strain: float = 0.0035,
+    ) -> None:
+        """Create rectangular stress block with HK high-strength adjustments."""
+        if compressive_strength < 25 or compressive_strength > 80:
+            msg = "compressive_strength must be between 25 MPa and 80 MPa."
+            raise ValueError(msg)
+
+        self.alpha, self.gamma = _calculate_stress_block_parameters(
+            compressive_strength
+        )
+        self.compressive_strength = compressive_strength
+        self.ultimate_strain = ultimate_strain
+
+        plateau_start = self.ultimate_strain * (1 - self.gamma)
+        plateau_stress = self.alpha * self.compressive_strength
+
+        strains = [0.0, plateau_start, plateau_start, self.ultimate_strain]
+        stresses = [0.0, 0.0, plateau_stress, plateau_stress]
+
+        super().__init__(
+            strains=strains,
+            stresses=stresses,
+            compressive_strength=compressive_strength,
+        )
+
+    def get_stress(
+        self,
+        strain: float,
+    ) -> float:
+        """Return stress with plateau tolerance for rectangular stress block."""
+        if strain >= self.strains[1] - 1e-8:
+            return self.stresses[2]
+        return 0.0
+
+
+@dataclass
+class HKSteelProfile(ssp.SteelProfile):
+    """HK Code 2013 reinforcement steel stress-strain (elastic-plastic).
+
+    HK Code 2013 Cl 3.2.5 (E_s = 200 GPa) and Cl 2.4.3.2 ductility classes
+    (Class A 2.5%, Class B 5.0%, Class C 7.5%). Optional strain hardening via
+    hardening_ratio (fraction of f_y).
+    """
+
+    yield_strength: float
+    ductility_class: str = "B"
+    elastic_modulus: float = 200_000
+    hardening_ratio: float | None = None
+    fracture_strain: float = field(init=False)
+    strains: list[float] = field(init=False)
+    stresses: list[float] = field(init=False)
+
+    def __post_init__(self) -> None:
+        """Build symmetric elastic-plastic profile with optional hardening."""
+        self.fracture_strain = _get_steel_fracture_strain(self.ductility_class)
+
+        yield_strain = self.yield_strength / self.elastic_modulus
+        self.strains = [
+            -self.fracture_strain,
+            -yield_strain,
+            0.0,
+            yield_strain,
+            self.fracture_strain,
+        ]
+
+        if self.hardening_ratio is None:
+            stress_y = self.yield_strength
+            self.stresses = [-stress_y, -stress_y, 0.0, stress_y, stress_y]
+        else:
+            ultimate_strength = self.yield_strength * (1 + self.hardening_ratio)
+            self.stresses = [
+                -ultimate_strength,
+                -self.yield_strength,
+                0.0,
+                self.yield_strength,
+                ultimate_strength,
+            ]
+
+        super().__post_init__()
+
+
+class HKShearSteelProfile(HKSteelProfile):
+    """HK Code 2013 shear link/stirrup steel profile (elastic-plastic).
+
+    Defaults to mild steel links (f_yv = 250 MPa, Class A ductility 2.5%).
+    """
+
+    def __init__(
+        self,
+        yield_strength: float = 250,
+        ductility_class: str = "A",
+        elastic_modulus: float = 200_000,
+        hardening_ratio: float | None = None,
+    ) -> None:
+        super().__init__(
+            yield_strength=yield_strength,
+            ductility_class=ductility_class,
+            elastic_modulus=elastic_modulus,
+            hardening_ratio=hardening_ratio,
+        )
 
 
 class HK2013(DesignCode):
@@ -143,30 +323,19 @@ class HK2013(DesignCode):
         name = f"C{compressive_strength:.0f} Concrete (HK Code 2013)"
 
         # Calculate elastic modulus (HK Code 2013 Cl 3.1.7)
-        # E_cm = 3.46 * sqrt(f_cu) + 3.21 (GPa)
-        elastic_modulus = 3.46 * math.sqrt(compressive_strength) + 3.21
-        elastic_modulus_mpa = elastic_modulus * 1000  # Convert GPa to MPa
+        elastic_modulus_mpa = _calculate_elastic_modulus_mpa(compressive_strength)
 
         # Calculate stress block parameters (HK Code 2013 Cl 6.1.2.4)
-        if compressive_strength <= 60:
-            alpha = 0.67
-            gamma = 0.45
-        else:
-            # High strength concrete adjustments
-            alpha = 0.67 - (compressive_strength - 60) / 400
-            alpha = max(alpha, 0.50)  # Minimum 0.50
-            gamma = 0.45 - (compressive_strength - 60) / 800
-            gamma = max(gamma, 0.35)  # Minimum 0.35
+        alpha, gamma = _calculate_stress_block_parameters(compressive_strength)
 
         # Calculate flexural tensile strength (HK Code 2013 Cl 3.1.6.3)
         # f_ct = 0.6 * sqrt(f_cu)
         flexural_tensile_strength = 0.6 * math.sqrt(compressive_strength)
 
-        # Density: 24 kN/m³ for plain concrete, 25 kN/m³ for reinforced
-        # Convert to kg/mm³: 24 kN/m³ = 24000 N/m³ = 24000/9.81 kg/m³
-        #                   = 2447 kg/m³ = 2.447e-6 kg/mm³
-        # For ConcreteProperties: use 2.4e-6 kg/mm³
-        density = 2.4e-6  # kg/mm³
+        # Density: 25 kN/m³ for reinforced concrete
+        # Convert to kg/mm³: 25 kN/m³ = 25_000 / 9.81 kg/m³ = 2548 kg/m³
+        # For ConcreteProperties: use 2.5e-6 kg/mm³
+        density = 2.5e-6  # kg/mm³
 
         # Ultimate concrete strain (HK Code 2013 Cl 6.1.2.4)
         ultimate_strain = 0.0035
@@ -174,15 +343,13 @@ class HK2013(DesignCode):
         return Concrete(
             name=name,
             density=density,
-            stress_strain_profile=ssp.ConcreteLinearNoTension(
-                elastic_modulus=elastic_modulus_mpa,
-                ultimate_strain=ultimate_strain,
-                compressive_strength=0.67 * compressive_strength,  # Service stress
-            ),
-            ultimate_stress_strain_profile=ssp.RectangularStressBlock(
+            stress_strain_profile=HKConcreteServiceProfile(
                 compressive_strength=compressive_strength,
-                alpha=alpha,
-                gamma=gamma,
+                ultimate_strain=ultimate_strain,
+                elastic_modulus=elastic_modulus_mpa,
+            ),
+            ultimate_stress_strain_profile=HKConcreteUltimateProfile(
+                compressive_strength=compressive_strength,
                 ultimate_strain=ultimate_strain,
             ),
             flexural_tensile_strength=flexural_tensile_strength,
@@ -193,6 +360,7 @@ class HK2013(DesignCode):
         self,
         yield_strength: float = 500,
         ductility_class: str = "B",
+        strain_hardening_ratio: float | None = None,
         colour: str = "grey",
     ) -> SteelBar:
         """Returns a steel bar material object to HK Code 2013.
@@ -204,6 +372,7 @@ class HK2013(DesignCode):
           - *Elastic modulus*: 200 GPa (HK Code 2013 Cl 3.2.5)
 
           - *Stress-strain profile*: Elastic-plastic with optional strain hardening
+            (set strain_hardening_ratio to amplify plateau)
 
           - *Ultimate strain*: Depends on ductility class
             - Class A (Low ductility): ε_su = 2.5%
@@ -222,6 +391,8 @@ class HK2013(DesignCode):
                 - "B": Normal ductility (ε_su ≥ 5.0%) - default
                 - "C": High ductility (ε_su ≥ 7.5%)
                 Defaults to "B".
+            strain_hardening_ratio: Optional strain hardening ratio (e.g., 0.1 gives
+                1.1 f_y at fracture strain). Defaults to None (perfectly plastic).
             colour: Colour of the steel for rendering. Defaults to "grey".
 
         Raises:
@@ -244,9 +415,7 @@ class HK2013(DesignCode):
 
         # Validate ductility class
         ductility_class = ductility_class.upper()
-        if ductility_class not in ["A", "B", "C"]:
-            msg = "ductility_class must be 'A', 'B', or 'C'."
-            raise ValueError(msg)
+        _ = _get_steel_fracture_strain(ductility_class)
 
         # Create steel grade name
         name = f"FY{yield_strength:.0f} Steel (HK Code 2013, Class {ductility_class})"
@@ -259,20 +428,14 @@ class HK2013(DesignCode):
 
         # Ultimate strain based on ductility class
         # HK Code 2013 Cl 2.4.3.2
-        if ductility_class == "A":
-            fracture_strain = 0.025  # 2.5%
-        elif ductility_class == "B":
-            fracture_strain = 0.05   # 5.0%
-        else:  # Class C
-            fracture_strain = 0.075  # 7.5%
-
         return SteelBar(
             name=name,
             density=density,
-            stress_strain_profile=ssp.SteelElasticPlastic(
+            stress_strain_profile=HKSteelProfile(
                 yield_strength=yield_strength,
                 elastic_modulus=elastic_modulus,
-                fracture_strain=fracture_strain,
+                ductility_class=ductility_class,
+                hardening_ratio=strain_hardening_ratio,
             ),
             colour=colour,
         )

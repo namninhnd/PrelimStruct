@@ -112,16 +112,14 @@ def _render_geometry_inputs(project: ProjectData) -> Dict[str, Any]:
             "Bay X (m)", 
             min_value=3.0, 
             max_value=15.0,
-            value=float(project.geometry.bay_x), 
-            step=0.5
+            value=float(project.geometry.bay_x)
         )
     with col2:
         bay_y = st.number_input(
             "Bay Y (m)", 
             min_value=3.0, 
             max_value=15.0,
-            value=float(project.geometry.bay_y), 
-            step=0.5
+            value=float(project.geometry.bay_y)
         )
     
     col1, col2 = st.columns(2)
@@ -130,8 +128,7 @@ def _render_geometry_inputs(project: ProjectData) -> Dict[str, Any]:
             "Bays in X", 
             min_value=1, 
             max_value=10,
-            value=project.geometry.num_bays_x, 
-            step=1,
+            value=project.geometry.num_bays_x,
             help="Number of bays in X direction"
         )
     with col2:
@@ -139,8 +136,7 @@ def _render_geometry_inputs(project: ProjectData) -> Dict[str, Any]:
             "Bays in Y", 
             min_value=1, 
             max_value=10,
-            value=project.geometry.num_bays_y, 
-            step=1,
+            value=project.geometry.num_bays_y,
             help="Number of bays in Y direction"
         )
     
@@ -150,16 +146,14 @@ def _render_geometry_inputs(project: ProjectData) -> Dict[str, Any]:
             "Floors", 
             min_value=1, 
             max_value=50,
-            value=project.geometry.floors, 
-            step=1
+            value=project.geometry.floors
         )
     with col2:
         story_height = st.number_input(
             "Story Height (m)", 
             min_value=2.5, 
             max_value=6.0,
-            value=float(project.geometry.story_height), 
-            step=0.1
+            value=float(project.geometry.story_height)
         )
     
     st.divider()
@@ -213,7 +207,6 @@ def _render_loading_inputs(project: ProjectData) -> Dict[str, Any]:
             min_value=0.5,
             max_value=20.0,
             value=float(default_custom),
-            step=0.5,
             help="Enter custom live load value (0.5 - 20.0 kPa) for special loading conditions"
         )
         selected_sub = "9.0"  # Placeholder subdivision for custom
@@ -236,8 +229,7 @@ def _render_loading_inputs(project: ProjectData) -> Dict[str, Any]:
         "SDL (kPa)", 
         min_value=0.5, 
         max_value=10.0,
-        value=float(project.loads.dead_load), 
-        step=0.5,
+        value=float(project.loads.dead_load),
         help="Superimposed Dead Load (finishes, services)"
     )
     
@@ -318,8 +310,9 @@ def _render_beam_config() -> Dict[str, Any]:
     
     secondary_beam_dir = st.radio(
         "Secondary Beam Direction",
-        options=["Along Y (default)", "Along X"],
+        options=["Along X", "Along Y"],
         index=0,
+        horizontal=True,
         help="Direction of secondary beams (internal beams). Primary beams are on the perimeter."
     )
     secondary_along_x = secondary_beam_dir == "Along X"
@@ -328,8 +321,7 @@ def _render_beam_config() -> Dict[str, Any]:
         "Number of Secondary Beams",
         min_value=0, 
         max_value=10, 
-        value=3, 
-        step=1,
+        value=3,
         help="Number of internal secondary beams equally spaced within the bay (0 = no secondary beams)"
     )
     
@@ -410,8 +402,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
             "Wall Thickness (mm)",
             min_value=200, 
             max_value=1000, 
-            value=500, 
-            step=50,
+            value=500,
             help="Core wall thickness in millimeters (typical: 500mm)"
         )
         
@@ -428,8 +419,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Flange Width (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0, 
-                    step=0.5,
+                    value=6.0,
                     help="Width of horizontal flange"
                 )
             with col2:
@@ -437,8 +427,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Web Length (m)", 
                     min_value=2.0, 
                     max_value=20.0, 
-                    value=8.0, 
-                    step=0.5,
+                    value=8.0,
                     help="Length of vertical web"
                 )
             
@@ -451,8 +440,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Opening Width (m)", 
                     min_value=1.0, 
                     max_value=10.0, 
-                    value=3.0, 
-                    step=0.5,
+                    value=3.0,
                     help="Width of opening between/within C-walls"
                 )
             
@@ -468,8 +456,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Length X (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0, 
-                    step=0.5,
+                    value=6.0,
                     help="Outer dimension in X direction"
                 )
             with col2:
@@ -477,8 +464,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Length Y (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0, 
-                    step=0.5,
+                    value=6.0,
                     help="Outer dimension in Y direction"
                 )
             
@@ -489,8 +475,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Opening Width (m)", 
                     min_value=0.5, 
                     max_value=5.0, 
-                    value=2.0, 
-                    step=0.5,
+                    value=2.0,
                     help="Width of opening"
                 )
             with col2:
@@ -498,8 +483,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Opening Height (m)", 
                     min_value=0.5, 
                     max_value=5.0, 
-                    value=2.0, 
-                    step=0.5,
+                    value=2.0,
                     help="Height of opening"
                 )
         
@@ -546,7 +530,6 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     min_value=0.0,
                     max_value=float(b_width),
                     value=float(b_width / 2),
-                    step=1.0,
                     help=f"X-coordinate of core centroid (valid: {min_x:.1f}m - {max_x:.1f}m)"
                 )
             with r_col:
@@ -555,7 +538,6 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     min_value=0.0,
                     max_value=float(b_depth),
                     value=float(b_depth / 2),
-                    step=1.0,
                     help=f"Y-coordinate of core centroid (valid: {min_y:.1f}m - {max_y:.1f}m)"
                 )
             
@@ -662,8 +644,7 @@ def _render_overrides(project: ProjectData) -> Dict[str, Any]:
         override_slab_thickness = st.number_input(
             "Slab Thickness (mm)", 
             min_value=0, 
-            value=0, 
-            step=25,
+            value=0,
             help="Override slab thickness (0 = auto)"
         )
         
@@ -673,16 +654,14 @@ def _render_overrides(project: ProjectData) -> Dict[str, Any]:
             override_pri_beam_width = st.number_input(
                 "Pri. Width (mm)", 
                 min_value=0, 
-                value=0, 
-                step=25,
+                value=0,
                 help="Primary beam width (0 = auto)"
             )
         with col2:
             override_pri_beam_depth = st.number_input(
                 "Pri. Depth (mm)", 
                 min_value=0, 
-                value=0, 
-                step=50,
+                value=0,
                 help="Primary beam depth (0 = auto)"
             )
         
@@ -692,24 +671,21 @@ def _render_overrides(project: ProjectData) -> Dict[str, Any]:
             override_sec_beam_width = st.number_input(
                 "Sec. Width (mm)", 
                 min_value=0, 
-                value=0, 
-                step=25,
+                value=0,
                 help="Secondary beam width (0 = auto)"
             )
         with col2:
             override_sec_beam_depth = st.number_input(
                 "Sec. Depth (mm)", 
                 min_value=0, 
-                value=0, 
-                step=50,
+                value=0,
                 help="Secondary beam depth (0 = auto)"
             )
         
         override_column_size = st.number_input(
             "Column Size (mm)", 
             min_value=0, 
-            value=0, 
-            step=25,
+            value=0,
             help="Override column dimension (0 = auto)"
         )
     else:
@@ -767,12 +743,12 @@ def _render_load_combinations() -> Dict[str, Any]:
             # Select All / Select None buttons
             btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
             with btn_col1:
-                if st.button("All", key=f"select_all_{category_key}", use_container_width=True):
+                if st.button("All", key=f"select_all_{category_key}", width="stretch"):
                     for c in combos:
                         st.session_state.selected_combinations.add(c.name)
                     st.rerun()
             with btn_col2:
-                if st.button("None", key=f"select_none_{category_key}", use_container_width=True):
+                if st.button("None", key=f"select_none_{category_key}", width="stretch"):
                     for c in combos:
                         st.session_state.selected_combinations.discard(c.name)
                     st.rerun()

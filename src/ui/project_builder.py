@@ -49,6 +49,7 @@ def build_project_from_inputs(
         live_load_sub=inputs.get("selected_sub", "2.5"),
         dead_load=inputs.get("dead_load", 1.5),
         custom_live_load=inputs.get("custom_live_load_value"),
+        loading_pattern_factor=inputs.get("loading_pattern_factor", 1.0),
     )
     
     # Build materials

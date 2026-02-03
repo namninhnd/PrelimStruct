@@ -5,23 +5,35 @@ Generates professional HTML reports with:
 - CSS Grid layout for magazine-style presentation
 - SVG icons for visual elements
 - Embedded fonts for consistent typography
-- Multi-page structure (Gravity, Stability, Assumptions)
+- Multi-page structure (Gravity, Stability, Assumptions, FEM Analysis)
+- FEM results integration with AI interpretation
 """
 
 import base64
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from jinja2 import Environment, BaseLoader, select_autoescape
 
 # Import project data models
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-from src.core.data_models import ProjectData, CoreLocation, LoadCombination
+from src.core.data_models import ProjectData, LoadCombination
 from src.core.constants import (
     GAMMA_G, GAMMA_Q, GAMMA_W, DRIFT_LIMIT,
     CARBON_FACTORS, CONCRETE_DENSITY
 )
+
+# Import AI results interpreter (for FEM integration)
+try:
+    from src.ai.results_interpreter import (
+        ResultsInterpretation,
+        FEMResultsSummary,
+        SimplifiedResultsSummary,
+    )
+    HAS_AI_INTERPRETER = True
+except ImportError:
+    HAS_AI_INTERPRETER = False
 
 
 # =============================================================================
@@ -715,6 +727,281 @@ body {
 .calc-result.fail .value { color: var(--danger); }
 
 /* ============================================
+   FEM RESULTS SECTION (Feature 14)
+   ============================================ */
+
+.fem-results-section {
+    background: var(--gray-100);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+}
+
+.fem-comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: var(--spacing-lg);
+    margin-bottom: var(--spacing-xl);
+}
+
+.fem-card {
+    background: white;
+    border: 1px solid var(--gray-300);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+}
+
+.fem-card h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.fem-card h4 .icon {
+    width: 20px;
+    height: 20px;
+    color: var(--accent);
+}
+
+.fem-value-row {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px solid var(--gray-200);
+}
+
+.fem-value-row:last-child {
+    border-bottom: none;
+}
+
+.fem-value-row .label {
+    color: var(--gray-600);
+    font-size: 0.85rem;
+}
+
+.fem-value-row .value {
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+.discrepancy-indicator {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    margin-left: var(--spacing-xs);
+}
+
+.discrepancy-indicator.high {
+    background: #fed7d7;
+    color: #c53030;
+}
+
+.discrepancy-indicator.medium {
+    background: #fefcbf;
+    color: #975a16;
+}
+
+.discrepancy-indicator.low {
+    background: #c6f6d5;
+    color: #276749;
+}
+
+.critical-elements-list {
+    list-style: none;
+    padding: 0;
+}
+
+.critical-element-item {
+    padding: var(--spacing-md);
+    background: white;
+    border-radius: 6px;
+    margin-bottom: var(--spacing-sm);
+    border-left: 4px solid var(--accent);
+}
+
+.critical-element-item.critical {
+    border-left-color: var(--danger);
+    background: #fff5f5;
+}
+
+.critical-element-item.high {
+    border-left-color: var(--warning);
+    background: #fffff0;
+}
+
+.critical-element-item.medium {
+    border-left-color: var(--accent);
+}
+
+.critical-element-item .element-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--spacing-xs);
+}
+
+.critical-element-item .element-type {
+    font-weight: 600;
+    color: var(--primary);
+}
+
+.critical-element-item .criticality-badge {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 12px;
+    text-transform: uppercase;
+}
+
+.criticality-badge.critical {
+    background: var(--danger);
+    color: white;
+}
+
+.criticality-badge.high {
+    background: var(--warning);
+    color: white;
+}
+
+.criticality-badge.medium {
+    background: var(--accent);
+    color: white;
+}
+
+.critical-element-item .element-issue {
+    font-size: 0.85rem;
+    color: var(--gray-700);
+    margin-bottom: var(--spacing-xs);
+}
+
+.critical-element-item .element-recommendation {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    font-style: italic;
+}
+
+.ai-interpretation {
+    background: linear-gradient(135deg, #4c51bf 0%, #667eea 100%);
+    border-radius: 8px;
+    padding: var(--spacing-xl);
+    color: white;
+    margin-bottom: var(--spacing-xl);
+}
+
+.ai-interpretation h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: var(--spacing-md);
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+}
+
+.ai-interpretation .summary-text {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 6px;
+    padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-md);
+    line-height: 1.8;
+}
+
+.ai-interpretation .confidence-score {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm);
+    font-size: 0.85rem;
+    opacity: 0.9;
+}
+
+.recommendations-list {
+    background: var(--gray-100);
+    border-radius: 8px;
+    padding: var(--spacing-lg);
+}
+
+.recommendations-list h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--primary);
+    margin-bottom: var(--spacing-md);
+}
+
+.recommendations-list ol {
+    margin: 0;
+    padding-left: var(--spacing-lg);
+}
+
+.recommendations-list li {
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px solid var(--gray-200);
+    font-size: 0.9rem;
+}
+
+.recommendations-list li:last-child {
+    border-bottom: none;
+}
+
+.code-compliance-summary {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-md);
+    margin-bottom: var(--spacing-xl);
+}
+
+.compliance-card {
+    background: white;
+    border-radius: 8px;
+    padding: var(--spacing-md);
+    text-align: center;
+    border: 2px solid var(--gray-300);
+}
+
+.compliance-card.pass {
+    border-color: var(--success);
+}
+
+.compliance-card.fail {
+    border-color: var(--danger);
+}
+
+.compliance-card.warning {
+    border-color: var(--warning);
+}
+
+.compliance-card .check-name {
+    font-weight: 600;
+    color: var(--primary);
+    font-size: 0.85rem;
+    margin-bottom: var(--spacing-xs);
+}
+
+.compliance-card .check-status {
+    font-size: 1.25rem;
+    font-weight: 700;
+}
+
+.compliance-card.pass .check-status {
+    color: var(--success);
+}
+
+.compliance-card.fail .check-status {
+    color: var(--danger);
+}
+
+.compliance-card.warning .check-status {
+    color: var(--warning);
+}
+
+.compliance-card .check-value {
+    font-size: 0.8rem;
+    color: var(--gray-600);
+    font-family: var(--font-mono);
+}
+
+/* ============================================
    PRINT STYLES
    ============================================ */
 
@@ -732,7 +1019,9 @@ body {
     .report-header,
     .ai-review-section,
     .carbon-dashboard,
-    .calc-section {
+    .calc-section,
+    .ai-interpretation,
+    .fem-results-section {
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
     }
@@ -852,7 +1141,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 1 of 4 | Generated {{ generation_date }}</span>
+        <span>Page 1 of {{ total_pages }} | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
@@ -1040,7 +1329,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 2 of 4 | Generated {{ generation_date }}</span>
+        <span>Page 2 of {{ total_pages }} | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
@@ -1188,7 +1477,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 3 of 4 | Generated {{ generation_date }}</span>
+        <span>Page 3 of {{ total_pages }} | Generated {{ generation_date }}</span>
     </footer>
 </div>
 
@@ -1404,9 +1693,200 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
     <footer class="report-footer">
         <span class="footer-logo">PrelimStruct</span>
-        <span>Page 4 of 4 | Generated {{ generation_date }}</span>
+        <span>Page 4 of {{ total_pages }} | Generated {{ generation_date }}</span>
     </footer>
 </div>
+
+{% if has_fem_results %}
+<!-- ============================================
+     PAGE 5: FEM ANALYSIS RESULTS (Feature 14)
+     ============================================ -->
+<div class="page" id="page-fem">
+
+    <h2 class="section-title">
+        <span class="icon">{{ icons.building | safe }}</span>
+        FEM Analysis Results
+    </h2>
+
+    <!-- Code Compliance Summary -->
+    <div class="code-compliance-summary">
+        {% for check in fem_data.code_compliance %}
+        <div class="compliance-card {{ check.status }}">
+            <div class="check-name">{{ check.check_name }}</div>
+            <div class="check-status">
+                {% if check.status == 'pass' %}OK{% elif check.status == 'fail' %}FAIL{% else %}WARN{% endif %}
+            </div>
+            <div class="check-value">{{ check.actual_value }} / {{ check.limit_value }}</div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- FEM vs Simplified Comparison -->
+    <h3 class="section-title" style="font-size: 1rem;">
+        <span class="icon">{{ icons.ruler | safe }}</span>
+        FEM vs Simplified Design Comparison
+    </h3>
+
+    <div class="fem-comparison-grid">
+        <div class="fem-card">
+            <h4><span class="icon">{{ icons.steel | safe }}</span>Beam Forces</h4>
+            <div class="fem-value-row">
+                <span class="label">Max Moment (FEM)</span>
+                <span class="value">{{ fem_data.max_beam_moment }} kNm</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Moment (Simplified)</span>
+                <span class="value">{{ fem_data.simplified_beam_moment }} kNm
+                    {% if fem_data.moment_discrepancy > 15 %}
+                    <span class="discrepancy-indicator high">+{{ fem_data.moment_discrepancy }}%</span>
+                    {% elif fem_data.moment_discrepancy > 5 %}
+                    <span class="discrepancy-indicator medium">+{{ fem_data.moment_discrepancy }}%</span>
+                    {% else %}
+                    <span class="discrepancy-indicator low">{{ fem_data.moment_discrepancy }}%</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Shear (FEM)</span>
+                <span class="value">{{ fem_data.max_beam_shear }} kN</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Location</span>
+                <span class="value">{{ fem_data.beam_moment_location }}</span>
+            </div>
+        </div>
+
+        <div class="fem-card">
+            <h4><span class="icon">{{ icons.concrete | safe }}</span>Column Forces</h4>
+            <div class="fem-value-row">
+                <span class="label">Max Axial (FEM)</span>
+                <span class="value">{{ fem_data.max_column_axial }} kN</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Axial (Simplified)</span>
+                <span class="value">{{ fem_data.simplified_column_axial }} kN
+                    {% if fem_data.axial_discrepancy > 15 %}
+                    <span class="discrepancy-indicator high">+{{ fem_data.axial_discrepancy }}%</span>
+                    {% elif fem_data.axial_discrepancy > 5 %}
+                    <span class="discrepancy-indicator medium">+{{ fem_data.axial_discrepancy }}%</span>
+                    {% else %}
+                    <span class="discrepancy-indicator low">{{ fem_data.axial_discrepancy }}%</span>
+                    {% endif %}
+                </span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Column Moment</span>
+                <span class="value">{{ fem_data.max_column_moment }} kNm</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Location</span>
+                <span class="value">{{ fem_data.column_axial_location }}</span>
+            </div>
+        </div>
+
+        <div class="fem-card">
+            <h4><span class="icon">{{ icons.wind | safe }}</span>Drift & Deflection</h4>
+            <div class="fem-value-row">
+                <span class="label">Max Drift (FEM)</span>
+                <span class="value">{{ fem_data.max_drift }} mm (H/{{ fem_data.drift_ratio }})</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Drift (Simplified)</span>
+                <span class="value">{{ fem_data.simplified_drift }} mm</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Deflection</span>
+                <span class="value">{{ fem_data.max_deflection }} mm</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Governing Load Case</span>
+                <span class="value">{{ fem_data.critical_load_case }}</span>
+            </div>
+        </div>
+
+        <div class="fem-card">
+            <h4><span class="icon">{{ icons.check | safe }}</span>Model Summary</h4>
+            <div class="fem-value-row">
+                <span class="label">Element Count</span>
+                <span class="value">{{ fem_data.element_count }}</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Node Count</span>
+                <span class="value">{{ fem_data.node_count }}</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Max Stress</span>
+                <span class="value">{{ fem_data.max_stress }} MPa</span>
+            </div>
+            <div class="fem-value-row">
+                <span class="label">Stress Location</span>
+                <span class="value">{{ fem_data.stress_location }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Critical Elements (if any) -->
+    {% if fem_data.critical_elements %}
+    <h3 class="section-title" style="font-size: 1rem; margin-top: var(--spacing-xl);">
+        <span class="icon">{{ icons.warning | safe }}</span>
+        Critical Elements Requiring Attention
+    </h3>
+
+    <ul class="critical-elements-list">
+        {% for element in fem_data.critical_elements %}
+        <li class="critical-element-item {{ element.criticality }}">
+            <div class="element-header">
+                <span class="element-type">{{ element.element_type }} - {{ element.location }}</span>
+                <span class="criticality-badge {{ element.criticality }}">{{ element.criticality }}</span>
+            </div>
+            <div class="element-issue">{{ element.issue }}</div>
+            {% if element.recommendation %}
+            <div class="element-recommendation">Recommendation: {{ element.recommendation }}</div>
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <!-- AI Interpretation -->
+    {% if fem_data.ai_interpretation %}
+    <div class="ai-interpretation">
+        <h3>
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+                <path d="M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z"/>
+            </svg>
+            AI-Powered FEM Results Interpretation
+        </h3>
+        <div class="summary-text">
+            {{ fem_data.ai_interpretation.summary | safe }}
+        </div>
+        <div class="confidence-score">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+                <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+            Confidence Score: {{ fem_data.ai_interpretation.confidence_score }}%
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Recommendations -->
+    {% if fem_data.recommendations %}
+    <div class="recommendations-list">
+        <h4>Prioritized Recommendations</h4>
+        <ol>
+            {% for rec in fem_data.recommendations %}
+            <li>{{ rec }}</li>
+            {% endfor %}
+        </ol>
+    </div>
+    {% endif %}
+
+    <footer class="report-footer">
+        <span class="footer-logo">PrelimStruct</span>
+        <span>Page 5 of {{ total_pages }} | Generated {{ generation_date }}</span>
+    </footer>
+</div>
+{% endif %}
 
 </body>
 </html>
@@ -1492,23 +1972,29 @@ def generate_framing_svg(project: ProjectData) -> str:
     <!-- Core wall (if present) -->'''
 
     # Add core wall if present
-    if project.lateral and project.lateral.core_dim_x > 0 and project.lateral.core_dim_y > 0:
-        core_x = project.lateral.core_dim_x
-        core_y = project.lateral.core_dim_y
+    core_geometry = project.lateral.core_geometry if project.lateral else None
+    if core_geometry and core_geometry.length_x and core_geometry.length_y:
+        core_x = core_geometry.length_x / 1000.0
+        core_y = core_geometry.length_y / 1000.0
         core_scale_x = core_x * scale * 0.8
         core_scale_y = core_y * scale * 0.8
 
-        # Position based on location
-        location = project.lateral.core_location
-        if location == CoreLocation.CENTER:
-            cx = margin + bay_x * scale / 2 - core_scale_x / 2
-            cy = margin + bay_y * scale / 2 - core_scale_y / 2
-        elif location == CoreLocation.SIDE:
+        # Position based on legacy core_location if present, else default to center
+        raw_location = getattr(project.lateral, "core_location", "center")
+        if hasattr(raw_location, "name"):
+            location = raw_location.name.lower()
+        else:
+            location = str(raw_location).lower()
+
+        if location == "side":
             cx = margin + bay_x * scale - core_scale_x - 10
             cy = margin + bay_y * scale / 2 - core_scale_y / 2
-        else:  # CORNER
+        elif location == "corner":
             cx = margin + bay_x * scale - core_scale_x - 10
             cy = margin + 10
+        else:
+            cx = margin + bay_x * scale / 2 - core_scale_x / 2
+            cy = margin + bay_y * scale / 2 - core_scale_y / 2
 
         svg += f'''
     <rect x="{cx}" y="{cy}" width="{core_scale_x}" height="{core_scale_y}"
@@ -1731,11 +2217,19 @@ class ReportGenerator:
         if self.project.lateral:
             data['terrain'] = self.project.lateral.terrain.name
 
-            if self.project.lateral.core_dim_x > 0 and self.project.lateral.core_dim_y > 0:
+            core_geometry = self.project.lateral.core_geometry
+            if core_geometry and core_geometry.length_x and core_geometry.length_y:
                 data['system_type'] = 'Core Wall System'
                 data['has_core'] = True
-                data['core_size'] = f'{self.project.lateral.core_dim_x:.1f} × {self.project.lateral.core_dim_y:.1f}m'
-                data['core_location'] = self.project.lateral.core_location.name
+                core_x = core_geometry.length_x / 1000.0
+                core_y = core_geometry.length_y / 1000.0
+                data['core_size'] = f'{core_x:.1f} × {core_y:.1f}m'
+
+                raw_location = getattr(self.project.lateral, "core_location", "CENTER")
+                if hasattr(raw_location, "name"):
+                    data['core_location'] = raw_location.name
+                else:
+                    data['core_location'] = str(raw_location).upper()
 
                 if self.project.core_wall_result:
                     cwr = self.project.core_wall_result
@@ -1793,13 +2287,128 @@ class ReportGenerator:
     def _get_load_combination_name(self) -> str:
         """Get human-readable load combination name."""
         combo = self.project.load_combination
-        if combo == LoadCombination.ULS_GRAVITY:
-            return "ULS Gravity (1.4Gk + 1.6Qk)"
-        elif combo == LoadCombination.ULS_WIND:
-            return "ULS Wind (1.0Gk + 1.4Wk)"
-        elif combo == LoadCombination.SLS_DEFLECTION:
-            return "SLS Deflection (1.0Gk + 1.0Qk)"
-        return "ULS Gravity"
+        # Map load combinations to human-readable names
+        combo_names = {
+            LoadCombination.ULS_GRAVITY_1: "ULS Gravity (1.4Gk + 1.6Qk)",
+            LoadCombination.ULS_GRAVITY_2: "ULS Gravity Min (1.0Gk + 1.6Qk)",
+            LoadCombination.ULS_WIND_1: "ULS Wind (1.4Gk + 1.4Wk)",
+            LoadCombination.ULS_WIND_2: "ULS Wind Min (1.0Gk + 1.4Wk)",
+            LoadCombination.ULS_WIND_3: "ULS Combined (1.2Gk + 1.2Qk + 1.2Wk)",
+            LoadCombination.ULS_WIND_4: "ULS Wind Reversal (1.2Gk + 1.2Qk - 1.2Wk)",
+            LoadCombination.SLS_CHARACTERISTIC: "SLS Characteristic (1.0Gk + 1.0Qk)",
+            LoadCombination.SLS_FREQUENT: "SLS Frequent (1.0Gk + 0.5Qk)",
+            LoadCombination.SLS_QUASI_PERMANENT: "SLS Quasi-Permanent (1.0Gk + 0.3Qk)",
+        }
+        return combo_names.get(combo, "ULS Gravity (1.4Gk + 1.6Qk)")
+
+    def _build_fem_data(
+        self,
+        fem_results: Optional[Any] = None,
+        simplified_results: Optional[Any] = None,
+        ai_interpretation: Optional[Any] = None,
+    ) -> dict:
+        """Build FEM results data for template.
+
+        Args:
+            fem_results: Optional FEMResultsSummary from analysis
+            simplified_results: Optional SimplifiedResultsSummary for comparison
+            ai_interpretation: Optional ResultsInterpretation from AI
+
+        Returns:
+            Dictionary with FEM data for template rendering
+        """
+        data = {
+            'max_beam_moment': '—',
+            'max_beam_shear': '—',
+            'max_column_axial': '—',
+            'max_column_moment': '—',
+            'max_drift': '—',
+            'drift_ratio': '—',
+            'max_deflection': '—',
+            'max_stress': '—',
+            'stress_location': '—',
+            'beam_moment_location': '—',
+            'column_axial_location': '—',
+            'critical_load_case': '—',
+            'element_count': 0,
+            'node_count': 0,
+            'simplified_beam_moment': '—',
+            'simplified_column_axial': '—',
+            'simplified_drift': '—',
+            'moment_discrepancy': 0,
+            'axial_discrepancy': 0,
+            'code_compliance': [],
+            'critical_elements': [],
+            'recommendations': [],
+            'ai_interpretation': None,
+        }
+
+        if fem_results:
+            # Extract FEM values
+            data['max_beam_moment'] = f'{fem_results.max_beam_moment[0]:.1f}'
+            data['beam_moment_location'] = fem_results.max_beam_moment[1] or 'N/A'
+            data['max_beam_shear'] = f'{fem_results.max_beam_shear[0]:.1f}'
+            data['max_column_axial'] = f'{fem_results.max_column_axial[0]:.1f}'
+            data['column_axial_location'] = fem_results.max_column_axial[1] or 'N/A'
+            data['max_column_moment'] = f'{fem_results.max_column_moment[0]:.1f}'
+            data['max_drift'] = f'{fem_results.max_drift[0]:.1f}'
+            data['drift_ratio'] = f'{fem_results.max_drift[1]:.0f}' if fem_results.max_drift[1] > 0 else '500+'
+            data['max_deflection'] = f'{fem_results.max_deflection[0]:.1f}'
+            data['max_stress'] = f'{fem_results.max_stress[0]:.1f}'
+            data['stress_location'] = fem_results.max_stress[1] or 'N/A'
+            data['critical_load_case'] = fem_results.critical_load_case or 'ULS1'
+            data['element_count'] = fem_results.element_count
+            data['node_count'] = fem_results.node_count
+
+        if simplified_results:
+            data['simplified_beam_moment'] = f'{simplified_results.beam_moment:.1f}'
+            data['simplified_column_axial'] = f'{simplified_results.column_axial:.1f}'
+            data['simplified_drift'] = f'{simplified_results.drift_estimate:.1f}'
+
+            # Calculate discrepancies
+            if fem_results and simplified_results.beam_moment > 0:
+                moment_diff = abs(fem_results.max_beam_moment[0] - simplified_results.beam_moment)
+                data['moment_discrepancy'] = int(moment_diff / simplified_results.beam_moment * 100)
+
+            if fem_results and simplified_results.column_axial > 0:
+                axial_diff = abs(fem_results.max_column_axial[0] - simplified_results.column_axial)
+                data['axial_discrepancy'] = int(axial_diff / simplified_results.column_axial * 100)
+
+        if ai_interpretation:
+            # Code compliance
+            data['code_compliance'] = [
+                {
+                    'check_name': c.check_name,
+                    'status': c.status,
+                    'actual_value': f'{c.actual_value:.1f}',
+                    'limit_value': f'{c.limit_value:.1f}',
+                }
+                for c in ai_interpretation.code_compliance
+            ]
+
+            # Critical elements
+            data['critical_elements'] = [
+                {
+                    'element_type': e.element_type.title(),
+                    'location': e.location,
+                    'issue': e.issue,
+                    'criticality': e.criticality.value,
+                    'recommendation': e.recommendation,
+                }
+                for e in ai_interpretation.critical_elements
+            ]
+
+            # Recommendations
+            data['recommendations'] = ai_interpretation.recommendations
+
+            # AI interpretation summary
+            if ai_interpretation.summary:
+                data['ai_interpretation'] = {
+                    'summary': ai_interpretation.summary.replace('\n', '<br>'),
+                    'confidence_score': ai_interpretation.confidence_score,
+                }
+
+        return data
 
     def _build_calc_data(self) -> dict:
         """Build step-by-step calculation data for template."""
@@ -1948,16 +2557,38 @@ class ReportGenerator:
             'column': column_data
         }
 
-    def generate(self, ai_review: Optional[str] = None) -> str:
+    def generate(
+        self,
+        ai_review: Optional[str] = None,
+        fem_results: Optional[Any] = None,
+        simplified_results: Optional[Any] = None,
+        fem_interpretation: Optional[Any] = None,
+    ) -> str:
         """
         Generate the complete HTML report.
 
         Args:
             ai_review: Optional AI-generated design review commentary
+            fem_results: Optional FEMResultsSummary from FEM analysis
+            simplified_results: Optional SimplifiedResultsSummary for comparison
+            fem_interpretation: Optional ResultsInterpretation from AI
 
         Returns:
             Complete HTML string ready for rendering or saving
         """
+        # Determine if we have FEM results
+        has_fem_results = fem_results is not None or fem_interpretation is not None
+        total_pages = 5 if has_fem_results else 4
+
+        # Build FEM data if available
+        fem_data = None
+        if has_fem_results:
+            fem_data = self._build_fem_data(
+                fem_results=fem_results,
+                simplified_results=simplified_results,
+                ai_interpretation=fem_interpretation,
+            )
+
         # Build template context
         context = {
             'project': self.project,
@@ -2003,24 +2634,43 @@ class ReportGenerator:
                 'total_dead': f'{self.project.total_dead_load:.1f}',
                 'design_load': f'{self.project.get_design_load():.1f}'
             },
-            'generation_date': datetime.now().strftime('%Y-%m-%d %H:%M')
+            'generation_date': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            # FEM Results (Feature 14)
+            'has_fem_results': has_fem_results,
+            'total_pages': total_pages,
+            'fem_data': fem_data,
         }
 
         # Render template
         return self.template.render(**context)
 
-    def save(self, filepath: str, ai_review: Optional[str] = None) -> str:
+    def save(
+        self,
+        filepath: str,
+        ai_review: Optional[str] = None,
+        fem_results: Optional[Any] = None,
+        simplified_results: Optional[Any] = None,
+        fem_interpretation: Optional[Any] = None,
+    ) -> str:
         """
         Generate and save the HTML report to a file.
 
         Args:
             filepath: Output file path
             ai_review: Optional AI-generated design review
+            fem_results: Optional FEMResultsSummary from FEM analysis
+            simplified_results: Optional SimplifiedResultsSummary for comparison
+            fem_interpretation: Optional ResultsInterpretation from AI
 
         Returns:
             The filepath where the report was saved
         """
-        html = self.generate(ai_review)
+        html = self.generate(
+            ai_review=ai_review,
+            fem_results=fem_results,
+            simplified_results=simplified_results,
+            fem_interpretation=fem_interpretation,
+        )
 
         with open(filepath, 'w', encoding='utf-8') as f:
             f.write(html)
@@ -2032,9 +2682,14 @@ class ReportGenerator:
 # CONVENIENCE FUNCTION
 # =============================================================================
 
-def generate_report(project: ProjectData,
-                    filepath: Optional[str] = None,
-                    ai_review: Optional[str] = None) -> str:
+def generate_report(
+    project: ProjectData,
+    filepath: Optional[str] = None,
+    ai_review: Optional[str] = None,
+    fem_results: Optional[Any] = None,
+    simplified_results: Optional[Any] = None,
+    fem_interpretation: Optional[Any] = None,
+) -> str:
     """
     Convenience function to generate a report.
 
@@ -2042,6 +2697,9 @@ def generate_report(project: ProjectData,
         project: ProjectData with calculation results
         filepath: Optional path to save the report
         ai_review: Optional AI-generated design review
+        fem_results: Optional FEMResultsSummary from FEM analysis
+        simplified_results: Optional SimplifiedResultsSummary for comparison
+        fem_interpretation: Optional ResultsInterpretation from AI
 
     Returns:
         HTML string if no filepath, otherwise the saved filepath
@@ -2049,5 +2707,16 @@ def generate_report(project: ProjectData,
     generator = ReportGenerator(project)
 
     if filepath:
-        return generator.save(filepath, ai_review)
-    return generator.generate(ai_review)
+        return generator.save(
+            filepath=filepath,
+            ai_review=ai_review,
+            fem_results=fem_results,
+            simplified_results=simplified_results,
+            fem_interpretation=fem_interpretation,
+        )
+    return generator.generate(
+        ai_review=ai_review,
+        fem_results=fem_results,
+        simplified_results=simplified_results,
+        fem_interpretation=fem_interpretation,
+    )

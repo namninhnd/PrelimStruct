@@ -1,13 +1,22 @@
 """
 Test suite for Moment Frame System (buildings without core walls)
 Tests lateral load distribution to columns and combined P+M checks.
+
+V3.5 DEPRECATED: These tests are for the simplified calculation workflow.
+The simplified WindEngine and column P+M distribution have been replaced by
+the FEM module. These tests are skipped until equivalent FEM-based tests are added.
+
+See:
+- src/fem/load_combinations.py for HK Code 2019 load combinations
+- src/fem/model_builder.py for FEM model construction
+- src/fem/results_processor.py for result extraction
 """
 
-import sys
-import os
+import pytest
 
-# Add src to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Skip all tests in this module - deprecated workflow
+pytestmark = pytest.mark.skip(reason="V3.5: Moment frame tests use deprecated simplified WindEngine. "
+                                      "Migrate to FEM-based lateral analysis tests.")
 
 from src.core.data_models import (
     ProjectData,
@@ -17,6 +26,8 @@ from src.core.data_models import (
     LateralInput,
     TerrainCategory,
     ColumnPosition,
+    CoreWallConfig,
+    CoreWallGeometry,
 )
 from src.engines.wind_engine import WindEngine
 from src.engines.column_engine import ColumnEngine

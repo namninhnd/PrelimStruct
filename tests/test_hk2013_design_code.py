@@ -7,7 +7,13 @@ implementation that extends the ConcreteProperties library.
 
 import pytest
 import math
-from src.fem.design_codes.hk2013 import HK2013
+from src.fem.design_codes.hk2013 import (
+    HK2013,
+    HKConcreteServiceProfile,
+    HKConcreteUltimateProfile,
+    HKShearSteelProfile,
+    HKSteelProfile,
+)
 
 
 class TestHK2013Initialization:
@@ -29,6 +35,34 @@ class TestHK2013Initialization:
 class TestConcreteMaterial:
     """Tests for concrete material creation per HK Code 2013."""
 
+    def test_service_and_ultimate_profiles(self):
+        """Service and ultimate profiles follow HK Code parameters."""
+        service = HKConcreteServiceProfile(compressive_strength=40)
+        ultimate = HKConcreteUltimateProfile(compressive_strength=70)
+
+        expected_e = (3.46 * math.sqrt(40) + 3.21) * 1000
+        expected_alpha = 0.67 - (70 - 60) / 400
+        expected_gamma = 0.45 - (70 - 60) / 800
+        plateau_strain = ultimate.strains[1]
+
+        assert service.elastic_modulus == pytest.approx(expected_e, rel=1e-6)
+        assert service.get_stress(-1e-4) == pytest.approx(0.0, abs=1e-12)
+
+        expected_service_strength = 0.67 * 40
+        service_strain = expected_service_strength / expected_e
+        assert service.get_stress(service_strain * 1.05) == pytest.approx(
+            expected_service_strength, rel=1e-6
+        )
+
+        assert ultimate.alpha == pytest.approx(expected_alpha, rel=1e-6)
+        assert ultimate.gamma == pytest.approx(expected_gamma, rel=1e-6)
+        assert ultimate.get_stress(plateau_strain - 1e-4) == pytest.approx(
+            0.0, abs=1e-12
+        )
+        assert ultimate.get_stress(plateau_strain + 1e-5) == pytest.approx(
+            expected_alpha * 70, rel=1e-6
+        )
+
     def test_create_concrete_c40(self):
         """Test C40 concrete material creation."""
         hk_code = HK2013()
@@ -36,7 +70,12 @@ class TestConcreteMaterial:
 
         assert concrete is not None
         assert concrete.name == "C40 Concrete (HK Code 2013)"
-        assert concrete.density == pytest.approx(2.4e-6, rel=1e-6)
+        assert concrete.density == pytest.approx(2.5e-6, rel=1e-6)
+        assert isinstance(concrete.stress_strain_profile, HKConcreteServiceProfile)
+        assert isinstance(
+            concrete.ultimate_stress_strain_profile,
+            HKConcreteUltimateProfile,
+        )
 
     def test_elastic_modulus_c40(self):
         """Test elastic modulus calculation for C40 concrete.
@@ -150,6 +189,7 @@ class TestSteelMaterial:
         assert steel is not None
         assert steel.name == "FY500 Steel (HK Code 2013, Class B)"
         assert steel.density == pytest.approx(7.85e-6, rel=1e-6)
+        assert isinstance(steel.stress_strain_profile, HKSteelProfile)
 
     def test_steel_elastic_modulus(self):
         """Test steel elastic modulus.
@@ -200,6 +240,25 @@ class TestSteelMaterial:
         profile = steel.stress_strain_profile
         assert profile.fracture_strain == pytest.approx(0.075, rel=1e-6)  # 7.5%
         assert "Class C" in steel.name
+
+    def test_hk_steel_profile_hardening(self):
+        """Test optional strain hardening plateau."""
+        profile = HKSteelProfile(yield_strength=500, ductility_class="B", hardening_ratio=0.1)
+        yield_strain = 500 / 200_000
+        test_strain = yield_strain * 1.05
+        expected = 500 + (50 * (test_strain - yield_strain) / (0.05 - yield_strain))
+
+        assert profile.get_stress(test_strain) == pytest.approx(expected, rel=1e-6)
+        assert profile.get_compressive_strength() == pytest.approx(550, rel=1e-6)
+        assert profile.get_ultimate_tensile_strain() == pytest.approx(-0.05, rel=1e-6)
+
+    def test_hk_shear_steel_profile_defaults(self):
+        """Test shear link profile defaults (FY250, Class A)."""
+        profile = HKShearSteelProfile()
+        yield_strain = 250 / 200_000
+
+        assert profile.get_stress(yield_strain * 1.02) == pytest.approx(250, rel=1e-6)
+        assert profile.get_ultimate_tensile_strain() == pytest.approx(-0.025, rel=1e-6)
 
     def test_steel_grades(self):
         """Test steel material creation for common grades."""

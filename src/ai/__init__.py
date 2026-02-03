@@ -3,13 +3,13 @@ AI Assistant Module for PrelimStruct v3.0
 
 This module provides AI-powered features for structural design automation,
 including LLM providers, prompt engineering, response parsing, mesh generation,
-model setup, and design optimization.
+model setup, design optimization, and results interpretation.
 
 Features:
 - Feature 11: AI Assistant Core Infrastructure (DeepSeek, Grok, OpenRouter)
 - Feature 12: AI-Assisted Mesh Generation & Model Setup
-- Feature 13: AI-Assisted Design Optimization (NEW)
-- Feature 14: AI Results Interpretation (upcoming)
+- Feature 13: AI-Assisted Design Optimization
+- Feature 14: AI Results Interpretation & Recommendations (NEW)
 
 Components:
 - LLM Providers: DeepSeekProvider, GrokProvider, OpenRouterProvider
@@ -19,20 +19,26 @@ Components:
 - AI Service: High-level service interface
 - Mesh Generation: Automated mesh generation with quality checks
 - Model Setup: Smart boundary condition and load application detection
-- Design Optimization: Gradient-based optimization with AI guidance (NEW)
+- Design Optimization: Gradient-based optimization with AI guidance
+- Results Interpreter: FEM results analysis and recommendations (NEW)
 
 Usage:
-    from src.ai import AIService, DesignOptimizer
-    
+    from src.ai import AIService, DesignOptimizer, ResultsInterpreter
+
     # AI Assistant
     service = AIService.from_env()
     review = service.get_design_review(...)
-    
+
     # Design Optimization
     optimizer = DesignOptimizer()
     optimizer.add_design_variable("depth", 600, 300, 1200)
     optimizer.set_objective(cost_func)
     result = optimizer.optimize()
+
+    # Results Interpretation
+    interpreter = ResultsInterpreter(ai_service=service)
+    interpretation = interpreter.interpret_results(fem_results, simplified_results)
+    print(interpretation.summary)
 """
 
 # Provider Infrastructure
@@ -113,7 +119,7 @@ from .auto_setup import (
     ModelSetup,
 )
 
-# Design Optimization (Feature 13 - NEW)
+# Design Optimization (Feature 13)
 from .optimizer import (
     OptimizationObjective,
     OptimizationStatus,
@@ -124,6 +130,22 @@ from .optimizer import (
     DesignOptimizer,
     create_beam_optimizer,
     get_ai_optimization_suggestions,
+)
+
+# Results Interpretation (Feature 14 - NEW)
+from .results_interpreter import (
+    ResultsInterpreter,
+    ResultsInterpretation,
+    FEMResultsSummary,
+    SimplifiedResultsSummary,
+    CriticalElement,
+    DesignDiscrepancy,
+    CodeComplianceCheck,
+    CriticalityLevel,
+    IssueCategory,
+    interpret_fem_results,
+    create_fem_summary_from_dict,
+    create_simplified_summary_from_project,
 )
 
 __all__ = [
@@ -188,7 +210,7 @@ __all__ = [
     "LoadCase",
     "ModelSetupConfig",
     "ModelSetup",
-    # Design Optimization (NEW)
+    # Design Optimization
     "OptimizationObjective",
     "OptimizationStatus",
     "DesignVariable",
@@ -198,4 +220,17 @@ __all__ = [
     "DesignOptimizer",
     "create_beam_optimizer",
     "get_ai_optimization_suggestions",
+    # Results Interpretation (NEW)
+    "ResultsInterpreter",
+    "ResultsInterpretation",
+    "FEMResultsSummary",
+    "SimplifiedResultsSummary",
+    "CriticalElement",
+    "DesignDiscrepancy",
+    "CodeComplianceCheck",
+    "CriticalityLevel",
+    "IssueCategory",
+    "interpret_fem_results",
+    "create_fem_summary_from_dict",
+    "create_simplified_summary_from_project",
 ]

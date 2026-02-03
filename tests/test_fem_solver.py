@@ -46,7 +46,7 @@ def test_analyze_model_success(ops_monkeypatch) -> None:
         3: [0, 0, -0.004, 0, 0, 0],
         4: [0, 0, -0.006, 0, 0, 0],
     }
-    ops_monkeypatch._node_reactions = {
+    ops_monkeypatch.reactions = {
         1: [0, 0, 6000, 0, 0, 0],
         2: [0, 0, 4000, 0, 0, 0],
     }

@@ -74,17 +74,6 @@ For design optimization:
 - Identify over-designed elements
 - Propose alternative solutions with trade-offs"""
 
-SYSTEM_PROMPT_MODEL_BUILDER = SYSTEM_PROMPT_BASE + """
-
-For model building assistance:
-- Extract building parameters from natural language descriptions
-- Suggest appropriate structural configurations for Hong Kong buildings
-- Validate parameters against code limits and engineering practice
-- Guide users through FEM model setup step by step"""
-
-# Alias for backward compatibility
-MODEL_BUILDER_SYSTEM_PROMPT = SYSTEM_PROMPT_MODEL_BUILDER
-
 
 # ============================================================================
 # PROMPT TEMPLATES

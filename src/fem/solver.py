@@ -122,9 +122,7 @@ class FEMSolver:
         
         # Create analysis
         # For linear static analysis, we use:
-        # - constraints: Plain (simpler, but may have issues with rigid diaphragms)
-        #   NOTE: Transformation would be better for MPC constraints but requires
-        #   investigation of reaction extraction issues. See KNOWN_ISSUES.md.
+        # - constraints: Plain (or Transformation for MPCs)
         # - numberer: RCM (Reverse Cuthill-McKee for bandwidth optimization)
         # - system: BandGeneral (for general systems) or ProfileSPD (for symmetric)
         # - test: NormDispIncr (convergence test)
@@ -186,10 +184,6 @@ class FEMSolver:
         for node_tag in node_tags:
             disp = ops.nodeDisp(node_tag)
             result.node_displacements[node_tag] = list(disp)
-        
-        # IMPORTANT: Must call reactions() to compute reactions before extracting them
-        # Without this call, nodeReaction() returns zeros for all nodes
-        ops.reactions()
         
         # Extract reactions for fixed nodes
         for node_tag in node_tags:

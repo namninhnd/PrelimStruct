@@ -40,7 +40,7 @@ from src.fem.model_builder import (
     ModelBuilderOptions, 
     get_column_omission_suggestions
 )
-from src.ui.views.fem_views import render_unified_fem_views
+from src.ui.views.fem_views import render_unified_fem_views, _is_inputs_locked, _unlock_inputs
 from src.fem.visualization import VisualizationConfig, get_model_statistics
 from src.fem.solver import analyze_model
 from src.fem.load_combinations import (
@@ -979,6 +979,10 @@ def main():
     # ===== SIDEBAR =====
     with st.sidebar:
         st.markdown("### Project Settings")
+        
+        inputs_locked = _is_inputs_locked()
+        if inputs_locked:
+            st.warning("🔒 **Inputs locked** - Analysis results active. Click 'Unlock to Modify' in FEM section to change inputs.")
 
         # Quick Scheme Presets
         st.markdown("##### Quick Presets")
@@ -1005,28 +1009,34 @@ def main():
         col1, col2 = st.columns(2)
         with col1:
             bay_x = st.number_input("Bay X (m)", min_value=3.0, max_value=15.0,
-                                   value=float(st.session_state.project.geometry.bay_x), step=0.5)
+                                   value=float(st.session_state.project.geometry.bay_x), step=0.5,
+                                   disabled=inputs_locked)
         with col2:
             bay_y = st.number_input("Bay Y (m)", min_value=3.0, max_value=15.0,
-                                   value=float(st.session_state.project.geometry.bay_y), step=0.5)
+                                   value=float(st.session_state.project.geometry.bay_y), step=0.5,
+                                   disabled=inputs_locked)
 
         col1, col2 = st.columns(2)
         with col1:
             num_bays_x = st.number_input("Bays in X", min_value=1, max_value=10,
                                         value=st.session_state.project.geometry.num_bays_x, step=1,
-                                        help="Number of bays in X direction")
+                                        help="Number of bays in X direction",
+                                        disabled=inputs_locked)
         with col2:
             num_bays_y = st.number_input("Bays in Y", min_value=1, max_value=10,
                                         value=st.session_state.project.geometry.num_bays_y, step=1,
-                                        help="Number of bays in Y direction")
+                                        help="Number of bays in Y direction",
+                                        disabled=inputs_locked)
 
         col1, col2 = st.columns(2)
         with col1:
             floors = st.number_input("Floors", min_value=1, max_value=50,
-                                    value=st.session_state.project.geometry.floors, step=1)
+                                    value=st.session_state.project.geometry.floors, step=1,
+                                    disabled=inputs_locked)
         with col2:
             story_height = st.number_input("Story Height (m)", min_value=2.5, max_value=6.0,
-                                          value=float(st.session_state.project.geometry.story_height), step=0.1)
+                                          value=float(st.session_state.project.geometry.story_height), step=0.1,
+                                          disabled=inputs_locked)
 
         st.divider()
 
@@ -1113,10 +1123,16 @@ def main():
             ExposureClass.ABRASIVE: "5: Abrasive (Chemical)"
         }
 
+        current_exposure = st.session_state.project.materials.exposure
+        try:
+            current_index = list(exposure_options.keys()).index(current_exposure)
+        except (ValueError, AttributeError):
+            current_index = 1
+
         selected_exposure_label = st.selectbox(
             "Exposure Class",
             options=list(exposure_options.values()),
-            index=list(exposure_options.keys()).index(st.session_state.project.materials.exposure)
+            index=current_index
         )
         selected_exposure = list(exposure_options.keys())[list(exposure_options.values()).index(selected_exposure_label)]
 
@@ -1128,14 +1144,19 @@ def main():
             "Secondary Beam Direction",
             options=["Along Y (default)", "Along X"],
             index=0,
-            help="Direction of secondary beams (internal beams). Primary beams are on the perimeter."
+            help="Direction of secondary beams (internal beams). Primary beams are on the perimeter.",
+            key="secondary_beam_direction_radio",
+            disabled=inputs_locked
         )
         secondary_along_x = secondary_beam_dir == "Along X"
+        st.session_state["secondary_along_x"] = secondary_along_x
 
         num_secondary_beams = st.number_input(
             "Number of Secondary Beams",
             min_value=0, max_value=10, value=3, step=1,
-            help="Number of internal secondary beams equally spaced within the bay (0 = no secondary beams)"
+            help="Number of internal secondary beams equally spaced within the bay (0 = no secondary beams)",
+            key="num_secondary_beams",
+            disabled=inputs_locked
         )
 
         st.divider()
@@ -1418,8 +1439,8 @@ def main():
             temp_geometry = CoreWallGeometry(
                 config=selected_core_wall_config,
                 wall_thickness=wall_thickness,
-                length_x=length_x * 1000 if length_x else None,
-                length_y=length_y * 1000 if length_y else None,
+                length_x=length_x * 1000 if length_x else 6000.0,
+                length_y=length_y * 1000 if length_y else 6000.0,
                 opening_width=opening_width * 1000 if opening_width else None,
                 opening_height=opening_height * 1000 if opening_height else None,
                 flange_width=flange_width * 1000 if flange_width else None,
@@ -1478,8 +1499,8 @@ def main():
                 temp_core_geo = CoreWallGeometry(
                     config=selected_core_wall_config,
                     wall_thickness=wall_thickness,
-                    length_x=length_x * 1000 if length_x else None,
-                    length_y=length_y * 1000 if length_y else None,
+                    length_x=length_x * 1000 if length_x else 6000.0,
+                    length_y=length_y * 1000 if length_y else 6000.0,
                     opening_width=opening_width * 1000 if opening_width else None,
                     opening_height=opening_height * 1000 if opening_height else None,
                     flange_width=flange_width * 1000 if flange_width else None,
@@ -1720,8 +1741,8 @@ def main():
         core_geometry = CoreWallGeometry(
             config=selected_core_wall_config,
             wall_thickness=wall_thickness,
-            length_x=length_x * 1000 if length_x else None,  # Convert m to mm
-            length_y=length_y * 1000 if length_y else None,
+            length_x=length_x * 1000 if length_x else 6000.0,
+            length_y=length_y * 1000 if length_y else 6000.0,
             opening_width=opening_width * 1000 if opening_width else None,
             opening_height=opening_height * 1000 if opening_height else None,
             flange_width=flange_width * 1000 if flange_width else None,
@@ -1762,65 +1783,6 @@ def main():
 
     # ===== MAIN CONTENT =====
 
-    # Status Badges Row
-    st.markdown("### Design Status")
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    with col1:
-        slab_util = project.slab_result.utilization if project.slab_result else 0
-        slab_status = "FAIL" if slab_util > 1.0 else "OK"
-        st.markdown(f"""
-        <div class="element-card">
-            <strong>Slab</strong> {get_status_badge(slab_status, slab_util)}
-            <br><small>{project.slab_result.thickness if project.slab_result else '--'}mm</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col2:
-        beam_util = project.primary_beam_result.utilization if project.primary_beam_result else 0
-        beam_status = "FAIL" if beam_util > 1.0 else ("WARNING" if project.primary_beam_result and project.primary_beam_result.is_deep_beam else "OK")
-        size_str = f"{project.primary_beam_result.width}x{project.primary_beam_result.depth}" if project.primary_beam_result else "--"
-        st.markdown(f"""
-        <div class="element-card">
-            <strong>Beam</strong> {get_status_badge(beam_status, beam_util)}
-            <br><small>{size_str}mm</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col3:
-        col_util = project.column_result.utilization if project.column_result else 0
-        col_status = "FAIL" if col_util > 1.0 else ("WARNING" if project.column_result and project.column_result.is_slender else "OK")
-        st.markdown(f"""
-        <div class="element-card">
-            <strong>Column</strong> {get_status_badge(col_status, col_util)}
-            <br><small>{project.column_result.dimension if project.column_result else '--'}mm sq</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col4:
-        if project.lateral.core_geometry and project.core_wall_result:
-            core_util = max(project.core_wall_result.compression_check, project.core_wall_result.shear_check)
-            core_status = "FAIL" if core_util > 1.0 else ("WARNING" if project.core_wall_result.requires_tension_piles else "OK")
-        else:
-            core_util = 0
-            core_status = "PENDING"
-        st.markdown(f"""
-        <div class="element-card">
-            <strong>Core</strong> {get_status_badge(core_status, core_util)}
-            <br><small>{project.lateral.lateral_system if hasattr(project.lateral, 'lateral_system') else (project.wind_result.lateral_system if project.wind_result else '--')}</small>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with col5:
-        drift_status = "OK" if (project.wind_result and project.wind_result.drift_ok) else "FAIL"
-        drift_val = f"{project.wind_result.drift_index:.5f}" if project.wind_result else "--"
-        st.markdown(f"""
-        <div class="element-card">
-            <strong>Drift</strong> {get_status_badge(drift_status)}
-            <br><small>Δ/H = {drift_val}</small>
-        </div>
-        """, unsafe_allow_html=True)
-
     # Key Metrics Row
     st.markdown("### Key Metrics")
     col1, col2, col3, col4 = st.columns(4)
@@ -1855,234 +1817,14 @@ def main():
             help="Embodied carbon per floor area"
         )
 
-    # ===== FEM VIEWS SECTION (Relocated below Key Metrics per Task 21.1) =====
-    st.markdown("### FEM Views")
-
-    # Build FEM model for visualization
-    try:
-        fem_options = ModelBuilderOptions(
-            include_core_wall=True,
-            trim_beams_at_core=True,
-            apply_gravity_loads=True,
-            apply_wind_loads=st.session_state.get("fem_include_wind", True),
-            apply_rigid_diaphragms=True,
-            secondary_beam_direction="X" if secondary_along_x else "Y",
-            num_secondary_beams=num_secondary_beams,
-            omit_columns_near_core=True,
-            suggested_omit_columns=[col for col, omit in st.session_state.get("omit_columns", {}).items() if omit]
-        )
-        fem_model_views = build_fem_model(project, fem_options)
-        fem_stats = get_model_statistics(fem_model_views)
-        fem_floor_levels = fem_stats.get("floor_elevations", [])
-
-        # Helper function to format floor labels in HK convention
-        def format_floor_label(z: float, floor_levels: list) -> str:
-            """Format floor elevation as HK convention: G/F, 1/F, 2/F, etc."""
-            if not floor_levels:
-                return f"Z = {z:.2f}m"
-            # Sort levels and find index
-            sorted_levels = sorted(floor_levels)
-            try:
-                floor_index = sorted_levels.index(z)
-            except ValueError:
-                return f"Z = {z:.2f}m"
-            # Ground floor is index 0, then 1/F, 2/F, etc.
-            if floor_index == 0:
-                return f"G/F (+{z:.2f})"
-            else:
-                return f"{floor_index}/F (+{z:.2f})"
-
-        # View selection buttons in horizontal row: Plan (Left), Elevation (Center), 3D (Right)
-        if selected_view_floor is None and fem_floor_levels:
-            selected_view_floor = fem_floor_levels[-1]
-
-        # FEM Views (Unified Module)
-        st.markdown("### 3D Model Preview")
-        render_unified_fem_views(
-            project=project,
-            analysis_result=st.session_state.get('fem_preview_analysis_result'),
-            config_overrides={}
-        )
-
-    except Exception as exc:
-        st.warning(f"FEM Views unavailable: {exc}")
-
-    # Visualizations Row
-    st.markdown("### Structural Layout")
-    col1, col2 = st.columns(2)
-
-    with col1:
-        grid_fig = create_framing_grid(project, secondary_along_x, num_secondary_beams)
-        st.plotly_chart(grid_fig, use_container_width=True)
-
-    with col2:
-        lateral_fig = create_lateral_diagram(project)
-        st.plotly_chart(lateral_fig, use_container_width=True)
-
     # FEM Analysis & Preview
     st.markdown("### FEM Analysis")
     st.caption("Preview the FEM model and optionally overlay OpenSees analysis results.")
 
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        show_nodes = st.checkbox("Show nodes", value=False, key="fem_preview_show_nodes")
-    with col2:
-        show_supports = st.checkbox("Show supports", value=True, key="fem_preview_show_supports")
-    with col3:
-        show_loads = st.checkbox("Show loads", value=True, key="fem_preview_show_loads")
-    with col4:
-        show_labels = st.checkbox("Show labels", value=False, key="fem_preview_show_labels")
-
-    col5, col6 = st.columns(2)
-    with col5:
-        show_slabs = st.checkbox("Show slab elements", value=True, key="fem_preview_show_slabs")
-    with col6:
-        show_slab_mesh = st.checkbox("Show mesh grid", value=True, key="fem_preview_show_slab_mesh")
-
-    show_ghost_columns = st.checkbox(
-        "Show omitted columns (ghost)", 
-        value=True, 
-        key="fem_preview_show_ghost"
-    )
-
-    include_wind = st.checkbox(
-        "Include wind loads in preview",
-        value=True,
-        key="fem_preview_include_wind",
-    )
-
     try:
-        options = ModelBuilderOptions(
-            include_core_wall=True,
-            trim_beams_at_core=True,
-            apply_gravity_loads=True,
-            apply_wind_loads=include_wind,
-            apply_rigid_diaphragms=True,
-            secondary_beam_direction="X" if secondary_along_x else "Y",
-            num_secondary_beams=num_secondary_beams,
-            omit_columns_near_core=True, # Enable the logic
-            suggested_omit_columns=tuple([col for col, omit in st.session_state.get("omit_columns", {}).items() if omit])
-        )
-        fem_model = build_fem_model(project, options)
-        stats = get_model_statistics(fem_model)
-        floor_levels = stats.get("floor_elevations", [])
-        if floor_levels:
-            selected_floor = st.selectbox(
-                "Floor elevation (m)",
-                options=floor_levels,
-                index=len(floor_levels) - 1,
-                format_func=lambda z: f"Z = {z:.2f} m",
-                key="fem_preview_floor_level",
-            )
-        else:
-            selected_floor = None
-
-        # Task 20.5a - Model Statistics and Slab Load Display
-        st.markdown("#### Model Statistics")
-        stat_cols = st.columns(6)
-        stat_cols[0].metric("Nodes", stats["n_nodes"])
-        stat_cols[1].metric("Elements", stats["n_elements"])
-        stat_cols[2].metric("Loads", stats["n_loads"])
-        stat_cols[3].metric("Surface Loads", stats.get("n_surface_loads", 0))
-
-        # Add Slab Design Load Metric
-        if fem_model and options.include_slabs and fem_model.surface_loads:
-            # Get pressure from first surface load (assume uniform)
-            pressure_pa = fem_model.surface_loads[0].pressure
-            slab_load_kpa = pressure_pa / 1000.0  # Convert Pa -> kPa
-            stat_cols[4].metric("Slab Load", f"{slab_load_kpa:.2f} kPa")
-            
-            # Also add to sidebar as requested
-            st.sidebar.divider()
-            st.sidebar.markdown("##### FEM Slab Load")
-            st.sidebar.metric("Design Surface Load", f"{slab_load_kpa:.2f} kPa")
-
-        # Visualization controls
-        st.markdown("#### Visualization Settings")
-        viz_col1, viz_col2 = st.columns(2)
-        with viz_col1:
-            view_color_mode = st.selectbox(
-                "Color Scheme",
-                options=["Element Type", "Utilization"],
-                index=0,
-                help="Select coloring based on Element Type (Geometry) or Utilization Ratio",
-                key="fem_preview_color_mode"
-            )
-        with viz_col2:
-            grid_spacing = st.slider(
-                "Grid Spacing (m)",
-                min_value=0.5,
-                max_value=5.0,
-                value=1.0,
-                step=0.5,
-                help="Adjust the spacing of grid lines in Plan and Elevation views",
-                key="fem_preview_grid_spacing"
-            )
-
-        util_map = build_preview_utilization_map(fem_model, project)
-        # If Element Type mode is selected, ignore utilization map for coloring
-        if view_color_mode == "Element Type":
-            util_map = {}
-        preview_config = VisualizationConfig(
-            show_nodes=show_nodes,
-            show_supports=show_supports,
-            show_loads=show_loads,
-            show_labels=show_labels,
-            show_slabs=show_slabs,
-            show_slab_mesh_grid=show_slab_mesh,
-            show_ghost_columns=show_ghost_columns,
-            grid_spacing=grid_spacing,
-        )
-
-        analysis_col1, analysis_col2 = st.columns(2)
-        with analysis_col1:
-            overlay_analysis = st.checkbox(
-                "Overlay OpenSees results (deflection/reactions)",
-                value=False,
-                key="fem_preview_overlay_analysis",
-            )
-        with analysis_col2:
-            analysis_pattern = st.selectbox(
-                "Analysis load pattern",
-                options=[options.gravity_load_pattern, options.wind_load_pattern],
-                index=0,
-                key="fem_preview_analysis_pattern",
-            )
-
-        if st.button("Run FEM Analysis", key="fem_preview_run_analysis"):
-            progress_bar = st.progress(0.0)
-            status_text = st.empty()
-            status_text.text("Building FEM model...")
-            progress_bar.progress(0.3)
-
-            status_text.text("Running OpenSees analysis...")
-            result = analyze_model(fem_model, load_pattern=analysis_pattern)
-            progress_bar.progress(0.8)
-
-            status_text.text("Extracting results...")
-            progress_bar.progress(1.0)
-            st.session_state["fem_preview_analysis_result"] = result
-            st.session_state["fem_preview_analysis_message"] = result.message
-
-        analysis_result = st.session_state.get("fem_preview_analysis_result")
-        analysis_message = st.session_state.get("fem_preview_analysis_message")
-
-        if analysis_message:
-            status = "success" if analysis_result and analysis_result.success else "warning"
-            if status == "success":
-                st.success(analysis_message)
-            else:
-                st.warning(analysis_message)
-
-        displaced_nodes = None
-        reactions = None
-        if overlay_analysis and analysis_result and analysis_result.success:
-            displaced_nodes = _analysis_result_to_displacements(analysis_result)
-            reactions = analysis_result.node_reactions
-
         render_unified_fem_views(
             project=project,
-            analysis_result=analysis_result,
+            analysis_result=st.session_state.get('fem_preview_analysis_result'),
             config_overrides={}
         )
     except Exception as exc:
@@ -2146,23 +1888,26 @@ def main():
                 - Iterations: {project.primary_beam_result.iteration_count}
                 """, unsafe_allow_html=True)
             with col2:
-                secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
-                secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
-                st.markdown(f"""
-                **Secondary Beam ({sec_dir})**
-                - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
-                - Span: {sec_span:.1f} m
-                - Design Moment: {project.secondary_beam_result.moment:.1f} kNm
-                - Design Shear: {project.secondary_beam_result.shear:.1f} kN
-                - Shear Capacity: {project.secondary_beam_result.shear_capacity:.1f} kN
+                if project.secondary_beam_result:
+                    secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
+                    secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
+                    st.markdown(f"""
+                    **Secondary Beam ({sec_dir})**
+                    - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
+                    - Span: {sec_span:.1f} m
+                    - Design Moment: {project.secondary_beam_result.moment:.1f} kNm
+                    - Design Shear: {project.secondary_beam_result.shear:.1f} kN
+                    - Shear Capacity: {project.secondary_beam_result.shear_capacity:.1f} kN
 
-                **Checks**
-                - Utilization: **{project.secondary_beam_result.utilization:.1%}**
-                - Status: <span style="color: {secondary_status_color}; font-weight: bold;">{secondary_status}</span>
-                - Iterations: {project.secondary_beam_result.iteration_count}
-                """, unsafe_allow_html=True)
+                    **Checks**
+                    - Utilization: **{project.secondary_beam_result.utilization:.1%}**
+                    - Status: <span style="color: {secondary_status_color}; font-weight: bold;">{secondary_status}</span>
+                    - Iterations: {project.secondary_beam_result.iteration_count}
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("No secondary beams defined")
 
-            if project.primary_beam_result.is_deep_beam or project.secondary_beam_result.is_deep_beam:
+            if project.primary_beam_result.is_deep_beam or (project.secondary_beam_result and project.secondary_beam_result.is_deep_beam):
                 st.warning("Deep beam detected (L/d < 2.0). Strut-and-Tie Model required.")
 
     with tab3:

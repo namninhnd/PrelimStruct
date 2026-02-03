@@ -124,11 +124,11 @@ class TestLLMResponse:
         """Test creating a basic response."""
         response = LLMResponse(
             content="Hello!",
-            model="deepseek-chat",
+            model="deepseek-v3.2",
             provider=LLMProviderType.DEEPSEEK,
         )
         assert response.content == "Hello!"
-        assert response.model == "deepseek-chat"
+        assert response.model == "deepseek-v3.2"
         assert response.provider == LLMProviderType.DEEPSEEK
 
     def test_response_with_usage(self):
@@ -136,7 +136,7 @@ class TestLLMResponse:
         usage = LLMUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         response = LLMResponse(
             content="Hi",
-            model="deepseek-chat",
+            model="deepseek-v3.2",
             provider=LLMProviderType.DEEPSEEK,
             usage=usage,
         )
@@ -148,7 +148,7 @@ class TestLLMResponse:
         usage = LLMUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         response = LLMResponse(
             content="Hi",
-            model="deepseek-chat",
+            model="deepseek-v3.2",
             provider=LLMProviderType.DEEPSEEK,
             usage=usage,
         )
@@ -158,7 +158,7 @@ class TestLLMResponse:
         """Test total_tokens returns 0 when usage is None."""
         response = LLMResponse(
             content="Hi",
-            model="deepseek-chat",
+            model="deepseek-v3.2",
             provider=LLMProviderType.DEEPSEEK,
         )
         assert response.total_tokens == 0
@@ -167,7 +167,7 @@ class TestLLMResponse:
         """Test response with finish reason."""
         response = LLMResponse(
             content="Done",
-            model="deepseek-chat",
+            model="deepseek-v3.2",
             provider=LLMProviderType.DEEPSEEK,
             finish_reason="stop",
         )
@@ -242,7 +242,7 @@ class TestLLMProviderFactory:
         )
         assert provider.provider_type == LLMProviderType.DEEPSEEK
         assert "deepseek" in provider.base_url
-        assert provider.default_model == "deepseek-chat"
+        assert provider.default_model == "deepseek-v3.2"
 
     def test_create_grok_provider(self):
         """Test creating Grok provider."""
@@ -296,7 +296,7 @@ class TestLLMProviderFactory:
         config = LLMProviderFactory.get_provider_config(LLMProviderType.DEEPSEEK)
         assert "base_url" in config
         assert "default_model" in config
-        assert config["default_model"] == "deepseek-chat"
+        assert config["default_model"] == "deepseek-v3.2"
 
     def test_get_provider_config_invalid(self):
         """Test getting config for invalid provider raises error."""
@@ -321,7 +321,7 @@ class TestDeepSeekProvider:
         from src.ai.providers import DeepSeekProvider
         provider = DeepSeekProvider(api_key="test-key")
         assert provider.provider_type == LLMProviderType.DEEPSEEK
-        assert provider.default_model == "deepseek-chat"
+        assert provider.default_model == "deepseek-v3.2"
         assert "deepseek" in provider.base_url
 
     def test_deepseek_provider_from_factory(self):
@@ -402,7 +402,7 @@ class TestDeepSeekProviderMocked:
             "id": "chatcmpl-123",
             "object": "chat.completion",
             "created": 1705395200,
-            "model": "deepseek-chat",
+            "model": "deepseek-v3.2",
             "choices": [
                 {
                     "index": 0,
@@ -427,7 +427,7 @@ class TestDeepSeekProviderMocked:
             "id": "chatcmpl-456",
             "object": "chat.completion",
             "created": 1705395201,
-            "model": "deepseek-chat",
+            "model": "deepseek-v3.2",
             "choices": [
                 {
                     "index": 0,
@@ -471,7 +471,7 @@ class TestDeepSeekProviderMocked:
         response = provider.chat(messages)
 
         assert response.content == "Hello! How can I help you today?"
-        assert response.model == "deepseek-chat"
+        assert response.model == "deepseek-v3.2"
         assert response.provider == LLMProviderType.DEEPSEEK
         assert response.usage.prompt_tokens == 10
         assert response.usage.completion_tokens == 8

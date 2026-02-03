@@ -80,9 +80,43 @@ def _get_or_build_cached_model(project: ProjectData, options: ModelBuilderOption
             st.session_state[CACHE_KEY_MODEL] = model
             st.session_state[CACHE_KEY_HASH] = current_hash
             logger.info(f"Rebuilt FEM model with hash: {current_hash[:20]}...")
+            
+            # Clear stale analysis results when model changes (prevents mismatch)
+            _clear_analysis_state()
+            
             return model
             
     return cached_model
+
+
+def _clear_analysis_state() -> None:
+    """Clear all FEM analysis state to prevent stale data."""
+    keys_to_clear = [
+        "fem_preview_analysis_result",
+        "fem_analysis_status", 
+        "fem_analysis_message",
+    ]
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    # Also unlock inputs when analysis is cleared
+    st.session_state["fem_inputs_locked"] = False
+
+
+def _is_inputs_locked() -> bool:
+    """Check if FEM inputs are locked (analysis has been run)."""
+    return st.session_state.get("fem_inputs_locked", False)
+
+
+def _lock_inputs() -> None:
+    """Lock FEM inputs after analysis runs."""
+    st.session_state["fem_inputs_locked"] = True
+
+
+def _unlock_inputs() -> None:
+    """Unlock FEM inputs and clear analysis state."""
+    _clear_analysis_state()
+    st.session_state["fem_inputs_locked"] = False
 
 
 def _analysis_result_to_displacements(result: Any) -> Optional[Dict[int, Tuple[float, float, float]]]:
@@ -139,11 +173,32 @@ def render_unified_fem_views(
     if config_overrides is None:
         config_overrides = {}
 
+    # --- 0. Initialize Session State Defaults ---
+    default_view_settings = {
+        "fem_view_show_nodes": False,
+        "fem_view_show_slabs": True,
+        "fem_view_show_supports": True,
+        "fem_view_show_mesh": True,
+        "fem_view_show_loads": True,
+        "fem_view_show_ghost": True,
+        "fem_view_show_labels": False,
+        "fem_view_color_mode": "Element Type",
+        "fem_view_show_deformed": False,
+        "fem_view_show_reactions": False,
+        "fem_view_force_type": "None",
+        "fem_view_force_scale": 1.0,
+        "fem_view_force_auto_scale": True,
+        "fem_active_tab": "Plan View",  # Track active tab for force rendering optimization
+    }
+    
+    for key, default in default_view_settings.items():
+        if key not in st.session_state:
+            st.session_state[key] = default
+
     # --- 1. Sidebar Controls / Builder Options ---
     # These affect the model build itself, so we check them first
     
     # Secondary beams settings (often from sidebar state in app.py)
-    # We'll use session state keys if available, otherwise defaults
     secondary_along_x = st.session_state.get("secondary_along_x", False)
     num_secondary_beams = st.session_state.get("num_secondary_beams", 0)
     
@@ -174,48 +229,41 @@ def render_unified_fem_views(
     stats = get_model_statistics(model)
     floor_levels = stats.get("floor_elevations", [])
     
-    # --- 3. View Controls & Configuration ---
+    # --- 3. Prepare Visualization Config ---
     
-    with st.expander("Display Options", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            show_nodes = st.checkbox("Show nodes", value=False, key="fem_view_show_nodes")
-            show_slabs = st.checkbox("Show slabs", value=True, key="fem_view_show_slabs")
-        with col2:
-            show_supports = st.checkbox("Show supports", value=True, key="fem_view_show_supports")
-            show_mesh = st.checkbox("Show mesh", value=True, key="fem_view_show_mesh")
-        with col3:
-            show_loads = st.checkbox("Show loads", value=True, key="fem_view_show_loads")
-            show_ghost = st.checkbox("Show ghost cols", value=True, key="fem_view_show_ghost")
-        with col4:
-            show_labels = st.checkbox("Show labels", value=False, key="fem_view_show_labels")
-            
-        col_c, col_d = st.columns(2)
-        with col_c:
-            color_mode = st.selectbox(
-                "Color Scheme",
-                options=["Element Type", "Utilization"],
-                index=0,
-                key="fem_view_color_mode"
-            )
-        with col_d:
-            grid_spacing = st.slider(
-                "Grid Spacing (m)", 
-                0.5, 5.0, 1.0, 0.5, 
-                key="fem_view_grid_spacing"
-            )
+    # Map friendly force names to codes
+    force_type_map = {
+        "None": None,
+        "N (Normal)": "N",
+        "Vy (Shear Y)": "Vy",
+        "Vz (Shear Z)": "Vz",
+        "My (Moment Y)": "My",
+        "Mz (Moment Z)": "Mz",
+        "T (Torsion)": "T"
+    }
+    selected_force = st.session_state.fem_view_force_type
+    force_code = force_type_map.get(selected_force)
 
-    # Prepare VisualizationConfig
+    force_scale = st.session_state.fem_view_force_scale
+    if st.session_state.fem_view_force_auto_scale:
+        force_scale = -1.0
+    
+    # Debug prints removed to prevent console spam and UI lag
+
     viz_config = VisualizationConfig(
-        show_nodes=show_nodes,
-        show_supports=show_supports,
-        show_loads=show_loads,
-        show_labels=show_labels,
-        show_slabs=show_slabs,
-        show_slab_mesh_grid=show_mesh,
-        show_ghost_columns=show_ghost,
-        grid_spacing=grid_spacing,
-        colorscale="RdYlGn_r"
+        show_nodes=st.session_state.fem_view_show_nodes,
+        show_supports=st.session_state.fem_view_show_supports,
+        show_loads=st.session_state.fem_view_show_loads,
+        show_labels=st.session_state.fem_view_show_labels,
+        show_slabs=st.session_state.fem_view_show_slabs,
+        show_slab_mesh_grid=st.session_state.fem_view_show_mesh,
+        show_ghost_columns=st.session_state.fem_view_show_ghost,
+        grid_spacing=None,
+        colorscale="RdYlGn_r",
+        show_deformed=st.session_state.fem_view_show_deformed,
+        show_reactions=st.session_state.fem_view_show_reactions,
+        section_force_type=force_code,
+        section_force_scale=force_scale,
     )
     
     # Prepare Analysis Data
@@ -225,48 +273,100 @@ def render_unified_fem_views(
     # Check for analysis results
     has_results = analysis_result is not None and getattr(analysis_result, "success", False)
     
-    # Overlay controls (only if we have results, or just basic toggle if not)
-    # We show the toggle even if no results, so user knows feature exists (but disabled)
-    overlay_disabled = not has_results
+    # In unified view, we handle overlays via config logic or explicit passing
+    # Previously show_overlay was a toggle, now we have specific toggles
     
-    # Note: In the unified view, we assume analysis controls (Run button) are outside 
-    # or passed in. Here we just visualize.
-    
-    show_overlay = False
     if has_results:
-        show_overlay = st.checkbox(
-            "Overlay Analysis Results (Deflection/Reactions)",
-            value=False,
-            key="fem_view_overlay_toggle"
-        )
-        if show_overlay:
+        # If show_deformed is on, pass displacements
+        if st.session_state.fem_view_show_deformed:
             displaced_nodes = _analysis_result_to_displacements(analysis_result)
+        
+        # If show_reactions is on, pass reactions
+        if st.session_state.fem_view_show_reactions:
             reactions = getattr(analysis_result, "node_reactions", None)
 
-    # Utilization Map (Placeholder or real if passed)
-    # For now, if "Utilization" mode is selected but no results, 
-    # we might want to pass a dummy map or rely on previous design results
-    # For this implementation, we'll keep it simple:
+    # Utilization Map
     util_map = {}
-    if color_mode == "Utilization":
-        # In a real scenario, we'd map project results to element tags
-        # For now, we'll leave empty (all grey/default) or implement a basic mapper
-        # Task instructions don't require re-implementing the complex mapper here yet
-        pass
+    if st.session_state.fem_view_color_mode == "Utilization":
+        if not has_results:
+            st.info("Run FEM Analysis to see element utilization")
+        elif hasattr(analysis_result, "element_utilization"):
+             util_map = analysis_result.element_utilization
+
+    # Debug prints removed to prevent console spam and UI lag
+
+    # --- Run Analysis / Lock Controls ---
+    st.markdown("---")
     
+    is_locked = _is_inputs_locked()
+    
+    col_run1, col_run2, col_run3 = st.columns([1, 1, 2])
+    with col_run1:
+        run_disabled = is_locked
+        if st.button("🔧 Run FEM Analysis", key="fem_view_run_analysis", type="primary", disabled=run_disabled):
+            from src.fem.solver import analyze_model
+            
+            progress_bar = st.progress(0.0)
+            status_text = st.empty()
+            
+            try:
+                status_text.text("Running OpenSees analysis...")
+                progress_bar.progress(0.3)
+                
+                result = analyze_model(model, load_pattern=1)
+                progress_bar.progress(0.8)
+                
+                status_text.text("Analysis complete!")
+                progress_bar.progress(1.0)
+                
+                st.session_state["fem_preview_analysis_result"] = result
+                st.session_state["fem_analysis_status"] = "success" if getattr(result, "success", False) else "failed"
+                st.session_state["fem_analysis_message"] = getattr(result, "message", "Analysis completed")
+                _lock_inputs()
+                st.rerun()
+            except Exception as e:
+                st.session_state["fem_analysis_status"] = "error"
+                st.session_state["fem_analysis_message"] = str(e)
+                st.rerun()
+    
+    with col_run2:
+        if is_locked:
+            if st.button("🔓 Unlock to Modify", key="fem_view_unlock", type="secondary"):
+                _unlock_inputs()
+                st.rerun()
+        else:
+            st.caption("Run analysis to lock inputs")
+    
+    with col_run3:
+        analysis_status = st.session_state.get("fem_analysis_status", None)
+        analysis_message = st.session_state.get("fem_analysis_message", "")
+        
+        if analysis_status == "success":
+            lock_indicator = "🔒 " if is_locked else ""
+            st.success(f"✅ {lock_indicator}**Analysis Successful** - {analysis_message}", icon="✅")
+        elif analysis_status == "failed":
+            st.warning(f"⚠️ **Analysis Failed** - {analysis_message}", icon="⚠️")
+        elif analysis_status == "error":
+            st.error(f"❌ **Error** - {analysis_message}", icon="❌")
+        elif has_results:
+            if getattr(analysis_result, "success", False):
+                st.success(f"✅ **Previous Analysis Available** - {getattr(analysis_result, 'message', 'Success')}", icon="✅")
+    
+    st.markdown("---")
+
     # --- 4. Main View Tabs ---
     
     tab_plan, tab_elev, tab_3d = st.tabs(["Plan View", "Elevation View", "3D View"])
     
     active_fig = None
-    active_view_name = "Plan View" # Default
+    active_view_name = "Plan View"
     
     # --- Plan View ---
     with tab_plan:
+        st.session_state.fem_active_tab = "Plan View"
+        
         if floor_levels:
-            # Floor selector
             floor_labels = [_format_floor_label(z, floor_levels) for z in floor_levels]
-            # Default to top floor (last index)
             selected_idx = st.selectbox(
                 "Floor Level",
                 options=range(len(floor_levels)),
@@ -278,50 +378,191 @@ def render_unified_fem_views(
         else:
             selected_z = 0.0
             st.warning("No floors found in model.")
+        
+        render_forces_here = (selected_force != "None")
+        
+        plan_config = VisualizationConfig(
+            show_nodes=viz_config.show_nodes,
+            show_supports=viz_config.show_supports,
+            show_loads=viz_config.show_loads,
+            show_labels=viz_config.show_labels,
+            show_slabs=viz_config.show_slabs,
+            show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
+            show_ghost_columns=viz_config.show_ghost_columns,
+            grid_spacing=viz_config.grid_spacing,
+            colorscale=viz_config.colorscale,
+            show_deformed=viz_config.show_deformed,
+            show_reactions=viz_config.show_reactions,
+            section_force_type=force_code if render_forces_here else None,
+            section_force_scale=viz_config.section_force_scale,
+        )
             
         fig_plan = create_plan_view(
             model, 
-            config=viz_config,
+            config=plan_config,
             floor_elevation=selected_z,
-            utilization=util_map
+            utilization=util_map,
+            analysis_result=analysis_result
         )
-        st.plotly_chart(fig_plan, use_container_width=True)
+        st.plotly_chart(fig_plan, use_container_width=True, key=f"plan_view_{st.session_state.fem_view_force_type}_{selected_z}")
         active_fig = fig_plan
         active_view_name = "Plan View"
 
     # --- Elevation View ---
     with tab_elev:
-        elev_dir = st.radio(
-            "Direction", 
-            options=["X", "Y"], 
-            horizontal=True,
-            key="fem_view_elev_dir"
+        st.session_state.fem_active_tab = "Elevation View"
+        
+        col_e1, col_e2 = st.columns(2)
+        with col_e1:
+            elev_mode = st.selectbox(
+                "View Direction", 
+                options=["X-Direction (XZ Plane)", "Y-Direction (YZ Plane)"],
+                key="fem_view_elev_mode"
+            )
+        
+        if "X-Direction" in elev_mode:
+            view_dir = "X"
+            gridlines = project.geometry.y_gridlines
+            axis_label = "Y"
+        else:
+            view_dir = "Y"
+            gridlines = project.geometry.x_gridlines
+            axis_label = "X"
+            
+        with col_e2:
+            grid_map = {f"{axis_label}={val:.1f}m": val for val in gridlines}
+            grid_opts = ["All (Projected)", "Custom"] + list(grid_map.keys())
+            
+            selected_grid = st.selectbox(
+                "Gridline Preset",
+                options=grid_opts,
+                key="fem_view_elev_grid"
+            )
+            
+            grid_coord = None
+            if selected_grid == "Custom":
+                grid_coord = st.number_input(
+                    f"Custom {axis_label} Coordinate (m)",
+                    value=0.0,
+                    step=0.5,
+                    key="fem_view_elev_custom_grid"
+                )
+            elif selected_grid != "All (Projected)":
+                grid_coord = grid_map[selected_grid]
+        
+        render_forces_here = (selected_force != "None")
+        
+        elev_config = VisualizationConfig(
+            show_nodes=viz_config.show_nodes,
+            show_supports=viz_config.show_supports,
+            show_loads=viz_config.show_loads,
+            show_labels=viz_config.show_labels,
+            show_slabs=viz_config.show_slabs,
+            show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
+            show_ghost_columns=viz_config.show_ghost_columns,
+            grid_spacing=viz_config.grid_spacing,
+            colorscale=viz_config.colorscale,
+            show_deformed=viz_config.show_deformed,
+            show_reactions=viz_config.show_reactions,
+            section_force_type=force_code if render_forces_here else None,
+            section_force_scale=viz_config.section_force_scale,
         )
         
         fig_elev = create_elevation_view(
             model,
-            config=viz_config,
-            view_direction=elev_dir,
+            config=elev_config,
+            view_direction=view_dir,
+            gridline_coord=grid_coord,
             utilization=util_map,
-            displaced_nodes=displaced_nodes if show_overlay else None,
-            reactions=reactions if show_overlay else None
+            displaced_nodes=displaced_nodes,
+            reactions=reactions,
+            analysis_result=analysis_result
         )
-        st.plotly_chart(fig_elev, use_container_width=True)
-        # If tab is selected, this becomes active (approximation in Streamlit)
-        # We handle export selection explicitly below
+        st.plotly_chart(fig_elev, use_container_width=True, key=f"elev_view_{st.session_state.fem_view_force_type}_{view_dir}_{grid_coord}")
         
     # --- 3D View ---
     with tab_3d:
+        st.session_state.fem_active_tab = "3D View"
+        
+        render_forces_here = False  # 3D view doesn't support force diagrams yet
+        
+        view_3d_config = VisualizationConfig(
+            show_nodes=viz_config.show_nodes,
+            show_supports=viz_config.show_supports,
+            show_loads=viz_config.show_loads,
+            show_labels=viz_config.show_labels,
+            show_slabs=viz_config.show_slabs,
+            show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
+            show_ghost_columns=viz_config.show_ghost_columns,
+            grid_spacing=viz_config.grid_spacing,
+            colorscale=viz_config.colorscale,
+            show_deformed=viz_config.show_deformed,
+            show_reactions=viz_config.show_reactions,
+            section_force_type=None,
+            section_force_scale=viz_config.section_force_scale,
+        )
+        
         fig_3d = create_3d_view(
             model,
-            config=viz_config,
+            config=view_3d_config,
             utilization=util_map,
-            displaced_nodes=displaced_nodes if show_overlay else None,
-            reactions=reactions if show_overlay else None
+            displaced_nodes=displaced_nodes,
+            reactions=reactions
         )
-        st.plotly_chart(fig_3d, use_container_width=True)
+        st.plotly_chart(fig_3d, use_container_width=True, key=f"3d_view_{st.session_state.fem_view_force_type}")
 
-    # --- 5. Model Statistics & Export ---
+    # --- 5. Display Options Panel (MOVED BELOW) ---
+    st.divider()
+    with st.expander("Display Options", expanded=False):
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.checkbox("Show nodes", key="fem_view_show_nodes")
+            st.checkbox("Show slabs", key="fem_view_show_slabs")
+            st.checkbox("Show Deformed Shape", key="fem_view_show_deformed")
+        with col2:
+            st.checkbox("Show supports", key="fem_view_show_supports")
+            st.checkbox("Show mesh", key="fem_view_show_mesh")
+            st.checkbox("Show Reactions (Base)", key="fem_view_show_reactions")
+        with col3:
+            st.checkbox("Show loads", key="fem_view_show_loads")
+            st.checkbox("Show ghost cols", key="fem_view_show_ghost")
+            st.checkbox("Show labels", key="fem_view_show_labels")
+        with col4:
+            st.write("**Section Forces:**")
+            st.radio(
+                "Force Type",
+                options=list(force_type_map.keys()),
+                key="fem_view_force_type",
+                label_visibility="collapsed"
+            )
+            
+            if st.session_state.fem_view_force_type != "None":
+                use_auto = st.checkbox(
+                    "Auto Scale",
+                    value=True,
+                    key="fem_view_force_auto_scale",
+                    help="Automatically calculate optimal scale based on building dimensions"
+                )
+                
+                if not use_auto:
+                    st.slider(
+                        "Manual Scale",
+                        min_value=0.01,
+                        max_value=2.0,
+                        value=0.5,
+                        step=0.01,
+                        key="fem_view_force_scale",
+                        help="Manual scale factor for force diagram size"
+                    )
+            
+        st.divider()
+        st.selectbox(
+            "Color Scheme",
+            options=["Element Type", "Utilization"],
+            key="fem_view_color_mode"
+        )
+
+    # --- 6. Model Statistics & Export ---
     
     st.markdown("### Model Statistics")
     col_s1, col_s2, col_s3, col_s4, col_s5 = st.columns(5)
@@ -333,7 +574,6 @@ def render_unified_fem_views(
     # Slab load metric
     slab_load_str = "N/A"
     if model.surface_loads:
-        # Assume uniform for summary
         pressure = model.surface_loads[0].pressure / 1000.0 # Pa -> kPa
         slab_load_str = f"{pressure:.2f} kPa"
     col_s5.metric("Slab Load", slab_load_str)
@@ -343,7 +583,6 @@ def render_unified_fem_views(
     
     xc1, xc2, xc3 = st.columns([2, 1, 1])
     with xc1:
-        # Allow choosing which view to export regardless of tab
         export_view_choice = st.selectbox(
             "Select View to Export",
             options=["Plan View", "Elevation View", "3D View"],
@@ -355,40 +594,6 @@ def render_unified_fem_views(
             options=["png", "svg", "pdf"],
             key="fem_view_export_fmt"
         )
-    with xc3:
-        if st.button("Download Image", key="fem_view_export_btn"):
-            # Select correct figure
-            target_fig = None
-            if export_view_choice == "Plan View":
-                target_fig = fig_plan
-            elif export_view_choice == "Elevation View":
-                target_fig = fig_elev
-            else:
-                target_fig = fig_3d
-                
-            try:
-                img_bytes = export_plotly_figure_image(target_fig, format=export_fmt)
-                
-                # Streamlit download button auto-reloads, so we assume the button click 
-                # handles the logic. However, st.download_button is better for this.
-                # Since we already clicked a button to generate, we now show the download button.
-                # Wait, typical pattern is to compute directly in the download_button callback 
-                # or pass bytes.
-                pass 
-                
-            except Exception as e:
-                err_msg = str(e)
-                if "kaleido" in err_msg.lower():
-                    st.error(
-                        "Export failed: 'kaleido' library missing or incompatible.\n"
-                        "Please install: `pip install -U kaleido`"
-                    )
-                else:
-                    st.error(f"Export failed: {err_msg}")
-
-    # To make download smoother, we can pre-calculate the active view export
-    # or just provide a dedicated download button that does the work.
-    # Let's use the pattern from app.py:
     
     # Recalculate target for download button
     target_fig_dl = fig_plan
@@ -396,54 +601,23 @@ def render_unified_fem_views(
         target_fig_dl = fig_elev
     elif export_view_choice == "3D View":
         target_fig_dl = fig_3d
-        
-    # We define the download button outside the "if button" block for better UX
-    # But generating image bytes can be slow, so we only do it if needed?
-    # Streamlit's download_button supports a callback or pre-computed data.
-    # We will wrap it in a try-except block inside the button generation if possible,
-    # or just warn user.
-    # For now, we will leave the simple warning logic above but re-structure for functionality.
     
-    # Better Export Pattern:
-    # Use st.download_button directly with a lambda or data if fast enough.
-    # Kaleido is moderately fast.
-    
-    # Since we can't easily trap errors inside st.download_button's data generation 
-    # if we pass a lambda, we'll try to generate it when the user asks or 
-    # warn about kaleido requirements upfront if possible.
-    
-    # Let's stick to the requested error handling requirement:
-    # "If export_plotly_figure_image() fails... Show clear install hint"
-    
-    # We'll use a standard button to "Prepare Download" then show the download button,
-    # OR just try-catch a check.
-    
-    try:
-        # Check if kaleido is importable to show warning early? 
-        # No, the requirement is to handle the exception.
-        pass
-    except:
-        pass
-
-    # For the UI, we will just provide the download button and let the user click it.
-    # But wait, st.download_button needs 'data'. If 'data' computation fails, the script crashes.
-    # So we need a "Generate Export" button first, then show "Download" button.
-    
-    if st.button("Generate Export Image", key="fem_view_gen_export"):
-        try:
-            with st.spinner("Generating image..."):
-                img_data = export_plotly_figure_image(target_fig_dl, format=export_fmt)
-                
-            st.download_button(
-                label="Click to Download",
-                data=img_data,
-                file_name=f"fem_{export_view_choice.split()[0].lower()}.{export_fmt}",
-                mime=f"image/{export_fmt}",
-                key="fem_view_dl_final"
-            )
-        except Exception as e:
-            err_msg = str(e)
-            if "kaleido" in err_msg.lower():
-                st.error("Export Error: `kaleido` package missing. Run `pip install -U kaleido`.")
-            else:
-                st.error(f"Export Error: {err_msg}")
+    with xc3:
+        if st.button("Generate Export Image", key="fem_view_gen_export"):
+            try:
+                with st.spinner("Generating image..."):
+                    img_data = export_plotly_figure_image(target_fig_dl, format=export_fmt)
+                    
+                st.download_button(
+                    label="Click to Download",
+                    data=img_data,
+                    file_name=f"fem_{export_view_choice.split()[0].lower()}.{export_fmt}",
+                    mime=f"image/{export_fmt}",
+                    key="fem_view_dl_final"
+                )
+            except Exception as e:
+                err_msg = str(e)
+                if "kaleido" in err_msg.lower():
+                    st.error("Export Error: `kaleido` package missing. Run `pip install -U kaleido`.")
+                else:
+                    st.error(f"Export Error: {err_msg}")

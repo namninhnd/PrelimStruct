@@ -6,7 +6,7 @@ various LLM APIs (DeepSeek, Grok, OpenRouter) using an OpenAI-compatible
 API format for easy provider swapping.
 
 Supported Providers:
-- DeepSeek (PRIMARY): api.deepseek.com, deepseek-chat model, 128K context
+- DeepSeek (PRIMARY): api.deepseek.com, deepseek-v3.2 model, 128K context
 - Grok (BACKUP): api.x.ai, grok-4-fast model, 2M context
 - OpenRouter (FALLBACK): openrouter.ai, 300+ models
 
@@ -293,6 +293,11 @@ DEEPSEEK_PRICING = {
         "output_per_million": 0.28,  # $0.28 per 1M output tokens
         "cache_hit_per_million": 0.014,  # $0.014 per 1M cached input tokens
     },
+    "deepseek-v3.2": {
+        "input_per_million": 0.14,   # Same pricing as deepseek-chat
+        "output_per_million": 0.28,
+        "cache_hit_per_million": 0.014,
+    },
     "deepseek-reasoner": {
         "input_per_million": 0.55,
         "output_per_million": 2.19,
@@ -356,7 +361,7 @@ class DeepSeekProvider(LLMProvider):
         self,
         api_key: str,
         base_url: str = "https://api.deepseek.com/v1",
-        default_model: str = "deepseek-chat",
+        default_model: str = "deepseek-v3.2",
         timeout: float = 60.0,
         max_retries: int = 3,
         retry_base_delay: float = 1.0,
@@ -366,7 +371,7 @@ class DeepSeekProvider(LLMProvider):
         Args:
             api_key: DeepSeek API key
             base_url: API base URL (default: api.deepseek.com)
-            default_model: Default model (default: deepseek-chat)
+            default_model: Default model (default: deepseek-v3.2)
             timeout: Request timeout in seconds (default: 60)
             max_retries: Maximum retry attempts for failed requests (default: 3)
             retry_base_delay: Base delay for exponential backoff in seconds (default: 1.0)
@@ -1491,7 +1496,7 @@ class LLMProviderFactory:
     _PROVIDER_CONFIGS: Dict[LLMProviderType, Dict[str, str]] = {
         LLMProviderType.DEEPSEEK: {
             "base_url": "https://api.deepseek.com/v1",
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-v3.2",
         },
         LLMProviderType.GROK: {
             "base_url": "https://api.x.ai/v1",

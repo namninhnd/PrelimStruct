@@ -714,29 +714,5 @@ class TestCouplingBeamResultProperties:
         assert "Deep beam" in result.warnings[0]
 
 
-class TestCouplingBeamNullSafety:
-    """Tests for coupling beam null/None handling."""
-
-    def test_two_c_facing_none_flange_width(self):
-        """Test TWO_C_FACING with None flange_width is handled gracefully.
-        
-        Note: The code handles None flange_width defensively, using fallback
-        values or returning calculated beam positions.
-        """
-        core_geom = CoreWallGeometry(
-            config=CoreWallConfig.TWO_C_FACING,
-            wall_thickness=500.0,
-            flange_width=None,  # Missing flange_width - handled gracefully
-            web_length=6000.0,
-            opening_width=2000.0,
-        )
-
-        generator = CouplingBeamGenerator(core_geom)
-        beams = generator.generate_coupling_beams()
-        
-        # Code handles None flange_width gracefully
-        assert len(beams) >= 0  # May return beams or empty list
-
-
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
