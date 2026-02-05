@@ -1,0 +1,49 @@
+{
+  "screenshots": [
+    "01_initial_state.png",
+    "02_geometry_configured.png",
+    "03_core_wall_configured.png",
+    "05_fem_views.png",
+    "06_after_fem_analysis.png",
+    "07_plan_view.png",
+    "08_elevation_view.png",
+    "09_3d_view.png",
+    "10_mobile_view.png",
+    "11_tablet_view.png",
+    "12_edge_case_max_bays.png",
+    "13_edge_case_50_floors.png",
+    "14_final_state.png"
+  ],
+  "issues": [
+    {
+      "element": "Core Wall checkbox",
+      "issue": "Element not found",
+      "severity": "high"
+    },
+    {
+      "element": "I_SECTION radio",
+      "issue": "Element not found",
+      "severity": "medium"
+    }
+  ],
+  "observations": [
+    "Bay X input found and set to 8.0",
+    "Bay Y input found and set to 10.0",
+    "Bays in X set to 4",
+    "Bays in Y set to 3",
+    "Floors set to 25",
+    "Story Height set to 3.5m",
+    "Framing Plan section not visible",
+    "FEM Views section found",
+    "Run FEM Analysis button found",
+    "Plan View tab found",
+    "Elevation View tab found",
+    "3D View tab found",
+    "Body background color: rgb(255, 255, 255)",
+    "First focusable element: INPUT [Story Height (m)]"
+  ],
+  "interactions": [
+    "Set Bays in X to 10 (max)",
+    "Set Floors to 50 (extreme)"
+  ]
+}
