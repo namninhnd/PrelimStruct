@@ -34,7 +34,7 @@ from src.fem.model_builder import (
     ModelBuilderOptions,
     NodeRegistry,
     _extract_beam_sizes,
-    _extract_column_size,
+    _extract_column_dims,
     _get_core_wall_offset,
     _get_core_wall_outline,
     _get_core_opening_for_slab,
@@ -76,7 +76,7 @@ class FEMModelDirector:
         self.beam_material_tag = 1
         self.column_material_tag = 2
         self.beam_sizes = _extract_beam_sizes(project)
-        self.column_size = _extract_column_size(project)
+        self.column_width, self.column_depth = _extract_column_dims(project)
 
     def build(self) -> FEMModel:
         """Build the complete FEM model.
@@ -154,8 +154,8 @@ class FEMModelDirector:
         )
         column_section = get_elastic_beam_section(
             column_concrete,
-            width=self.column_size,
-            height=self.column_size,
+            width=self.column_width,
+            height=self.column_depth,
             section_tag=3,
         )
         
@@ -209,6 +209,7 @@ class FEMModelDirector:
             column_material_tag=self.column_material_tag,
             column_section_tag=3,
             omit_column_ids=omit_column_ids,
+            registry=self.registry,
         )
 
     def _build_beams(self, initial_element_tag: int) -> int:

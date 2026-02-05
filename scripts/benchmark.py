@@ -110,7 +110,8 @@ def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
         model = build_fem_model(project, options=options)
         
         print("  -> Running linear static analysis...")
-        result: AnalysisResult = analyze_model(model, load_pattern=1)
+        results_dict = analyze_model(model, load_pattern=1)
+        result: AnalysisResult = results_dict.get("combined") or next(iter(results_dict.values()))
         
         end_time = time.time()
         wall_time = end_time - start_time

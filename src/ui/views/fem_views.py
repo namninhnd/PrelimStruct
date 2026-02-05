@@ -19,9 +19,12 @@ from src.fem.visualization import (
     create_3d_view,
     VisualizationConfig,
     get_model_statistics,
-    export_plotly_figure_image
+    export_plotly_figure_image,
+    create_opsvis_force_diagram,
+    calculate_opsvis_scale,
 )
 from src.ui.components.reaction_table import ReactionTable
+from src.ui.components.beam_forces_table import BeamForcesTable
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +62,8 @@ def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
         f"beam_w:{project.primary_beam_result.width if project.primary_beam_result else 0}",
         f"beam_d:{project.primary_beam_result.depth if project.primary_beam_result else 0}",
         f"col_dim:{project.column_result.dimension if project.column_result else 0}",
+        f"col_w:{project.column_result.width if project.column_result else 0}",
+        f"col_d:{project.column_result.depth if project.column_result else 0}",
         f"wind:{options.apply_wind_loads}",
         f"slabs:{options.include_slabs}",
         f"sec_dir:{options.secondary_beam_direction}",
@@ -103,6 +108,7 @@ def _clear_analysis_state() -> None:
     """Clear all FEM analysis state to prevent stale data."""
     keys_to_clear = [
         "fem_preview_analysis_result",
+        "fem_analysis_results_dict",  # Multi-load-case results dict
         "fem_analysis_status", 
         "fem_analysis_message",
     ]
@@ -126,6 +132,8 @@ def _lock_inputs() -> None:
 def _unlock_inputs() -> None:
     """Unlock FEM inputs and clear analysis state."""
     _clear_analysis_state()
+    st.session_state[CACHE_KEY_MODEL] = None
+    st.session_state[CACHE_KEY_HASH] = ""
     st.session_state["fem_inputs_locked"] = False
 
 
@@ -192,12 +200,16 @@ def render_unified_fem_views(
         "fem_view_show_loads": True,
         "fem_view_show_ghost": True,
         "fem_view_show_labels": False,
+        "fem_view_show_diaphragms": False,
         "fem_view_color_mode": "Element Type",
         "fem_view_show_deformed": False,
         "fem_view_show_reactions": False,
         "fem_view_force_type": "None",
         "fem_view_force_scale": 1.0,
         "fem_view_force_auto_scale": True,
+        "fem_view_use_opsvis": False,
+        "fem_view_opsvis_label_mode": "Max abs",
+        "fem_view_opsvis_label_stride": 1,
         "fem_active_tab": "Plan View",  # Track active tab for force rendering optimization
     }
     
@@ -221,6 +233,10 @@ def render_unified_fem_views(
     has_wind_result = project.wind_result is not None
     include_wind = st.session_state.get("fem_include_wind", False) and has_wind_result
     
+    slab_thickness_m = 0.15
+    if project.slab_result and project.slab_result.thickness > 0:
+        slab_thickness_m = project.slab_result.thickness / 1000.0
+
     options = ModelBuilderOptions(
         include_core_wall=True,
         trim_beams_at_core=True,
@@ -231,7 +247,8 @@ def render_unified_fem_views(
         num_secondary_beams=num_secondary_beams,
         omit_columns_near_core=True,
         suggested_omit_columns=tuple(suggested_omit), # Tuple for immutability/hashing
-        include_slabs=True
+        include_slabs=True,
+        slab_thickness=slab_thickness_m,
     )
     
     # --- 2. Build or Retrieve Model ---
@@ -243,14 +260,16 @@ def render_unified_fem_views(
     
     # --- 3. Prepare Visualization Config ---
     
-    # Map friendly force names to codes
+    # Map friendly force names to codes (structural engineering convention)
+    # Note: OpenSeesPy uses local axes where My=major bending, Mz=minor bending
+    # We label them with structural meaning for engineer-friendly display
     force_type_map = {
         "None": None,
-        "N (Normal)": "N",
-        "Vy (Shear Y)": "Vy",
-        "Vz (Shear Z)": "Vz",
-        "My (Moment Y)": "My",
-        "Mz (Moment Z)": "Mz",
+        "N (Axial)": "N",
+        "V-major (Gravity Shear)": "Vy",
+        "V-minor (Lateral Shear)": "Vz",
+        "M-major (Strong Axis)": "My",
+        "M-minor (Weak Axis)": "Mz",
         "T (Torsion)": "T"
     }
     selected_force = st.session_state.fem_view_force_type
@@ -259,6 +278,8 @@ def render_unified_fem_views(
     force_scale = st.session_state.fem_view_force_scale
     if st.session_state.fem_view_force_auto_scale:
         force_scale = -1.0
+
+    use_opsvis = bool(st.session_state.fem_view_use_opsvis)
     
     # Debug prints removed to prevent console spam and UI lag
 
@@ -270,6 +291,7 @@ def render_unified_fem_views(
         show_slabs=st.session_state.fem_view_show_slabs,
         show_slab_mesh_grid=st.session_state.fem_view_show_mesh,
         show_ghost_columns=st.session_state.fem_view_show_ghost,
+        show_diaphragms=st.session_state.fem_view_show_diaphragms,
         grid_spacing=None,
         colorscale="RdYlGn_r",
         show_deformed=st.session_state.fem_view_show_deformed,
@@ -281,6 +303,15 @@ def render_unified_fem_views(
     # Prepare Analysis Data
     displaced_nodes = None
     reactions = None
+    
+    # --- Load Case Selection: Update analysis_result from results_dict BEFORE has_results check ---
+    # This ensures the selected load case is used throughout the entire function
+    results_dict = st.session_state.get("fem_analysis_results_dict", {})
+    if results_dict:
+        # Get selected load case from session state (defaults to "DL")
+        selected_load_case = st.session_state.get("fem_view_load_case", "DL")
+        if selected_load_case in results_dict:
+            analysis_result = results_dict[selected_load_case]
     
     # Check for analysis results
     has_results = analysis_result is not None and getattr(analysis_result, "success", False)
@@ -312,15 +343,8 @@ def render_unified_fem_views(
     
     is_locked = _is_inputs_locked()
     
-    LOAD_COMBINATIONS = [
-        ("LC1: 1.4G + 1.6Q", "ULS Gravity (Max)"),
-        ("LC2: 1.0G + 1.6Q", "ULS Gravity (Min Dead)"),
-        ("LC3: 1.4G + 1.4W", "ULS Wind"),
-        ("SLS: 1.0G + 1.0Q", "SLS Characteristic"),
-    ]
-    
-    col_run1, col_run2 = st.columns([1, 1])
-    with col_run1:
+    col_run1, col_run2, col_run3, col_run4 = st.columns([1, 1, 1, 1])
+    with col_run2:
         run_disabled = is_locked
         if st.button("🔧 Run FEM Analysis", key="fem_view_run_analysis", type="primary", disabled=run_disabled):
             from src.fem.solver import analyze_model
@@ -332,13 +356,14 @@ def render_unified_fem_views(
                 status_text.text("Running OpenSees analysis...")
                 progress_bar.progress(0.3)
                 
-                result = analyze_model(model, load_pattern=1)
+                # Run analysis for all 7 load cases
+                results_dict = analyze_model(model, load_cases=["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"])
                 progress_bar.progress(0.8)
                 
                 status_text.text("Analysis complete!")
                 progress_bar.progress(1.0)
                 
-                results_dict = {combo[0]: result for combo in LOAD_COMBINATIONS}
+                result = results_dict.get("DL") or next(iter(results_dict.values()), None)
                 st.session_state["fem_preview_analysis_result"] = result
                 st.session_state["fem_analysis_results_dict"] = results_dict
                 st.session_state["fem_analysis_status"] = "success" if getattr(result, "success", False) else "failed"
@@ -350,7 +375,7 @@ def render_unified_fem_views(
                 st.session_state["fem_analysis_message"] = str(e)
                 st.rerun()
     
-    with col_run2:
+    with col_run3:
         if is_locked:
             if st.button("🔓 Unlock to Modify", key="fem_view_unlock", type="secondary"):
                 _unlock_inputs()
@@ -358,32 +383,56 @@ def render_unified_fem_views(
         else:
             st.caption("Run analysis to lock inputs")
     
+    LOAD_CASES = ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
+    
+    selected_load_case = None
     if has_results:
-        combo_options = [combo[0] for combo in LOAD_COMBINATIONS]
-        selected_combo = st.selectbox(
-            "Load Combination for Force Display",
-            options=combo_options,
-            key="fem_view_load_combo",
-            help="Select load combination for force diagrams and reactions"
+        selected_load_case = st.selectbox(
+            "Load Case",
+            options=LOAD_CASES,
+            key="fem_view_load_case",
+            help="Select load case to display in force diagrams"
         )
         
         results_dict = st.session_state.get("fem_analysis_results_dict", {})
-        if selected_combo in results_dict:
-            analysis_result = results_dict[selected_combo]
+        if selected_load_case in results_dict:
+            analysis_result = results_dict[selected_load_case]
+
+    load_pattern_map = {
+        "DL": options.dl_load_pattern,
+        "SDL": options.sdl_load_pattern,
+        "LL": options.ll_load_pattern,
+        "Wx+": options.wx_plus_pattern,
+        "Wx-": options.wx_minus_pattern,
+        "Wy+": options.wy_plus_pattern,
+        "Wy-": options.wy_minus_pattern,
+    }
+    active_load_case = selected_load_case if has_results else None
+    active_load_pattern = load_pattern_map.get(active_load_case) if active_load_case else None
     
     analysis_status = st.session_state.get("fem_analysis_status", None)
     analysis_message = st.session_state.get("fem_analysis_message", "")
     
+    def _render_status_message(message: str) -> None:
+        st.markdown(
+            "<div style=\"background:#dcfce7; padding:0.75rem; border-radius:0.5rem; "
+            "border:1px solid #86efac; text-align:center; font-weight:600; "
+            "display:flex; align-items:center; justify-content:center;\">"
+            f"{message}"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+
     if analysis_status == "success":
         lock_indicator = "🔒 " if is_locked else ""
-        st.success(f"✅ {lock_indicator}**Analysis Successful** - {analysis_message}", icon="✅")
+        _render_status_message(f"{lock_indicator}Analysis Successful - {analysis_message}")
     elif analysis_status == "failed":
         st.warning(f"⚠️ **Analysis Failed** - {analysis_message}", icon="⚠️")
     elif analysis_status == "error":
         st.error(f"❌ **Error** - {analysis_message}", icon="❌")
     elif has_results:
         if getattr(analysis_result, "success", False):
-            st.success(f"✅ **Previous Analysis Available** - {getattr(analysis_result, 'message', 'Success')}", icon="✅")
+            _render_status_message(f"Previous Analysis Available - {getattr(analysis_result, 'message', 'Success')}")
     
     st.markdown("---")
 
@@ -440,8 +489,7 @@ def render_unified_fem_views(
     if active_view == "Plan View":
         st.session_state.fem_active_tab = "Plan View"
         
-        render_forces_here = (selected_force != "None")
-        
+        # opsvis incompatible with ShellMITC4 elements - use Plotly
         plan_config = VisualizationConfig(
             show_nodes=viz_config.show_nodes,
             show_supports=viz_config.show_supports,
@@ -450,12 +498,15 @@ def render_unified_fem_views(
             show_slabs=viz_config.show_slabs,
             show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
             show_ghost_columns=viz_config.show_ghost_columns,
+            show_diaphragms=viz_config.show_diaphragms,
             grid_spacing=viz_config.grid_spacing,
             colorscale=viz_config.colorscale,
             show_deformed=viz_config.show_deformed,
             show_reactions=viz_config.show_reactions,
-            section_force_type=force_code if render_forces_here else None,
+            section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
+            load_pattern=active_load_pattern,
+            load_case_label=active_load_case,
         )
             
         fig_plan = create_plan_view(
@@ -471,10 +522,6 @@ def render_unified_fem_views(
     # --- Elevation View Render ---
     elif active_view == "Elevation View":
         st.session_state.fem_active_tab = "Elevation View"
-        
-        # DEBUG: Show force diagram status
-        ef_count = len(getattr(analysis_result, 'element_forces', {})) if analysis_result else 0
-        st.caption(f"[DEBUG] force_code={force_code}, has_results={has_results}, element_forces={ef_count}")
         
         col_e1, col_e2 = st.columns(2)
         with col_e1:
@@ -495,7 +542,7 @@ def render_unified_fem_views(
             
         with col_e2:
             grid_map = {f"{axis_label}={val:.1f}m": val for val in gridlines}
-            grid_opts = ["All (Projected)", "Custom"] + list(grid_map.keys())
+            grid_opts = ["Custom"] + list(grid_map.keys())
             
             selected_grid = st.selectbox(
                 "Gridline Preset",
@@ -511,11 +558,10 @@ def render_unified_fem_views(
                     step=0.5,
                     key="fem_view_elev_custom_grid"
                 )
-            elif selected_grid != "All (Projected)":
-                grid_coord = grid_map[selected_grid]
+            else:
+                grid_coord = grid_map.get(selected_grid)
         
-        render_forces_here = (selected_force != "None")
-        
+        # opsvis incompatible with ShellMITC4 elements - use Plotly
         elev_config = VisualizationConfig(
             show_nodes=viz_config.show_nodes,
             show_supports=viz_config.show_supports,
@@ -528,8 +574,10 @@ def render_unified_fem_views(
             colorscale=viz_config.colorscale,
             show_deformed=viz_config.show_deformed,
             show_reactions=viz_config.show_reactions,
-            section_force_type=force_code if render_forces_here else None,
+            section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
+            load_pattern=active_load_pattern,
+            load_case_label=active_load_case,
         )
         
         fig_elev = create_elevation_view(
@@ -577,6 +625,62 @@ def render_unified_fem_views(
         st.plotly_chart(fig_3d, use_container_width=True, key=f"3d_view_{st.session_state.fem_view_force_type}")
         active_fig = fig_3d
 
+    if use_opsvis and force_code and has_results:
+        st.divider()
+        st.markdown("### opsvis Force Diagram")
+        st.caption("Rebuilds the OpenSees model for the selected load case.")
+
+        load_case = active_load_case or "DL"
+        pattern_id = active_load_pattern or options.dl_load_pattern
+
+        sfac = 1.0
+        from src.fem.results_processor import ResultsProcessor
+        opsvis_forces = ResultsProcessor.extract_section_forces(
+            result=analysis_result,
+            model=model,
+            force_type=force_code,
+        )
+        base_scale = calculate_opsvis_scale(opsvis_forces, model)
+        if st.session_state.fem_view_force_auto_scale:
+            sfac = base_scale
+        else:
+            sfac = base_scale * st.session_state.fem_view_force_scale
+
+        label_mode_map = {
+            "Max abs": "max_abs",
+            "Max/Min": "max_min",
+            "Ends": "ends",
+            "None": "none",
+        }
+        label_mode = label_mode_map.get(
+            st.session_state.get("fem_view_opsvis_label_mode", "Max abs"),
+            "max_abs",
+        )
+        label_stride = int(st.session_state.get("fem_view_opsvis_label_stride", 1))
+
+        opsvis_fig = create_opsvis_force_diagram(
+            sf_type=force_code,
+            sfac=sfac,
+            title=f"{selected_force} ({load_case})",
+            model=model,
+            run_analysis=True,
+            load_pattern=pattern_id,
+            forces=opsvis_forces,
+            label_mode=label_mode,
+            label_stride=label_stride,
+        )
+
+        if opsvis_fig is None:
+            error_msg = st.session_state.get("_opsvis_last_error")
+            if error_msg:
+                st.warning(f"opsvis force diagram failed: {error_msg}")
+            else:
+                st.warning("opsvis force diagram unavailable. Check opsvis/matplotlib installation.")
+        else:
+            if "_opsvis_last_error" in st.session_state:
+                del st.session_state["_opsvis_last_error"]
+            st.pyplot(opsvis_fig, clear_figure=True)
+
     # --- 5. Display Options Panel (MOVED BELOW) ---
     st.divider()
     with st.expander("Display Options", expanded=False):
@@ -588,6 +692,7 @@ def render_unified_fem_views(
         with col2:
             st.checkbox("Show supports", key="fem_view_show_supports")
             st.checkbox("Show mesh", key="fem_view_show_mesh")
+            st.checkbox("Show diaphragms", key="fem_view_show_diaphragms")
             st.checkbox("Show Reactions (Base)", key="fem_view_show_reactions")
         with col3:
             st.checkbox("Show loads", key="fem_view_show_loads")
@@ -601,6 +706,28 @@ def render_unified_fem_views(
                 key="fem_view_force_type",
                 label_visibility="collapsed"
             )
+
+            st.checkbox(
+                "Use opsvis force diagram (experimental)",
+                key="fem_view_use_opsvis",
+                help="Uses opsvis and Matplotlib instead of Plotly overlays."
+            )
+
+            if st.session_state.fem_view_use_opsvis:
+                st.selectbox(
+                    "opsvis labels",
+                    options=["Max abs", "Max/Min", "Ends", "None"],
+                    key="fem_view_opsvis_label_mode",
+                )
+                if st.session_state.fem_view_opsvis_label_mode != "None":
+                    st.slider(
+                        "Label every N elements",
+                        min_value=1,
+                        max_value=10,
+                        value=int(st.session_state.fem_view_opsvis_label_stride),
+                        step=1,
+                        key="fem_view_opsvis_label_stride",
+                    )
             
             if st.session_state.fem_view_force_type != "None":
                 use_auto = st.checkbox(
@@ -638,6 +765,20 @@ def render_unified_fem_views(
             else:
                 reaction_table = ReactionTable(analysis_result)
             reaction_table.render()
+    
+    # --- 6b. Beam Forces Table ---
+    if has_results:
+        with st.expander("Beam Section Forces", expanded=False):
+            current_load_case = st.session_state.get("fem_view_load_case", "DL")
+            beam_forces_table = BeamForcesTable(
+                model=model,
+                analysis_result=analysis_result,
+                force_type=force_code if force_code else "My",
+                story_height=project.geometry.story_height,
+                load_case=current_load_case
+            )
+            current_floor = int(round(selected_z / project.geometry.story_height)) if selected_z else None
+            beam_forces_table.render(floor_filter=current_floor)
 
     # --- 7. Model Statistics & Export ---
     

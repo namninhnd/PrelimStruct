@@ -56,8 +56,9 @@ def test_analyze_model_success(ops_monkeypatch) -> None:
         3: [0.0] * 12,
     }
 
-    result = analyze_model(model)
+    results = analyze_model(model)
 
+    result = results["combined"]
     assert result.success
     assert result.converged
     assert result.node_displacements[4][2] == -0.006

@@ -53,11 +53,18 @@ def calculate_carbon_emission(project: ProjectData) -> Tuple[float, float]:
     secondary_beam_volume = beam_width * beam_depth * project.geometry.bay_y * floors
 
     # Column volume
-    col_size = 0.4  # default 400mm
+    col_width = 0.4  # default 400mm
+    col_depth = 0.4
     if project.column_result:
-        col_size = project.column_result.dimension / 1000
+        if project.column_result.width > 0:
+            col_width = project.column_result.width / 1000
+        if project.column_result.depth > 0:
+            col_depth = project.column_result.depth / 1000
+        if project.column_result.dimension > 0:
+            col_width = max(col_width, project.column_result.dimension / 1000)
+            col_depth = max(col_depth, project.column_result.dimension / 1000)
     col_height = project.geometry.story_height * floors
-    col_volume = col_size * col_size * col_height
+    col_volume = col_width * col_depth * col_height
 
     # Total volume
     total_volume = slab_volume + primary_beam_volume + secondary_beam_volume + col_volume

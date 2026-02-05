@@ -115,7 +115,10 @@ class BeamBuilder:
         section_dims: Optional[Tuple[float, float]] = None,
         geometry_override: Optional[Dict] = None,
     ) -> int:
-        """Create a single beam element and add to model.
+        """Create a subdivided beam element (6 sub-elements, 7 nodes) and add to model.
+        
+        This method creates 6 sub-elements between start_node and end_node to enable
+        accurate parabolic force diagram visualization using real analysis forces.
         
         Args:
             start_node: Start node tag
@@ -126,42 +129,81 @@ class BeamBuilder:
             geometry_override: Optional geometry dict override
             
         Returns:
-            Element tag of created beam
+            Element tag of first created sub-element (parent beam ID)
         """
-        current_tag = self.element_tag
+        NUM_SUBDIVISIONS = 6
+        
+        # Get start and end node coordinates
+        start_node_obj = self.model.nodes[start_node]
+        end_node_obj = self.model.nodes[end_node]
+        
+        start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
+        end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
+        
+        # Determine floor level from start node elevation
+        floor_level = int(round(start_z / self.geometry.story_height))
+        
+        # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+        node_tags = [start_node]
+        
+        for i in range(1, NUM_SUBDIVISIONS):
+            t = i / NUM_SUBDIVISIONS  # 1/6, 2/6, 3/6, 4/6, 5/6
+            inter_x = start_x + t * (end_x - start_x)
+            inter_y = start_y + t * (end_y - start_y)
+            inter_z = start_z + t * (end_z - start_z)  # Same elevation for horizontal beams
+            
+            inter_node = self.registry.get_or_create(
+                inter_x, inter_y, inter_z, floor_level=floor_level
+            )
+            node_tags.append(inter_node)
+        
+        node_tags.append(end_node)
+        
+        # Track parent beam ID for logical grouping
+        parent_beam_id = self.element_tag
         
         # Default geometry
-        geom = geometry_override if geometry_override else {"local_y": (0.0, 0.0, 1.0)}
+        geom_base = geometry_override if geometry_override else {"local_y": (0.0, 0.0, 1.0)}
         
-        self.model.add_element(
-            Element(
-                tag=current_tag,
-                element_type=ElementType.ELASTIC_BEAM,
-                node_tags=[start_node, end_node],
-                material_tag=self.beam_material_tag,
-                section_tag=section_tag,
-                geometry=geom,
-            )
-        )
-
-        # Apply gravity loads if enabled
-        if self.options.apply_gravity_loads and section_dims:
-            width_m = section_dims[0] / 1000.0
-            depth_m = section_dims[1] / 1000.0
-            beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
-            w_total = beam_self_weight * 1000.0  # N/m
+        # Create 6 sub-elements connecting the 7 nodes sequentially
+        for i in range(NUM_SUBDIVISIONS):
+            current_tag = self.element_tag
             
-            self.model.add_uniform_load(
-                UniformLoad(
-                    element_tag=current_tag,
-                    load_type="Gravity",
-                    magnitude=w_total,
-                    load_pattern=load_pattern,
+            # Add parent beam tracking to geometry metadata
+            geom = geom_base.copy()
+            geom["parent_beam_id"] = parent_beam_id
+            geom["sub_element_index"] = i
+            
+            self.model.add_element(
+                Element(
+                    tag=current_tag,
+                    element_type=ElementType.ELASTIC_BEAM,
+                    node_tags=[node_tags[i], node_tags[i + 1]],
+                    material_tag=self.beam_material_tag,
+                    section_tag=section_tag,
+                    geometry=geom,
                 )
             )
 
-        self.element_tag += 1
-        return current_tag
+            # Apply gravity loads proportionally to each sub-element
+            if self.options.apply_gravity_loads and section_dims:
+                width_m = section_dims[0] / 1000.0
+                depth_m = section_dims[1] / 1000.0
+                beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
+                w_total = beam_self_weight * 1000.0  # N/m
+                
+                self.model.add_uniform_load(
+                    UniformLoad(
+                        element_tag=current_tag,
+                        load_type="Gravity",
+                        magnitude=w_total,
+                        load_pattern=load_pattern,
+                    )
+                )
+
+            self.element_tag += 1
+        
+        return parent_beam_id
 
     def _process_beam_segments(
         self,
@@ -278,7 +320,7 @@ class BeamBuilder:
                         section_tag=self.primary_section_tag,
                         section_dims=section_dims,
                         core_boundary_points=core_boundary_points,
-                        load_pattern=self.options.gravity_load_pattern,
+                        load_pattern=self.options.dl_load_pattern,
                     )
                     created_elements.extend(elem_tags)
         
@@ -307,7 +349,7 @@ class BeamBuilder:
                         section_tag=self.primary_section_tag,
                         section_dims=section_dims,
                         core_boundary_points=core_boundary_points,
-                        load_pattern=self.options.gravity_load_pattern,
+                        load_pattern=self.options.dl_load_pattern,
                     )
                     created_elements.extend(elem_tags)
         
@@ -374,7 +416,7 @@ class BeamBuilder:
                                 section_tag=self.secondary_section_tag,
                                 section_dims=section_dims,
                                 core_boundary_points=core_boundary_points,
-                                load_pattern=self.options.gravity_load_pattern,
+                                load_pattern=self.options.dl_load_pattern,
                             )
                             created_elements.extend(elem_tags)
             
@@ -404,7 +446,7 @@ class BeamBuilder:
                                 section_tag=self.secondary_section_tag,
                                 section_dims=section_dims,
                                 core_boundary_points=core_boundary_points,
-                                load_pattern=self.options.gravity_load_pattern,
+                                load_pattern=self.options.dl_load_pattern,
                             )
                             created_elements.extend(elem_tags)
         
@@ -519,23 +561,27 @@ class BeamBuilder:
                     end_x, end_y, z, floor_level=level
                 )
                 
-                # Create coupling beam element
-                self.model.add_element(
-                    Element(
-                        tag=coupling_element_tag,
-                        element_type=ElementType.ELASTIC_BEAM,
-                        node_tags=[start_node, end_node],
-                        material_tag=self.beam_material_tag,
-                        section_tag=self.coupling_section_tag,
-                        geometry={"local_y": (0.0, 0.0, 1.0)},
-                    )
+                # Create coupling beam element using subdivision method (6 sub-elements, 7 nodes)
+                # Store original element_tag, use coupling beam range, then restore
+                original_element_tag = self.element_tag
+                self.element_tag = coupling_element_tag
+                
+                parent_beam_id = self._create_beam_element(
+                    start_node=start_node,
+                    end_node=end_node,
+                    section_tag=self.coupling_section_tag,
+                    load_pattern=self.options.dl_load_pattern,
+                    section_dims=(coupling_beam_template.width, coupling_beam_template.depth),
+                    geometry_override={"local_y": (0.0, 0.0, 1.0), "coupling_beam": True},
                 )
                 
-                created_elements.append(coupling_element_tag)
+                # Restore element_tag and increment coupling beam base
+                coupling_element_tag = self.element_tag
+                self.element_tag = original_element_tag
+                
+                created_elements.append(parent_beam_id)
                 all_nodes.add(start_node)
                 all_nodes.add(end_node)
-                
-                coupling_element_tag += 1
         
         logger.info(
             f"Generated {len(created_elements)} coupling beam elements "

@@ -513,6 +513,13 @@ class ResultsProcessor:
         
         Converts forces from N → kN and moments from N·m → kN·m for display.
         
+        Handles subdivided elements (beams/columns split into 6 sub-elements):
+        - Each sub-element is included in the output with its own element_id
+        - Sub-elements can be grouped by parent_beam_id or parent_column_id
+          in the element geometry metadata for visualization purposes
+        - Forces are extracted at all subdivision nodes, enabling accurate
+          parabolic force diagram visualization
+        
         Args:
             result: AnalysisResult containing element_forces dict
             model: FEMModel containing element metadata
@@ -520,6 +527,7 @@ class ResultsProcessor:
             
         Returns:
             SectionForcesData with extracted forces in kN/kNm units
+            (includes all sub-elements for subdivided beams/columns)
             
         Example:
             forces = ResultsProcessor.extract_section_forces(
@@ -529,30 +537,39 @@ class ResultsProcessor:
             )
             print(f"{len(forces.elements)} elements, range: {forces.get_color_range()}")
         """
-        # Determine unit and force keys
-        # Element forces are stored as dict with keys like 'N_i', 'N_j', etc.
-        force_key_map = {
-            "N": ("N_i", "N_j"),      # Keys for axial force at node i and j
-            "Vy": ("Vy_i", "Vy_j"),   # Shear Y
-            "Vz": ("Vz_i", "Vz_j"),   # Shear Z
-            "T": ("T_i", "T_j"),      # Torsion
-            "My": ("My_i", "My_j"),   # Moment Y
-            "Mz": ("Mz_i", "Mz_j"),   # Moment Z
+        # Force key mapping for both 3D and 2D beam elements
+        # 3D elements: Vy_i/Vy_j, Mz_i/Mz_j etc.
+        # 2D elements: V_i/V_j, M_i/M_j
+        force_key_map_3d = {
+            "N": ("N_i", "N_j"),
+            "Vy": ("Vy_i", "Vy_j"),
+            "Vz": ("Vz_i", "Vz_j"),
+            "T": ("T_i", "T_j"),
+            "My": ("My_i", "My_j"),
+            "Mz": ("Mz_i", "Mz_j"),
+        }
+        
+        force_key_map_2d = {
+            "N": ("N_i", "N_j"),
+            "Vy": ("V_i", "V_j"),
+            "Vz": ("V_i", "V_j"),
+            "T": (None, None),
+            "My": ("M_i", "M_j"),
+            "Mz": ("M_i", "M_j"),
         }
 
-        if force_type not in force_key_map:
-            raise ValueError(f"Unknown force type: {force_type}. Use one of {list(force_key_map.keys())}")
+        if force_type not in force_key_map_3d:
+            raise ValueError(f"Unknown force type: {force_type}. Use one of {list(force_key_map_3d.keys())}")
 
-        key_i, key_j = force_key_map[force_type]
+        key_i_3d, key_j_3d = force_key_map_3d[force_type]
+        key_i_2d, key_j_2d = force_key_map_2d[force_type]
         unit = "kN" if force_type in ["N", "Vy", "Vz"] else "kNm"
         
-        # Extract forces from all beam elements
         elements_dict = {}
         min_val = float('inf')
         max_val = float('-inf')
         
         if not result.element_forces:
-            # Return empty data if no forces available
             return SectionForcesData(
                 force_type=force_type,
                 elements={},
@@ -562,28 +579,29 @@ class ResultsProcessor:
             )
         
         for elem_tag, force_dict in result.element_forces.items():
-            # Get element metadata from model
             if elem_tag not in model.elements:
                 continue
 
             elem_info = model.elements[elem_tag]
 
-            # Only extract forces for beam/column elements (2 nodes)
             if len(elem_info.node_tags) != 2:
                 continue
 
-            # Check if this is a 3D beam element (has the expected keys)
-            if key_i not in force_dict:
+            key_i, key_j = None, None
+            if key_i_3d in force_dict:
+                key_i, key_j = key_i_3d, key_j_3d
+            elif key_i_2d and key_i_2d in force_dict:
+                key_i, key_j = key_i_2d, key_j_2d
+            
+            if key_i is None:
                 continue
 
             node_i = elem_info.node_tags[0]
             node_j = elem_info.node_tags[1]
 
-            # Extract and convert forces (N → kN, N·m → kN·m)
-            force_i = force_dict[key_i] / 1000.0  # Convert to kN or kNm
+            force_i = force_dict[key_i] / 1000.0
             force_j = force_dict[key_j] / 1000.0
             
-            # Create ElementForce object
             elem_force = ElementForce(
                 element_id=elem_tag,
                 node_i=node_i,
@@ -594,11 +612,9 @@ class ResultsProcessor:
             
             elements_dict[elem_tag] = elem_force
             
-            # Track min/max for color scaling
             min_val = min(min_val, force_i, force_j)
             max_val = max(max_val, force_i, force_j)
         
-        # Handle case where no valid elements were found
         if not elements_dict:
             min_val = 0.0
             max_val = 0.0

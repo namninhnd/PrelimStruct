@@ -995,15 +995,6 @@ def main():
     <p style="color: #64748B; margin-top: 0;">AI-Assisted Preliminary Structural Design Platform</p>
     """, unsafe_allow_html=True)
     
-    # Mobile warning banner (visible only on mobile viewports)
-    st.markdown("""
-    <div class="mobile-warning">
-        <strong>⚠️ Desktop Recommended</strong><br>
-        This application is optimized for desktop browsers (1280px+ width). 
-        For the best experience and full access to sidebar controls, please use a desktop or tablet in landscape mode.
-    </div>
-    """, unsafe_allow_html=True)
-
     # Initialize session state
     if 'project' not in st.session_state:
         st.session_state.project = ProjectData()
@@ -1203,10 +1194,16 @@ def main():
             TerrainCategory.CITY_CENTRE: "D: City Centre"
         }
 
+        current_terrain = st.session_state.project.lateral.terrain
+        if current_terrain in terrain_options:
+            terrain_index = list(terrain_options.keys()).index(current_terrain)
+        else:
+            terrain_index = list(terrain_options.keys()).index(TerrainCategory.URBAN)
+
         selected_terrain_label = st.selectbox(
             "Terrain Category",
             options=list(terrain_options.values()),
-            index=list(terrain_options.keys()).index(st.session_state.project.lateral.terrain)
+            index=terrain_index
         )
         selected_terrain = list(terrain_options.keys())[list(terrain_options.values()).index(selected_terrain_label)]
 

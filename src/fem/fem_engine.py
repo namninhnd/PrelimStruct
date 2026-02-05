@@ -5,10 +5,13 @@ This module provides a high-level interface for structural finite element modeli
 using OpenSeesPy, tailored for tall building structural analysis with HK Code 2013.
 """
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Dict, Tuple, Optional
 import numpy as np
+
+_logger = logging.getLogger(__name__)
 
 
 class ElementType(Enum):
@@ -127,11 +130,13 @@ class UniformLoad:
         load_type: Load direction ('X', 'Y', 'Z', or 'Gravity')
         magnitude: Load magnitude (N/m for beams, Pa for shells)
         load_pattern: Load pattern identifier
+        visual_only: If True, used for visualization only (not applied in analysis)
     """
     element_tag: int
     load_type: str
     magnitude: float
     load_pattern: int = 1
+    visual_only: bool = False
 
 
 @dataclass
@@ -330,12 +335,16 @@ class FEMModel:
 
         return wy, wz
     
-    def build_openseespy_model(self, ndm: int = 3, ndf: int = 6) -> None:
+    def build_openseespy_model(
+        self, ndm: int = 3, ndf: int = 6, active_pattern: Optional[int] = None
+    ) -> None:
         """Build OpenSeesPy model from definitions.
         
         Args:
             ndm: Number of dimensions (2 or 3)
             ndf: Number of degrees of freedom per node (3 or 6)
+            active_pattern: If specified, only apply loads with this pattern ID.
+                           If None, apply all load patterns.
             
         Raises:
             ImportError: If openseespy is not installed
@@ -573,26 +582,44 @@ class FEMModel:
                     force_per_node
                 ))
 
-        # Apply rigid diaphragms (planar constraints)
-        if self.diaphragms and ndm < 3:
-            raise ValueError("Rigid diaphragms require ndm=3 (3D model)")
-        for diaphragm in self.diaphragms:
-            ops.rigidDiaphragm(
-                diaphragm.perp_dirn,
-                diaphragm.master_node,
-                *diaphragm.slave_nodes,
-            )
+        # Apply rigid diaphragms (planar constraints) for lateral patterns only
+        apply_diaphragms = False
+        if self.diaphragms:
+            if active_pattern is None:
+                apply_diaphragms = True
+            else:
+                apply_diaphragms = active_pattern in {4, 5, 6, 7}
+
+        if apply_diaphragms:
+            if ndm < 3:
+                raise ValueError("Rigid diaphragms require ndm=3 (3D model)")
+            for diaphragm in self.diaphragms:
+                ops.rigidDiaphragm(
+                    diaphragm.perp_dirn,
+                    diaphragm.master_node,
+                    *diaphragm.slave_nodes,
+                )
         
         # Apply loads grouped by pattern
         patterns = {load.load_pattern for load in self.loads}
         patterns.update({u.load_pattern for u in self.uniform_loads})
         patterns.update({s.load_pattern for s in self.surface_loads})
+        
+        # Filter patterns if active_pattern is specified
+        if active_pattern is not None:
+            patterns = {p for p in patterns if p == active_pattern}
 
+        _logger.info(f"Applying loads for pattern(s): {sorted(patterns)}")
+        total_point_loads = 0
+        total_uniform_loads = 0
+        total_surface_loads = 0
+        
         for pattern_id in sorted(patterns):
             ops.timeSeries('Linear', pattern_id)
             ops.pattern('Plain', pattern_id, pattern_id)
 
             # Point loads
+            pattern_point_loads = 0
             for load in self.loads:
                 if load.load_pattern != pattern_id:
                     continue
@@ -604,10 +631,14 @@ class FEMModel:
                     )
                 load_vector = load.load_values[:ndf]
                 ops.load(load.node_tag, *load_vector)
+                pattern_point_loads += 1
 
             # Uniform loads
+            pattern_uniform_loads = 0
             for uniform_load in self.uniform_loads:
                 if uniform_load.load_pattern != pattern_id:
+                    continue
+                if uniform_load.visual_only:
                     continue
 
                 wy, wz = self._get_uniform_load_components(uniform_load, ndm)
@@ -617,6 +648,7 @@ class FEMModel:
                 else:
                     ops.eleLoad('-ele', uniform_load.element_tag,
                                 '-type', 'beamUniform', wy, wz)
+                pattern_uniform_loads += 1
             
             nodal_load_dict = {}
             for node_tag, load_pattern, force_z in surface_nodal_loads:
@@ -629,6 +661,18 @@ class FEMModel:
             for node_tag, force_z in nodal_load_dict.items():
                 load_vector = [0.0, 0.0, force_z, 0.0, 0.0, 0.0]
                 ops.load(node_tag, *load_vector[:ndf])
+            
+            pattern_surface_loads = len(nodal_load_dict)
+            _logger.debug(f"Pattern {pattern_id}: {pattern_point_loads} point loads, "
+                         f"{pattern_uniform_loads} uniform loads, {pattern_surface_loads} surface load nodes")
+            total_point_loads += pattern_point_loads
+            total_uniform_loads += pattern_uniform_loads
+            total_surface_loads += pattern_surface_loads
+
+        _logger.info(f"Total loads applied: {total_point_loads} point, {total_uniform_loads} uniform, {total_surface_loads} surface nodes")
+        
+        if total_point_loads + total_uniform_loads + total_surface_loads == 0:
+            _logger.warning("WARNING: No loads were applied! Check load definitions and pattern IDs.")
 
         self._is_built = True
         self._ops_initialized = True
@@ -728,33 +772,35 @@ class FEMModel:
                 if slave == diaphragm.master_node:
                     errors.append("Diaphragm slave cannot equal master node")
         
-        # Mesh quality checks for shell elements
+        # Mesh quality checks for shell elements (warn only)
         max_aspect_ratio = 5.0
         for elem in self.elements.values():
             if elem.element_type == ElementType.SHELL_MITC4:
                 if len(elem.node_tags) != 4:
                     errors.append(f"Shell element {elem.tag} has {len(elem.node_tags)} nodes (expected 4)")
                     continue
-                
+
                 n1 = self.nodes[elem.node_tags[0]]
                 n2 = self.nodes[elem.node_tags[1]]
                 n3 = self.nodes[elem.node_tags[2]]
                 n4 = self.nodes[elem.node_tags[3]]
-                
+
                 edge1 = np.sqrt((n2.x - n1.x)**2 + (n2.y - n1.y)**2 + (n2.z - n1.z)**2)
                 edge2 = np.sqrt((n3.x - n2.x)**2 + (n3.y - n2.y)**2 + (n3.z - n2.z)**2)
                 edge3 = np.sqrt((n4.x - n3.x)**2 + (n4.y - n3.y)**2 + (n4.z - n3.z)**2)
                 edge4 = np.sqrt((n1.x - n4.x)**2 + (n1.y - n4.y)**2 + (n1.z - n4.z)**2)
-                
+
                 max_edge = max(edge1, edge2, edge3, edge4)
                 min_edge = min(edge1, edge2, edge3, edge4)
-                
+
                 if min_edge > 0:
                     aspect_ratio = max_edge / min_edge
                     if aspect_ratio > max_aspect_ratio:
-                        errors.append(
-                            f"Shell element {elem.tag} has excessive aspect ratio {aspect_ratio:.2f} "
-                            f"(max allowed: {max_aspect_ratio})"
+                        _logger.warning(
+                            "Shell element %s has excessive aspect ratio %.2f (max %.2f)",
+                            elem.tag,
+                            aspect_ratio,
+                            max_aspect_ratio,
                         )
         
         return (len(errors) == 0, errors)

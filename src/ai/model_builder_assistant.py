@@ -142,8 +142,8 @@ class ModelBuilderAssistant:
     LIMITS = {
         "num_floors": (1, 100),
         "floor_height": (2.5, 6.0),
-        "bay_x": (4.0, 15.0),
-        "bay_y": (4.0, 15.0),
+        "bay_x": (4.0, 1000.0),
+        "bay_y": (4.0, 1000.0),
         "num_bays_x": (1, 20),
         "num_bays_y": (1, 20),
     }

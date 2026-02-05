@@ -162,12 +162,15 @@ def test_build_fem_model_wind_loads_apply_to_diaphragms() -> None:
 
     model = build_fem_model(
         project,
-        ModelBuilderOptions(include_core_wall=False, apply_gravity_loads=False),
+        ModelBuilderOptions(include_core_wall=False, apply_gravity_loads=False, apply_wind_loads=True),
     )
 
-    assert len(model.loads) == project.geometry.floors
-    assert all(load.load_values[0] != 0.0 for load in model.loads)
-    assert all(load.load_pattern == 2 for load in model.loads)
+    # Now applies 4 directions (±X, ±Y) × 3 floors = 12 loads
+    assert len(model.loads) == project.geometry.floors * 4
+    # Check that loads are distributed across patterns 4-7 (wind patterns)
+    wind_patterns = {4, 5, 6, 7}
+    load_patterns = {load.load_pattern for load in model.loads}
+    assert load_patterns == wind_patterns
 
 
 def test_trim_beam_segment_splits_across_core() -> None:
@@ -428,11 +431,16 @@ class TestModelBuilderOptions:
         assert options.include_core_wall is True
         assert options.trim_beams_at_core is True
         assert options.apply_gravity_loads is True
-        assert options.apply_wind_loads is True
+        assert options.apply_wind_loads is False  # Default False in v3.5
         assert options.apply_rigid_diaphragms is True
         assert options.lateral_load_direction == "X"
-        assert options.gravity_load_pattern == 1
-        assert options.wind_load_pattern == 2
+        assert options.dl_load_pattern == 1
+        assert options.sdl_load_pattern == 2
+        assert options.ll_load_pattern == 3
+        assert options.wx_plus_pattern == 4
+        assert options.wx_minus_pattern == 5
+        assert options.wy_plus_pattern == 6
+        assert options.wy_minus_pattern == 7
 
     def test_custom_options(self) -> None:
         """Test custom ModelBuilderOptions values."""
@@ -440,13 +448,13 @@ class TestModelBuilderOptions:
             include_core_wall=False,
             apply_gravity_loads=False,
             lateral_load_direction="Y",
-            gravity_load_pattern=3,
+            dl_load_pattern=10,
         )
 
         assert options.include_core_wall is False
         assert options.apply_gravity_loads is False
         assert options.lateral_load_direction == "Y"
-        assert options.gravity_load_pattern == 3
+        assert options.dl_load_pattern == 10
 
 
 class TestBuildFEMModelIntegration:

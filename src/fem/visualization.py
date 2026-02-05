@@ -34,6 +34,15 @@ except Exception:
     OPSVIS_AVAILABLE = False
 
 try:
+    import matplotlib
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    matplotlib = None  # type: ignore
+    plt = None  # type: ignore
+    MATPLOTLIB_AVAILABLE = False
+
+try:
     import vfo
     VFO_AVAILABLE = True
 except Exception:
@@ -58,6 +67,123 @@ class VisualizationBackend(Enum):
     OPSVIS = "opsvis"
     VFO = "vfo"
     OPENSEES = "opensees"
+
+
+FORCE_DISPLAY_NAMES: Dict[str, str] = {
+    "N": "N (Axial)",
+    "Vy": "V-major",
+    "Vz": "V-minor",
+    "My": "M-major",
+    "Mz": "M-minor",
+    "T": "T (Torsion)",
+}
+
+
+def _format_opsvis_value(value: float, value_unit: str) -> str:
+    abs_val = abs(value)
+    if abs_val >= 1000:
+        return f"{value / 1000.0:.2f} x10^3 {value_unit}"
+    return f"{value:.1f} {value_unit}"
+
+
+def _format_opsvis_label(value: float) -> str:
+    abs_val = abs(value)
+    if abs_val >= 1000:
+        return f"{value / 1000.0:.2f} x10^3"
+    return f"{value:.1f}"
+
+
+def _hide_shell_elements_for_opsvis() -> List[int]:
+    """Temporarily remove shell elements (4-node) from active OpenSees model.
+    
+    opsvis.section_force_diagram_3d() crashes when shell elements are present
+    because it expects 2-node beam elements only. This function identifies and
+    removes shell elements to allow opsvis to render beam force diagrams.
+    
+    Returns:
+        List of removed shell element tags (for reference, not restoration)
+    
+    Note:
+        Shell elements cannot be restored after removal in OpenSees.
+        This function should only be called after analysis is complete
+        and before calling opsvis visualization functions.
+    """
+    try:
+        import openseespy.opensees as ops
+    except ImportError:
+        return []
+    
+    removed_tags: List[int] = []
+    
+    try:
+        elem_tags = list(ops.getEleTags())
+    except Exception:
+        return []
+    
+    for tag in elem_tags:
+        try:
+            nodes = ops.eleNodes(tag)
+            if len(nodes) == 4:  # Shell elements (ShellMITC4)
+                ops.remove('element', tag)
+                removed_tags.append(tag)
+        except Exception:
+            continue
+    
+    return removed_tags
+
+
+def _prune_elements_for_opsvis() -> Dict[str, int]:
+    """Remove elements unsupported by opsvis section_force_diagram_3d.
+
+    opsvis expects 2-node beam elements with 3D localForce responses. This
+    removes shell elements and any elements that do not return a full
+    12-component localForce vector.
+
+    Returns:
+        Dictionary of removal counts by reason.
+    """
+    try:
+        import openseespy.opensees as ops
+    except ImportError:
+        return {"import_error": 1}
+
+    removed = {
+        "shell": 0,
+        "non_2node": 0,
+        "invalid_force": 0,
+    }
+
+    try:
+        elem_tags = list(ops.getEleTags())
+    except Exception:
+        return {"get_tags_error": 1}
+
+    for tag in elem_tags:
+        try:
+            nodes = ops.eleNodes(tag)
+        except Exception:
+            continue
+
+        if len(nodes) == 4:
+            ops.remove("element", tag)
+            removed["shell"] += 1
+            continue
+
+        if len(nodes) != 2:
+            ops.remove("element", tag)
+            removed["non_2node"] += 1
+            continue
+
+        try:
+            forces = ops.eleResponse(tag, "localForce")
+            if not forces or len(forces) < 12:
+                ops.remove("element", tag)
+                removed["invalid_force"] += 1
+        except Exception:
+            ops.remove("element", tag)
+            removed["invalid_force"] += 1
+
+    return removed
 
 
 @dataclass
@@ -170,11 +296,14 @@ class VisualizationConfig:
     show_slabs: bool = True
     show_slab_mesh_grid: bool = True
     show_ghost_columns: bool = True
+    show_diaphragms: bool = False
     grid_spacing: Optional[float] = None
     show_deformed: bool = False
     show_reactions: bool = False
     section_force_type: Optional[str] = None
     section_force_scale: float = 1.0
+    load_pattern: Optional[int] = None
+    load_case_label: Optional[str] = None
 
 
 def build_visualization_data_from_fem_model(model: FEMModel) -> VisualizationData:
@@ -498,6 +627,18 @@ def _clamp(value: float, min_value: float, max_value: float) -> float:
     return max(min_value, min(value, max_value))
 
 
+def _normalize_end_force(force_i: float, force_j: float) -> float:
+    if abs(force_i + force_j) < abs(force_i - force_j):
+        return -force_j
+    return force_j
+
+
+def _display_end_force(force_i: float, force_j: float, force_type: str) -> float:
+    if force_type in {"Vy", "Vz", "My", "Mz", "T"}:
+        return -force_j
+    return _normalize_end_force(force_i, force_j)
+
+
 def _get_utilization_color(utilization: float, colorscale: str) -> str:
     """Map utilization ratio to a colorscale color."""
     if plotly_colors is None:
@@ -600,10 +741,33 @@ def _get_floor_elevations(model: ModelLike, tolerance: float = 0.01) -> List[flo
         Sorted list of unique z-elevations
     """
     elevations: List[float] = []
-    for node in model.nodes.values():
-        z = node.z
-        if not any(abs(z - e) < tolerance for e in elevations):
-            elevations.append(z)
+
+    def _add_level(z_value: float) -> None:
+        if not any(abs(z_value - e) < tolerance for e in elevations):
+            elevations.append(z_value)
+
+    # Prefer slab and horizontal element elevations to avoid column subnodes
+    for elem in model.elements.values():
+        if elem.element_type in (ElementType.SHELL_MITC4, ElementType.SHELL):
+            node_zs = [model.nodes[n].z for n in elem.node_tags if n in model.nodes]
+            if node_zs:
+                _add_level(sum(node_zs) / len(node_zs))
+
+    if not elevations:
+        for elem in model.elements.values():
+            if len(elem.node_tags) != 2:
+                continue
+            n_i = model.nodes.get(elem.node_tags[0])
+            n_j = model.nodes.get(elem.node_tags[1])
+            if not n_i or not n_j:
+                continue
+            if abs(n_i.z - n_j.z) <= tolerance:
+                _add_level(n_i.z)
+
+    if not elevations:
+        for node in model.nodes.values():
+            _add_level(node.z)
+
     return sorted(elevations)
 
 
@@ -666,35 +830,296 @@ def calculate_auto_scale_factor(
     return scale_factor
 
 
+def calculate_opsvis_scale(
+    forces: "SectionForcesData",
+    model: "ModelLike",
+    target_ratio: float = 0.35
+) -> float:
+    """Calculate scale factor for opsvis force diagrams.
+
+    This returns a scale factor in N-units for opsvis (forces in N), based on
+    force values in kN/kNm from ResultsProcessor and a target diagram size
+    relative to typical element length.
+    """
+    if not forces.elements:
+        return 1.0
+
+    max_abs_force = 0.0
+    for elem_force in forces.elements.values():
+        max_abs_force = max(
+            max_abs_force,
+            abs(elem_force.force_i),
+            abs(elem_force.force_j),
+        )
+
+    if max_abs_force <= 0:
+        return 1.0
+
+    lengths = []
+    for elem in model.elements.values():
+        if len(elem.node_tags) != 2:
+            continue
+        node_i = model.nodes.get(elem.node_tags[0])
+        node_j = model.nodes.get(elem.node_tags[1])
+        if node_i is None or node_j is None:
+            continue
+        dx = node_j.x - node_i.x
+        dy = node_j.y - node_i.y
+        dz = node_j.z - node_i.z
+        length = (dx**2 + dy**2 + dz**2) ** 0.5
+        if length > 1e-6:
+            lengths.append(length)
+
+    if not lengths:
+        return 1.0
+
+    import statistics
+
+    typical_length = statistics.median(lengths)
+    target_diagram_size = typical_length * target_ratio
+    scale_kN = target_diagram_size / max_abs_force
+
+    return scale_kN / 1000.0
+
+
+def _annotate_opsvis_end_values(
+    ax: Any,
+    model: "ModelLike",
+    forces: "SectionForcesData",
+    value_unit: str,
+    mode: str = "max_abs",
+    stride: int = 1,
+    font_size: int = 6,
+) -> None:
+    if not forces.elements:
+        return
+
+    if mode == "none":
+        return
+
+    try:
+        stride = int(stride)
+    except (TypeError, ValueError):
+        stride = 1
+    if stride < 1:
+        stride = 1
+
+    lengths = []
+    for elem in model.elements.values():
+        if len(elem.node_tags) != 2:
+            continue
+        node_i = model.nodes.get(elem.node_tags[0])
+        node_j = model.nodes.get(elem.node_tags[1])
+        if node_i is None or node_j is None:
+            continue
+        dx = node_j.x - node_i.x
+        dy = node_j.y - node_i.y
+        dz = node_j.z - node_i.z
+        length = (dx**2 + dy**2 + dz**2) ** 0.5
+        if length > 1e-6:
+            lengths.append(length)
+
+    offset = 0.0
+    if lengths:
+        import statistics
+
+        offset = statistics.median(lengths) * 0.05
+
+    element_ids = sorted(forces.elements.keys())
+    for idx, elem_id in enumerate(element_ids):
+        if idx % stride != 0:
+            continue
+        elem_force = forces.elements[elem_id]
+        elem = model.elements.get(elem_id)
+        if elem is None or len(elem.node_tags) != 2:
+            continue
+
+        node_i = model.nodes.get(elem.node_tags[0])
+        node_j = model.nodes.get(elem.node_tags[1])
+        if node_i is None or node_j is None:
+            continue
+
+        if mode == "ends":
+            text_i = _format_opsvis_label(elem_force.force_i)
+            text_j = _format_opsvis_label(elem_force.force_j)
+
+            ax.text(
+                node_i.x,
+                node_i.y,
+                node_i.z + offset,
+                text_i,
+                fontsize=font_size,
+                color="black",
+            )
+            ax.text(
+                node_j.x,
+                node_j.y,
+                node_j.z + offset,
+                text_j,
+                fontsize=font_size,
+                color="black",
+            )
+        elif mode == "max_min":
+            max_val = max(elem_force.force_i, elem_force.force_j)
+            min_val = min(elem_force.force_i, elem_force.force_j)
+
+            if max_val == min_val:
+                text = _format_opsvis_label(max_val)
+                ax.text(
+                    node_i.x,
+                    node_i.y,
+                    node_i.z + offset,
+                    text,
+                    fontsize=font_size,
+                    color="black",
+                )
+            else:
+                if elem_force.force_i == max_val:
+                    max_node = node_i
+                    min_node = node_j
+                else:
+                    max_node = node_j
+                    min_node = node_i
+
+                max_text = _format_opsvis_label(max_val)
+                min_text = _format_opsvis_label(min_val)
+
+                ax.text(
+                    max_node.x,
+                    max_node.y,
+                    max_node.z + offset,
+                    max_text,
+                    fontsize=font_size,
+                    color="black",
+                )
+                ax.text(
+                    min_node.x,
+                    min_node.y,
+                    min_node.z + offset,
+                    min_text,
+                    fontsize=font_size,
+                    color="black",
+                )
+        else:
+            if abs(elem_force.force_i) >= abs(elem_force.force_j):
+                target_node = node_i
+                target_value = elem_force.force_i
+            else:
+                target_node = node_j
+                target_value = elem_force.force_j
+
+            text = _format_opsvis_label(target_value)
+            ax.text(
+                target_node.x,
+                target_node.y,
+                target_node.z + offset,
+                text,
+                fontsize=font_size,
+                color="black",
+            )
+
+
+def _apply_opsvis_hatch(ax: Any) -> None:
+    try:
+        collections = list(getattr(ax, "collections", []))
+    except Exception:
+        return
+
+    for collection in collections:
+        if not hasattr(collection, "set_hatch"):
+            continue
+        try:
+            collection.set_facecolor("none")
+            collection.set_edgecolor("black")
+            collection.set_linewidth(0.6)
+            collection.set_hatch("|||")
+        except Exception:
+            continue
+
+
 def render_section_forces(
     fig: "go.Figure",
     model: "ModelLike",
     forces: "SectionForcesData",
     view_direction: str,
-    scale_factor: float = 0.001
+    scale_factor: float = 0.001,
+    gridline_coord: Optional[float] = None,
+    gridline_tol: float = 0.5,
+    label_positions: Optional[List[float]] = None,
+    label_font_size: int = 8,
 ) -> None:
     """Render section force diagrams on Plotly figure (opsvis-style).
     
     Draws unfilled force distribution curves with perpendicular reference lines
     and numerical annotations at element ends.
     
+    For subdivided elements (coupling beams with 6 sub-elements, columns with 4),
+    forces are extracted from all sub-elements to show curved diagrams (parabolic
+    for UDL) instead of linear interpolation.
+    
     Args:
         fig: Plotly Figure object to add traces to
         model: FEMModel containing element and node data
         forces: SectionForcesData with extracted force values
-        view_direction: 'X' for YZ plane, 'Y' for XZ plane
+        view_direction: 'X' for XZ plane, 'Y' for YZ plane
         scale_factor: Scale factor for force diagram magnitudes
     """
     if not forces.elements:
         return
+
+    if label_positions is None:
+        label_positions = [0.0, 0.5, 1.0]
     
-    # Determine coordinate mapping based on view
-    if view_direction.upper() == 'X':
-        h_idx, v_idx = 1, 2  # Y, Z
-    else:  # 'Y'
-        h_idx, v_idx = 0, 2  # X, Z
+    view_direction = view_direction.upper()
+
+    if view_direction == "X":
+        get_h = lambda n: n.x
+        get_v = lambda n: n.z
+        get_filter_coord = lambda n: n.y
+    else:
+        get_h = lambda n: n.y
+        get_v = lambda n: n.z
+        get_filter_coord = lambda n: n.x
+
+    def element_passes_filter(node_i: "Node", node_j: "Node") -> bool:
+        if gridline_coord is None:
+            return True
+        coord_i = get_filter_coord(node_i)
+        coord_j = get_filter_coord(node_j)
+        return (
+            abs(coord_i - gridline_coord) < gridline_tol and
+            abs(coord_j - gridline_coord) < gridline_tol
+        )
+
+    def compute_perp(h_start: float, v_start: float, h_end: float, v_end: float) -> Optional[Tuple[float, float]]:
+        dh = h_end - h_start
+        dv = v_end - v_start
+        length = float(np.hypot(dh, dv))
+        if length < 1e-6:
+            return None
+        return (-dv / length, dh / length)
     
     is_first_trace = True
+    
+    parent_groups: Dict[int, List[Tuple[int, int]]] = {}
+    processed_parents: Set[int] = set()
+    
+    for elem_id, elem_info in model.elements.items():
+        geom = elem_info.geometry or {}
+        parent_id = (
+            geom.get("parent_beam_id") or 
+            geom.get("parent_coupling_beam_id") or 
+            geom.get("parent_column_id")
+        )
+        if parent_id is not None:
+            sub_index = geom.get("sub_element_index", 0)
+            if parent_id not in parent_groups:
+                parent_groups[parent_id] = []
+            parent_groups[parent_id].append((sub_index, elem_id))
+    
+    # Sort sub-elements by index
+    for parent_id in parent_groups:
+        parent_groups[parent_id].sort(key=lambda x: x[0])
     
     for elem_id, elem_force in forces.elements.items():
         if elem_id not in model.elements:
@@ -704,66 +1129,176 @@ def render_section_forces(
         
         if len(elem_info.node_tags) != 2:
             continue
-        
+
         node_i_tag, node_j_tag = elem_info.node_tags
-        
         if node_i_tag not in model.nodes or node_j_tag not in model.nodes:
             continue
-        
         node_i = model.nodes[node_i_tag]
         node_j = model.nodes[node_j_tag]
-        
-        # Element vector
-        coords_i = np.array([node_i.x, node_i.y, node_i.z])
-        coords_j = np.array([node_j.x, node_j.y, node_j.z])
-        L_vec = coords_j - coords_i
-        L = np.linalg.norm(L_vec)
-        
-        if L < 1e-6:
+        if not element_passes_filter(node_i, node_j):
             continue
         
-        # Direction cosines
-        cosa, cosb, cosc = L_vec / L
+        geom = elem_info.geometry or {}
+        parent_id = (
+            geom.get("parent_beam_id") or 
+            geom.get("parent_coupling_beam_id") or 
+            geom.get("parent_column_id")
+        )
         
-        # Evaluation points along element
+        # Skip if this is a sub-element and parent already processed
+        if parent_id is not None:
+            if parent_id in processed_parents:
+                continue
+            processed_parents.add(parent_id)
+            
+            # Get all sub-elements for this parent
+            sub_elements = parent_groups.get(parent_id, [])
+            if len(sub_elements) > 1:
+                # Extract forces from all sub-elements
+                force_values = []
+                h_baseline = []
+                v_baseline = []
+                
+                for sub_idx, sub_elem_id in sub_elements:
+                    sub_elem = model.elements.get(sub_elem_id)
+                    sub_force = forces.elements.get(sub_elem_id)
+                    if sub_elem and sub_force and len(sub_elem.node_tags) == 2:
+                        node_i_tag = sub_elem.node_tags[0]
+                        if node_i_tag in model.nodes:
+                            node_i = model.nodes[node_i_tag]
+                            force_value = sub_force.force_i
+                            if forces.force_type == "N":
+                                force_value = -force_value
+                            force_values.append(force_value)
+                            h_baseline.append(get_h(node_i))
+                            v_baseline.append(get_v(node_i))
+                
+                # Add final force_j from last sub-element
+                if sub_elements:
+                    last_sub_elem_id = sub_elements[-1][1]
+                    last_sub_elem = model.elements.get(last_sub_elem_id)
+                    last_sub_force = forces.elements.get(last_sub_elem_id)
+                    if last_sub_elem and last_sub_force and len(last_sub_elem.node_tags) == 2:
+                        node_j_tag = last_sub_elem.node_tags[1]
+                        if node_j_tag in model.nodes:
+                            node_j = model.nodes[node_j_tag]
+                            normalized_j = _display_end_force(
+                                last_sub_force.force_i,
+                                last_sub_force.force_j,
+                                forces.force_type,
+                            )
+                            force_values.append(normalized_j)
+                            h_baseline.append(get_h(node_j))
+                            v_baseline.append(get_v(node_j))
+
+                if len(force_values) >= 2 and len(h_baseline) >= 2:
+                    force_values_arr = np.array(force_values)
+                    forces_scaled = force_values_arr * scale_factor
+                    nep = len(force_values)
+
+                    h_baseline_arr = np.array(h_baseline, dtype=float)
+                    v_baseline_arr = np.array(v_baseline, dtype=float)
+
+                    perp = compute_perp(
+                        h_baseline_arr[0],
+                        v_baseline_arr[0],
+                        h_baseline_arr[-1],
+                        v_baseline_arr[-1],
+                    )
+                    if perp is None:
+                        continue
+                    perp_h, perp_v = perp
+
+                    h_force = h_baseline_arr + forces_scaled * perp_h
+                    v_force = v_baseline_arr + forces_scaled * perp_v
+                    
+                    # Draw force curve (red unfilled line)
+                    display_name = FORCE_DISPLAY_NAMES.get(forces.force_type, forces.force_type)
+                    fig.add_trace(go.Scatter(
+                        x=h_force.tolist(),
+                        y=v_force.tolist(),
+                        mode='lines',
+                    line=dict(color='black', width=1.5),
+                        name=f'{display_name} [{forces.unit}]',
+                        showlegend=is_first_trace,
+                        legendgroup=forces.force_type,
+                        hoverinfo='skip'
+                    ))
+                    
+                    is_first_trace = False
+                    
+                    # Reference lines at ends
+                    for i in [0, -1]:
+                        fig.add_trace(go.Scatter(
+                            x=[h_baseline_arr[i], h_force[i]],
+                            y=[v_baseline_arr[i], v_force[i]],
+                            mode='lines',
+                            line=dict(color='black', width=0.5, dash='dot'),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                    
+                    # Annotations at 0L, 0.5L, 1.0L positions
+                    for pos_frac in label_positions:
+                        idx = int(pos_frac * (nep - 1))
+                        force_at_pos = force_values[idx]
+                        
+                        if abs(force_at_pos) < 1e-9:
+                            continue
+                        
+                        fig.add_annotation(
+                            x=h_force[idx],
+                            y=v_force[idx],
+                            text=f'{force_at_pos:.1f}',
+                            showarrow=False,
+                            font=dict(size=label_font_size, color='black'),
+                            xanchor='left',
+                            yanchor='bottom'
+                        )
+                    
+                    continue  # Skip single-element handling below
+        
+        # Single element (no subdivision) - use linear interpolation
+        node_i_tag, node_j_tag = elem_info.node_tags
+        if node_i_tag not in model.nodes or node_j_tag not in model.nodes:
+            continue
+        node_i = model.nodes[node_i_tag]
+        node_j = model.nodes[node_j_tag]
+        if not element_passes_filter(node_i, node_j):
+            continue
+        
+        h_i = get_h(node_i)
+        v_i = get_v(node_i)
+        h_j = get_h(node_j)
+        v_j = get_v(node_j)
+
+        perp = compute_perp(h_i, v_i, h_j, v_j)
+        if perp is None:
+            continue
+        perp_h, perp_v = perp
+
         nep = 17
-        xl = np.linspace(0, L, nep)
-        
-        # Linear interpolation of forces
+        t = np.linspace(0.0, 1.0, nep)
+
         force_i = elem_force.force_i
-        force_j = elem_force.force_j
-        forces_interp = force_i + (force_j - force_i) * (xl / L)
+        force_j = _display_end_force(force_i, elem_force.force_j, forces.force_type)
+        forces_interp = force_i + (force_j - force_i) * t
         forces_scaled = forces_interp * scale_factor
-        
-        # Baseline coordinates (element centerline)
-        s_0 = np.zeros((nep, 3))
-        s_0[:, 0] = node_i.x + xl * cosa
-        s_0[:, 1] = node_i.y + xl * cosb
-        s_0[:, 2] = node_i.z + xl * cosc
-        
-        # Offset coordinates (perpendicular to element)
-        s_p = np.copy(s_0)
-        
-        if view_direction.upper() == 'X':
-            s_p[:, 1] -= forces_scaled * cosc
-            s_p[:, 2] += forces_scaled * cosb
-        else:  # 'Y'
-            s_p[:, 0] -= forces_scaled * cosc
-            s_p[:, 2] += forces_scaled * cosa
-        
-        # Extract coordinates for plotting
-        h_baseline = s_0[:, h_idx]
-        v_baseline = s_0[:, v_idx]
-        h_force = s_p[:, h_idx]
-        v_force = s_p[:, v_idx]
+
+        h_baseline = h_i + t * (h_j - h_i)
+        v_baseline = v_i + t * (v_j - v_i)
+
+        h_force = h_baseline + forces_scaled * perp_h
+        v_force = v_baseline + forces_scaled * perp_v
         
         # Draw force curve (red unfilled line)
+        display_name = FORCE_DISPLAY_NAMES.get(forces.force_type, forces.force_type)
         fig.add_trace(go.Scatter(
             x=h_force.tolist(),
             y=v_force.tolist(),
             mode='lines',
-            line=dict(color='red', width=1.5),
-            name=f'{forces.force_type} [{forces.unit}]',
+            line=dict(color='black', width=1.5),
+            name=f'{display_name} [{forces.unit}]',
             showlegend=is_first_trace,
             legendgroup=forces.force_type,
             hoverinfo='skip'
@@ -777,13 +1312,13 @@ def render_section_forces(
                 x=[h_baseline[i], h_force[i]],
                 y=[v_baseline[i], v_force[i]],
                 mode='lines',
-                line=dict(color='red', width=0.5, dash='dot'),
+                line=dict(color='black', width=0.5, dash='dot'),
                 showlegend=False,
                 hoverinfo='skip'
             ))
         
         # Annotations at 3 points (ends + midpoint)
-        for pos_frac in [0.0, 0.5, 1.0]:
+        for pos_frac in label_positions:
             force_at_pos = force_i + pos_frac * (force_j - force_i)
             
             if abs(force_at_pos) < 1e-9:
@@ -796,7 +1331,7 @@ def render_section_forces(
                 y=v_force[idx],
                 text=f'{force_at_pos:.1f}',
                 showarrow=False,
-                font=dict(size=8, color='red'),
+                font=dict(size=label_font_size, color='black'),
                 xanchor='left',
                 yanchor='bottom'
             )
@@ -814,11 +1349,36 @@ def render_section_forces_plan(
     
     Only renders elements at the specified floor elevation.
     Forces are drawn perpendicular to elements in the XY plane.
+    
+    For subdivided elements (beams with 6 sub-elements), forces are extracted
+    from all sub-elements to show curved diagrams (parabolic for UDL) instead
+    of linear interpolation.
     """
     if not forces.elements:
         return
     
     is_first_trace = True
+    
+    # Build parent groups for subdivided elements (same logic as Elevation View)
+    parent_groups: Dict[int, List[Tuple[int, int]]] = {}
+    processed_parents: Set[int] = set()
+    
+    for elem_id, elem_info in model.elements.items():
+        geom = elem_info.geometry or {}
+        parent_id = (
+            geom.get("parent_beam_id") or 
+            geom.get("parent_coupling_beam_id") or 
+            geom.get("parent_column_id")
+        )
+        if parent_id is not None:
+            sub_index = geom.get("sub_element_index", 0)
+            if parent_id not in parent_groups:
+                parent_groups[parent_id] = []
+            parent_groups[parent_id].append((sub_index, elem_id))
+    
+    # Sort sub-elements by index
+    for parent_id in parent_groups:
+        parent_groups[parent_id].sort(key=lambda x: x[0])
     
     for elem_id, elem_force in forces.elements.items():
         if elem_id not in model.elements:
@@ -829,18 +1389,141 @@ def render_section_forces_plan(
         if len(elem_info.node_tags) != 2:
             continue
         
+        # Check floor elevation filter first (for performance)
         node_i_tag, node_j_tag = elem_info.node_tags
-        
         if node_i_tag not in model.nodes or node_j_tag not in model.nodes:
             continue
         
         node_i = model.nodes[node_i_tag]
         node_j = model.nodes[node_j_tag]
         
-        # Filter by floor elevation - both nodes must be at target floor
         if abs(node_i.z - floor_z) > tolerance or abs(node_j.z - floor_z) > tolerance:
             continue
         
+        geom = elem_info.geometry or {}
+        parent_id = (
+            geom.get("parent_beam_id") or 
+            geom.get("parent_coupling_beam_id") or 
+            geom.get("parent_column_id")
+        )
+        
+        # Handle subdivided elements (group by parent)
+        if parent_id is not None:
+            if parent_id in processed_parents:
+                continue
+            processed_parents.add(parent_id)
+            
+            sub_elements = parent_groups.get(parent_id, [])
+            if len(sub_elements) > 1:
+                # Extract forces from all sub-elements
+                force_values = []
+                node_positions = []  # (x, y) at each subdivision node
+                
+                for sub_idx, sub_elem_id in sub_elements:
+                    sub_elem = model.elements.get(sub_elem_id)
+                    sub_force = forces.elements.get(sub_elem_id)
+                    if sub_elem and sub_force and len(sub_elem.node_tags) == 2:
+                        node_i_tag = sub_elem.node_tags[0]
+                        if node_i_tag in model.nodes:
+                            node_i = model.nodes[node_i_tag]
+                            # Check floor filter for each sub-element
+                            if abs(node_i.z - floor_z) <= tolerance:
+                                force_value = sub_force.force_i
+                                force_values.append(force_value)
+                                node_positions.append((node_i.x, node_i.y))
+                
+                # Add final force_j from last sub-element
+                if sub_elements:
+                    last_sub_elem_id = sub_elements[-1][1]
+                    last_sub_elem = model.elements.get(last_sub_elem_id)
+                    last_sub_force = forces.elements.get(last_sub_elem_id)
+                    if last_sub_elem and last_sub_force and len(last_sub_elem.node_tags) == 2:
+                        node_j_tag = last_sub_elem.node_tags[1]
+                        if node_j_tag in model.nodes:
+                            node_j = model.nodes[node_j_tag]
+                            if abs(node_j.z - floor_z) <= tolerance:
+                                normalized_j = _display_end_force(
+                                    last_sub_force.force_i,
+                                    last_sub_force.force_j,
+                                    forces.force_type,
+                                )
+                                force_values.append(normalized_j)
+                                node_positions.append((node_j.x, node_j.y))
+                
+                if len(force_values) >= 2 and len(node_positions) >= 2:
+                    # Use actual forces at subdivision nodes
+                    force_values_arr = np.array(force_values)
+                    forces_scaled = force_values_arr * scale_factor
+                    nep = len(force_values)
+                    
+                    # Baseline coordinates at each subdivision node
+                    x_baseline = np.array([pos[0] for pos in node_positions])
+                    y_baseline = np.array([pos[1] for pos in node_positions])
+                    
+                    # Get direction for perpendicular offset
+                    dx = node_positions[-1][0] - node_positions[0][0]
+                    dy = node_positions[-1][1] - node_positions[0][1]
+                    L = np.sqrt(dx**2 + dy**2)
+                    if L < 1e-6:
+                        continue
+                    
+                    # Direction cosines and perpendicular
+                    cosa = dx / L
+                    cosb = dy / L
+                    perp_x = -cosb
+                    perp_y = cosa
+                    
+                    # Offset coordinates (perpendicular to element)
+                    x_force = x_baseline + forces_scaled * perp_x
+                    y_force = y_baseline + forces_scaled * perp_y
+                    
+                    # Draw force curve (red unfilled line)
+                    display_name = FORCE_DISPLAY_NAMES.get(forces.force_type, forces.force_type)
+                    fig.add_trace(go.Scatter(
+                        x=x_force.tolist(),
+                        y=y_force.tolist(),
+                        mode='lines',
+                    line=dict(color='black', width=1.5),
+                        name=f'{display_name} [{forces.unit}]',
+                        showlegend=is_first_trace,
+                        legendgroup=forces.force_type,
+                        hoverinfo='skip'
+                    ))
+                    
+                    is_first_trace = False
+                    
+                    # Reference lines at ends
+                    for i in [0, -1]:
+                        fig.add_trace(go.Scatter(
+                            x=[x_baseline[i], x_force[i]],
+                            y=[y_baseline[i], y_force[i]],
+                            mode='lines',
+                            line=dict(color='black', width=0.5, dash='dot'),
+                            showlegend=False,
+                            hoverinfo='skip'
+                        ))
+                    
+                    # Annotations at 0L, 0.5L, 1.0L positions
+                    for pos_frac in [0.0, 0.5, 1.0]:
+                        idx = int(pos_frac * (nep - 1))
+                        force_at_pos = force_values[idx]
+                        
+                        if abs(force_at_pos) < 1e-9:
+                            continue
+                        
+                        fig.add_annotation(
+                            x=x_force[idx],
+                            y=y_force[idx],
+                            text=f'{force_at_pos:.1f}',
+                            showarrow=False,
+                            font=dict(size=8, color='black'),
+                            xanchor='left',
+                            yanchor='bottom'
+                        )
+                    
+                    continue  # Skip single-element handling below
+        
+        # Single element (no subdivision) - use linear interpolation
         # Element vector in XY plane
         dx = node_j.x - node_i.x
         dy = node_j.y - node_i.y
@@ -863,7 +1546,7 @@ def render_section_forces_plan(
         
         # Linear interpolation of forces
         force_i = elem_force.force_i
-        force_j = elem_force.force_j
+        force_j = _display_end_force(force_i, elem_force.force_j, forces.force_type)
         forces_interp = force_i + (force_j - force_i) * (xl / L)
         forces_scaled = forces_interp * scale_factor
         
@@ -876,12 +1559,13 @@ def render_section_forces_plan(
         y_force = y_baseline + forces_scaled * perp_y
         
         # Draw force curve
+        display_name = FORCE_DISPLAY_NAMES.get(forces.force_type, forces.force_type)
         fig.add_trace(go.Scatter(
             x=x_force.tolist(),
             y=y_force.tolist(),
             mode='lines',
-            line=dict(color='red', width=1.5),
-            name=f'{forces.force_type} [{forces.unit}]',
+            line=dict(color='black', width=1.5),
+            name=f'{display_name} [{forces.unit}]',
             showlegend=is_first_trace,
             legendgroup=forces.force_type,
             hoverinfo='skip'
@@ -895,7 +1579,7 @@ def render_section_forces_plan(
                 x=[x_baseline[i], x_force[i]],
                 y=[y_baseline[i], y_force[i]],
                 mode='lines',
-                line=dict(color='red', width=0.5, dash='dot'),
+                line=dict(color='black', width=0.5, dash='dot'),
                 showlegend=False,
                 hoverinfo='skip'
             ))
@@ -914,7 +1598,7 @@ def render_section_forces_plan(
                 y=y_force[idx],
                 text=f'{force_at_pos:.1f}',
                 showarrow=False,
-                font=dict(size=8, color='red'),
+                font=dict(size=8, color='black'),
                 xanchor='left',
                 yanchor='bottom'
             )
@@ -1025,6 +1709,7 @@ def create_plan_view(model: ModelLike,
     beam_label_x: List[float] = []
     beam_label_y: List[float] = []
     beam_label_text: List[str] = []
+    beam_label_groups: Dict[int, List[Tuple[int, int]]] = {}
     beam_trace_added = False
 
     for elem_tag in classification["beams"]:
@@ -1064,9 +1749,10 @@ def create_plan_view(model: ModelLike,
                 beam_text.append(hover_text)
 
             if config.show_labels:
-                beam_label_x.append((node_i.x + node_j.x) / 2)
-                beam_label_y.append((node_i.y + node_j.y) / 2)
-                beam_label_text.append(f"B{elem_tag} {length:.2f} m")
+                geom = elem.geometry or {}
+                parent_id = geom.get("parent_beam_id", elem_tag)
+                sub_idx = geom.get("sub_element_index", 0)
+                beam_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
     if beam_x and not use_utilization:
         fig.add_trace(go.Scatter(
@@ -1097,6 +1783,19 @@ def create_plan_view(model: ModelLike,
             hoverinfo='none',
         ))
 
+    if config.show_labels and beam_label_groups:
+        for parent_id, sub_elements in beam_label_groups.items():
+            sub_elements.sort(key=lambda item: item[0])
+            first_elem = model.elements.get(sub_elements[0][1])
+            last_elem = model.elements.get(sub_elements[-1][1])
+            if first_elem is None or last_elem is None:
+                continue
+            start_node, _ = _get_element_endpoints(model, first_elem)
+            _, end_node = _get_element_endpoints(model, last_elem)
+            beam_label_x.append((start_node.x + end_node.x) / 2)
+            beam_label_y.append((start_node.y + end_node.y) / 2)
+            beam_label_text.append(f"B{parent_id}")
+
     if config.show_labels and beam_label_x:
         fig.add_trace(go.Scatter(
             x=beam_label_x,
@@ -1116,6 +1815,7 @@ def create_plan_view(model: ModelLike,
     sec_beam_label_x: List[float] = []
     sec_beam_label_y: List[float] = []
     sec_beam_label_text: List[str] = []
+    sec_beam_label_groups: Dict[int, List[Tuple[int, int]]] = {}
     sec_beam_trace_added = False
 
     for elem_tag in classification["beams_secondary"]:
@@ -1155,9 +1855,10 @@ def create_plan_view(model: ModelLike,
                 sec_beam_text.append(hover_text)
 
             if config.show_labels:
-                sec_beam_label_x.append((node_i.x + node_j.x) / 2)
-                sec_beam_label_y.append((node_i.y + node_j.y) / 2)
-                sec_beam_label_text.append(f"SB{elem_tag} {length:.2f} m")
+                geom = elem.geometry or {}
+                parent_id = geom.get("parent_beam_id", elem_tag)
+                sub_idx = geom.get("sub_element_index", 0)
+                sec_beam_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
     if sec_beam_x and not use_utilization:
         fig.add_trace(go.Scatter(
@@ -1169,6 +1870,19 @@ def create_plan_view(model: ModelLike,
             hoverinfo='text',
             text=sec_beam_text * (len(sec_beam_x) // 3) if sec_beam_text else None,
         ))
+
+    if config.show_labels and sec_beam_label_groups:
+        for parent_id, sub_elements in sec_beam_label_groups.items():
+            sub_elements.sort(key=lambda item: item[0])
+            first_elem = model.elements.get(sub_elements[0][1])
+            last_elem = model.elements.get(sub_elements[-1][1])
+            if first_elem is None or last_elem is None:
+                continue
+            start_node, _ = _get_element_endpoints(model, first_elem)
+            _, end_node = _get_element_endpoints(model, last_elem)
+            sec_beam_label_x.append((start_node.x + end_node.x) / 2)
+            sec_beam_label_y.append((start_node.y + end_node.y) / 2)
+            sec_beam_label_text.append(f"SB{parent_id}")
 
     if config.show_labels and sec_beam_label_x:
         fig.add_trace(go.Scatter(
@@ -1226,6 +1940,7 @@ def create_plan_view(model: ModelLike,
     cb_label_x: List[float] = []
     cb_label_y: List[float] = []
     cb_label_text: List[str] = []
+    cb_label_groups: Dict[int, List[Tuple[int, int]]] = {}
 
     for elem_tag in classification["coupling_beams"]:
         elem = model.elements[elem_tag]
@@ -1236,10 +1951,10 @@ def create_plan_view(model: ModelLike,
             cb_x.extend([node_i.x, node_j.x, None])
             cb_y.extend([node_i.y, node_j.y, None])
             if config.show_labels:
-                length = float(np.hypot(node_j.x - node_i.x, node_j.y - node_i.y))
-                cb_label_x.append((node_i.x + node_j.x) / 2)
-                cb_label_y.append((node_i.y + node_j.y) / 2)
-                cb_label_text.append(f"CB{elem_tag} {length:.2f} m")
+                geom = elem.geometry or {}
+                parent_id = geom.get("parent_coupling_beam_id", elem_tag)
+                sub_idx = geom.get("sub_element_index", 0)
+                cb_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
     if cb_x:
         fig.add_trace(go.Scatter(
@@ -1249,6 +1964,19 @@ def create_plan_view(model: ModelLike,
             line=dict(color=COLORS["coupling_beam"], width=config.element_width + 3),
             name='Coupling Beams',
         ))
+
+    if config.show_labels and cb_label_groups:
+        for parent_id, sub_elements in cb_label_groups.items():
+            sub_elements.sort(key=lambda item: item[0])
+            first_elem = model.elements.get(sub_elements[0][1])
+            last_elem = model.elements.get(sub_elements[-1][1])
+            if first_elem is None or last_elem is None:
+                continue
+            start_node, _ = _get_element_endpoints(model, first_elem)
+            _, end_node = _get_element_endpoints(model, last_elem)
+            cb_label_x.append((start_node.x + end_node.x) / 2)
+            cb_label_y.append((start_node.y + end_node.y) / 2)
+            cb_label_text.append(f"CB{parent_id}")
 
     if config.show_labels and cb_label_x:
         fig.add_trace(go.Scatter(
@@ -1405,13 +2133,19 @@ def create_plan_view(model: ModelLike,
             # Actual panel ID would need to be stored if available
             panel_id = f"Element {elem_tag}"
             
-            # Find surface load for this slab element
+            # Find surface load for this slab element (filter by load pattern)
             surface_load_kpa = None
+            surface_case = config.load_case_label
             for sload in model.surface_loads:
-                if sload.element_tag == elem.tag:
-                    # CRITICAL: Convert Pa -> kPa for display
-                    surface_load_kpa = sload.pressure / 1000.0
-                    break
+                if sload.element_tag != elem.tag:
+                    continue
+                if config.load_pattern is not None and sload.load_pattern != config.load_pattern:
+                    continue
+                # CRITICAL: Convert Pa -> kPa for display
+                surface_load_kpa = sload.pressure / 1000.0
+                if surface_case is None and config.load_pattern is not None:
+                    surface_case = f"P{config.load_pattern}"
+                break
 
             # Create hover text
             hover_text = (
@@ -1422,7 +2156,10 @@ def create_plan_view(model: ModelLike,
             )
             
             if surface_load_kpa is not None:
-                hover_text += f"<br><b>Surface Load: {surface_load_kpa:.2f} kPa</b>"
+                if surface_case:
+                    hover_text += f"<br><b>Surface Load ({surface_case}): {surface_load_kpa:.2f} kPa</b>"
+                else:
+                    hover_text += f"<br><b>Surface Load: {surface_load_kpa:.2f} kPa</b>"
             
             # Add filled quad trace (individual trace for hover)
             if config.show_slabs:
@@ -1521,6 +2258,54 @@ def create_plan_view(model: ModelLike,
             hoverinfo='text',
         ))
 
+    # Draw diaphragm nodes (master + slaves)
+    if config.show_diaphragms and model.diaphragms:
+        master_x: List[float] = []
+        master_y: List[float] = []
+        master_text: List[str] = []
+        slave_x: List[float] = []
+        slave_y: List[float] = []
+        slave_text: List[str] = []
+
+        for diaphragm in model.diaphragms:
+            master_node = model.nodes.get(diaphragm.master_node)
+            if master_node is None or abs(master_node.z - target_z) >= tolerance:
+                continue
+            master_x.append(master_node.x)
+            master_y.append(master_node.y)
+            master_text.append(f"Diaphragm Master {master_node.tag}")
+
+            for slave_tag in diaphragm.slave_nodes:
+                slave_node = model.nodes.get(slave_tag)
+                if slave_node is None or abs(slave_node.z - target_z) >= tolerance:
+                    continue
+                slave_x.append(slave_node.x)
+                slave_y.append(slave_node.y)
+                slave_text.append(f"Diaphragm Slave {slave_node.tag}")
+
+        if master_x:
+            fig.add_trace(go.Scatter(
+                x=master_x,
+                y=master_y,
+                mode='markers',
+                marker=dict(size=config.node_size + 2, color="#a855f7", symbol="x"),
+                name='Diaphragm Nodes',
+                text=master_text,
+                hoverinfo='text',
+            ))
+
+        if slave_x:
+            fig.add_trace(go.Scatter(
+                x=slave_x,
+                y=slave_y,
+                mode='markers',
+                marker=dict(size=config.node_size + 1, color="#a855f7", symbol="circle-open"),
+                name=None,
+                showlegend=False,
+                text=slave_text,
+                hoverinfo='text',
+            ))
+
     # Draw loads
     if config.show_loads:
         load_x: List[float] = []
@@ -1528,12 +2313,19 @@ def create_plan_view(model: ModelLike,
         load_arrows_x: List[float] = []
         load_arrows_y: List[float] = []
         load_text: List[str] = []
+        grav_x: List[float] = []
+        grav_y: List[float] = []
+        grav_text: List[str] = []
 
         for load in model.loads:
+            if config.load_pattern is not None and load.load_pattern != config.load_pattern:
+                continue
             if load.node_tag in floor_nodes:
                 node = floor_nodes[load.node_tag]
                 fx, fy = load.load_values[0], load.load_values[1]
                 fz = load.load_values[2]
+                load_case_label = config.load_case_label or f"P{load.load_pattern}"
+
                 if abs(fx) > 1e-6 or abs(fy) > 1e-6:
                     load_x.append(node.x)
                     load_y.append(node.y)
@@ -1543,9 +2335,22 @@ def create_plan_view(model: ModelLike,
                     load_arrows_x.append(fx * scale)
                     load_arrows_y.append(fy * scale)
                     load_text.append(
-                        f"Node Load<br>Fx: {fx:.2f} N<br>Fy: {fy:.2f} N<br>Fz: {fz:.2f} N"
+                        "Point Load"
+                        f"<br>Case: {load_case_label}"
+                        f"<br>Fx: {fx / 1000.0:.2f} kN"
+                        f"<br>Fy: {fy / 1000.0:.2f} kN"
+                        f"<br>Fz: {fz / 1000.0:.2f} kN"
+                    )
+                elif abs(fz) > 1e-6:
+                    grav_x.append(node.x)
+                    grav_y.append(node.y)
+                    grav_text.append(
+                        "Point Load"
+                        f"<br>Case: {load_case_label}"
+                        f"<br>Fz: {fz / 1000.0:.2f} kN"
                     )
 
+        point_legend_added = False
         if load_x:
             # Draw load arrows using annotations
             for x, y, ax, ay in zip(load_x, load_y, load_arrows_x, load_arrows_y):
@@ -1571,44 +2376,101 @@ def create_plan_view(model: ModelLike,
                 text=load_text,
                 hoverinfo='text',
             ))
+            point_legend_added = True
+
+        if grav_x:
+            fig.add_trace(go.Scatter(
+                x=grav_x,
+                y=grav_y,
+                mode='markers',
+                marker=dict(size=config.node_size + 2, color=COLORS["load_gravity"],
+                            symbol='triangle-down'),
+                name='Point Loads' if not point_legend_added else None,
+                showlegend=not point_legend_added,
+                text=grav_text,
+                hoverinfo='text',
+            ))
 
         # Uniform load markers along elements
         if model.uniform_loads:
-            uload_x: List[float] = []
-            uload_y: List[float] = []
-            uload_text: List[str] = []
-            uload_colors: List[str] = []
+            uload_groups: Dict[int, Dict[str, Any]] = {}
 
             for uniform_load in model.uniform_loads:
+                if config.load_pattern is not None and uniform_load.load_pattern != config.load_pattern:
+                    continue
                 elem = model.elements.get(uniform_load.element_tag)
                 if elem is None:
                     continue
                 node_i, node_j = _get_element_endpoints(model, elem)
                 if (abs(node_i.z - target_z) < tolerance and
                     abs(node_j.z - target_z) < tolerance):
-                    mid_x = (node_i.x + node_j.x) / 2
-                    mid_y = (node_i.y + node_j.y) / 2
-                    uload_x.append(mid_x)
-                    uload_y.append(mid_y)
-                    uload_text.append(
-                        f"Uniform Load<br>Type: {uniform_load.load_type}<br>"
-                        f"Mag: {uniform_load.magnitude:.2f}"
+                    geom = elem.geometry or {}
+                    parent_id = (
+                        geom.get("parent_beam_id") or
+                        geom.get("parent_coupling_beam_id") or
+                        geom.get("parent_column_id") or
+                        elem.tag
                     )
-                    color = COLORS["load_gravity"]
-                    if uniform_load.load_type.lower() in ("x", "y"):
-                        color = COLORS["load_lateral"]
-                    uload_colors.append(color)
+                    sub_idx = geom.get("sub_element_index", 0)
+                    group = uload_groups.setdefault(parent_id, {
+                        "sub_elements": [],
+                        "load": uniform_load,
+                    })
+                    group["sub_elements"].append((sub_idx, elem.tag))
 
-            if uload_x:
-                fig.add_trace(go.Scatter(
-                    x=uload_x,
-                    y=uload_y,
-                    mode='markers',
-                    marker=dict(size=config.node_size, color=uload_colors, symbol='triangle-down'),
-                    name='Uniform Loads',
-                    text=uload_text,
-                    hoverinfo='text',
-                ))
+            if uload_groups:
+                legend_added = False
+                for parent_id in sorted(uload_groups.keys()):
+                    group = uload_groups[parent_id]
+                    sub_elements = sorted(group["sub_elements"], key=lambda item: item[0])
+                    first_elem = model.elements.get(sub_elements[0][1])
+                    last_elem = model.elements.get(sub_elements[-1][1])
+                    if first_elem is None or last_elem is None:
+                        continue
+                    start_node, _ = _get_element_endpoints(model, first_elem)
+                    _, end_node = _get_element_endpoints(model, last_elem)
+
+                    load_case_label = config.load_case_label or f"P{group['load'].load_pattern}"
+                    label = f"{parent_id}{load_case_label}"
+                    magnitude_kn = group["load"].magnitude / 1000.0
+
+                    color = "#22c55e"
+                    symbol = "triangle-down"
+                    if group["load"].load_type.lower() in ("x", "y"):
+                        color = COLORS["load_lateral"]
+                        symbol = "triangle-right"
+
+                    span_length = float(np.hypot(end_node.x - start_node.x, end_node.y - start_node.y))
+                    if span_length <= 1e-6:
+                        continue
+                    spacing = 0.5
+                    positions = np.arange(0.0, span_length + 1e-6, spacing)
+                    if len(positions) < 2:
+                        positions = np.array([0.0, span_length])
+                    t_vals = positions / span_length
+                    uload_x = start_node.x + (end_node.x - start_node.x) * t_vals
+                    uload_y = start_node.y + (end_node.y - start_node.y) * t_vals
+
+                    text = [""] * len(t_vals)
+                    text[len(t_vals) // 2] = label
+
+                    fig.add_trace(go.Scatter(
+                        x=uload_x.tolist(),
+                        y=uload_y.tolist(),
+                        mode='markers+text',
+                        marker=dict(size=config.node_size, color=color, symbol=symbol),
+                        text=text,
+                        textposition='top center',
+                        name="Uniform Loads" if not legend_added else None,
+                        showlegend=not legend_added,
+                        hovertemplate=(
+                            f"UDL {label}"
+                            f"<br>Case: {load_case_label}"
+                            f"<br>Mag: {magnitude_kn:.2f} kN/m"
+                            "<extra></extra>"
+                        ),
+                    ))
+                    legend_added = True
 
     if config.section_force_type and analysis_result:
         from src.fem.results_processor import ResultsProcessor
@@ -1623,7 +2485,7 @@ def create_plan_view(model: ModelLike,
             forces=forces,
             model=model,
             view_direction="PLAN",
-            target_ratio=0.5
+            target_ratio=0.35
         )
         
         if config.section_force_scale < 0:
@@ -1689,8 +2551,8 @@ def create_elevation_view(model: ModelLike,
         config: Visualization configuration
         view_direction: "X" for XZ view (looking along Y), "Y" for YZ view (looking along X)
         gridline_coord: Optional gridline coordinate filter. When view_direction="X",
-                       this filters by Y coordinate. When view_direction="Y", filters by X.
-                       If None, all elements are projected (flattened).
+                       this filters by Y coordinate (XZ plane). When view_direction="Y", filters by X.
+                       If None, no gridline filter is applied.
         utilization: Optional dict of element tag -> utilization ratio for coloring
         displaced_nodes: Optional dict of node tag -> (dx, dy, dz) displacements
         reactions: Optional dict of node tag -> [Fx, Fy, Fz, Mx, My, Mz] reactions
@@ -2033,6 +2895,132 @@ def create_elevation_view(model: ModelLike,
                 name='Deflected Shape',
             ))
 
+    if config.show_loads:
+        point_h: List[float] = []
+        point_v: List[float] = []
+        point_text: List[str] = []
+
+        for load in model.loads:
+            if config.load_pattern is not None and load.load_pattern != config.load_pattern:
+                continue
+            node = model.nodes.get(load.node_tag)
+            if node is None:
+                continue
+            if not element_passes_filter(node, node):
+                continue
+
+            fx, fy = load.load_values[0], load.load_values[1]
+            fz = load.load_values[2]
+            if abs(fz) > 1e-6 and abs(fx) < 1e-6 and abs(fy) < 1e-6:
+                load_case_label = config.load_case_label or f"P{load.load_pattern}"
+                point_h.append(get_h(node))
+                point_v.append(get_v(node))
+                point_text.append(
+                    "Point Load"
+                    f"<br>Case: {load_case_label}"
+                    f"<br>Fz: {fz / 1000.0:.2f} kN"
+                )
+
+        if point_h:
+            fig.add_trace(go.Scatter(
+                x=point_h,
+                y=point_v,
+                mode='markers',
+                marker=dict(size=config.node_size + 2, color=COLORS["load_gravity"],
+                            symbol='triangle-down'),
+                name='Point Loads',
+                text=point_text,
+                hoverinfo='text',
+            ))
+
+    if config.show_loads and model.uniform_loads:
+        uload_groups: Dict[int, Dict[str, Any]] = {}
+
+        for uniform_load in model.uniform_loads:
+            if config.load_pattern is not None and uniform_load.load_pattern != config.load_pattern:
+                continue
+            elem = model.elements.get(uniform_load.element_tag)
+            if elem is None or len(elem.node_tags) != 2:
+                continue
+            node_i, node_j = _get_element_endpoints(model, elem)
+            if not element_passes_filter(node_i, node_j):
+                continue
+
+            is_vertical = abs(node_i.x - node_j.x) < 0.01 and abs(node_i.y - node_j.y) < 0.01
+            if not is_vertical:
+                if view_direction == "X" and abs(node_i.y - node_j.y) >= 0.01:
+                    continue
+                if view_direction == "Y" and abs(node_i.x - node_j.x) >= 0.01:
+                    continue
+
+            geom = elem.geometry or {}
+            parent_id = (
+                geom.get("parent_beam_id") or
+                geom.get("parent_coupling_beam_id") or
+                geom.get("parent_column_id") or
+                elem.tag
+            )
+            sub_idx = geom.get("sub_element_index", 0)
+            group = uload_groups.setdefault(parent_id, {
+                "sub_elements": [],
+                "load": uniform_load,
+            })
+            group["sub_elements"].append((sub_idx, elem.tag))
+
+        if uload_groups:
+            legend_added = False
+            for parent_id in sorted(uload_groups.keys()):
+                group = uload_groups[parent_id]
+                sub_elements = sorted(group["sub_elements"], key=lambda item: item[0])
+                first_elem = model.elements.get(sub_elements[0][1])
+                last_elem = model.elements.get(sub_elements[-1][1])
+                if first_elem is None or last_elem is None:
+                    continue
+                start_node, _ = _get_element_endpoints(model, first_elem)
+                _, end_node = _get_element_endpoints(model, last_elem)
+
+                load_case_label = config.load_case_label or f"P{group['load'].load_pattern}"
+                label = f"{parent_id}{load_case_label}"
+                magnitude_kn = group["load"].magnitude / 1000.0
+
+                color = "#22c55e"
+                symbol = "triangle-down"
+                if group["load"].load_type.lower() in ("x", "y"):
+                    color = COLORS["load_lateral"]
+                    symbol = "triangle-right"
+
+                span_length = float(np.hypot(get_h(end_node) - get_h(start_node), get_v(end_node) - get_v(start_node)))
+                if span_length <= 1e-6:
+                    continue
+                spacing = 0.5
+                positions = np.arange(0.0, span_length + 1e-6, spacing)
+                if len(positions) < 2:
+                    positions = np.array([0.0, span_length])
+                t_vals = positions / span_length
+                uload_h = get_h(start_node) + (get_h(end_node) - get_h(start_node)) * t_vals
+                uload_v = get_v(start_node) + (get_v(end_node) - get_v(start_node)) * t_vals
+
+                text = [""] * len(t_vals)
+                text[len(t_vals) // 2] = label
+
+                fig.add_trace(go.Scatter(
+                    x=uload_h.tolist(),
+                    y=uload_v.tolist(),
+                    mode='markers+text',
+                    marker=dict(size=config.node_size, color=color, symbol=symbol),
+                    text=text,
+                    textposition='top center',
+                    name="Uniform Loads" if not legend_added else None,
+                    showlegend=not legend_added,
+                    hovertemplate=(
+                        f"UDL {label}"
+                        f"<br>Case: {load_case_label}"
+                        f"<br>Mag: {magnitude_kn:.2f} kN/m"
+                        "<extra></extra>"
+                    ),
+                ))
+                legend_added = True
+
     # Reaction forces at supports
     if reactions and config.show_supports:
         base_nodes = [n for n in model.nodes.values() if n.z < 0.01]
@@ -2109,7 +3097,7 @@ def create_elevation_view(model: ModelLike,
             forces=forces,
             model=model,
             view_direction=view_direction,
-            target_ratio=0.5
+            target_ratio=0.35
         )
         
         if config.section_force_scale < 0:
@@ -2122,7 +3110,11 @@ def create_elevation_view(model: ModelLike,
             model=model,
             forces=forces,
             view_direction=view_direction,
-            scale_factor=scale
+            scale_factor=scale,
+            gridline_coord=gridline_coord,
+            gridline_tol=gridline_tol,
+            label_positions=[0.0, 1.0],
+            label_font_size=7,
         )
 
     # Layout
@@ -2834,6 +3826,127 @@ def export_plotly_figure_image(fig: "go.Figure",
     return pio.to_image(fig, format=format, width=width, height=height, scale=scale)
 
 
+def create_opsvis_force_diagram(
+    sf_type: str,
+    sfac: float = 1.0,
+    nep: int = 7,
+    title: Optional[str] = None,
+    model: Optional[Any] = None,
+    run_analysis: bool = True,
+    load_pattern: Optional[int] = None,
+    forces: Optional["SectionForcesData"] = None,
+    label_mode: str = "max_abs",
+    label_stride: int = 1,
+    label_font_size: int = 6,
+) -> Optional[Any]:
+    """Create a Matplotlib figure using opsvis section_force_diagram_3d.
+    
+    This function requires an active OpenSeesPy model with analysis results.
+    Shell elements (ShellMITC4) are temporarily removed before calling opsvis
+    to prevent crashes, as opsvis only supports 2-node beam elements.
+    
+    Args:
+        sf_type: Force type - 'N', 'Vy', 'Vz', 'My', 'Mz', or 'T'
+        sfac: Scale factor for force diagram visualization
+        nep: Number of evaluation points (default 17 for smooth curves)
+        title: Optional title override for the plot
+        model: FEMModel to rebuild if OpenSees model is not active
+        run_analysis: If True, run analysis after rebuilding model
+        load_pattern: Optional load pattern ID to apply when rebuilding model
+        forces: Optional SectionForcesData for annotating end values
+        label_mode: Labeling mode: max_abs, ends, max_min, or none
+        label_stride: Label every Nth element
+        
+    Returns:
+        Matplotlib figure object, or None if opsvis unavailable
+    """
+    if not OPSVIS_AVAILABLE or opsv is None:
+        return None
+    
+    try:
+        import openseespy.opensees as ops
+        import matplotlib.pyplot as plt
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        existing_tags = ops.getEleTags()
+        logger.info(f"opsvis: existing elements = {len(existing_tags) if existing_tags else 0}")
+        if (not existing_tags) and model is None:
+            logger.warning("opsvis: no active model and no FEMModel provided")
+            return None
+        
+        if model is not None:
+            logger.info("Rebuilding OpenSees model (3D) and running analysis for opsvis")
+            model.build_openseespy_model(ndm=3, ndf=6, active_pattern=load_pattern)
+            
+            if run_analysis:
+                ops.constraints('Plain')
+                ops.numberer('RCM')
+                ops.system('BandGeneral')
+                ops.test('NormDispIncr', 1.0e-6, 100)
+                ops.algorithm('Newton')
+                ops.integrator('LoadControl', 1.0)
+                ops.analysis('Static')
+                analyze_result = ops.analyze(1)
+                logger.info(f"opsvis: quick analysis result = {analyze_result}")
+        
+        removed_counts = _prune_elements_for_opsvis()
+        if removed_counts:
+            logger.info(f"opsvis: removed elements for visualization: {removed_counts}")
+        
+        min_val, max_val, ax_returned = opsv.section_force_diagram_3d(
+            sf_type=sf_type,
+            sfac=sfac,
+            nep=nep,
+            end_max_values=False,
+            ref_vert_lines=True,
+            node_supports=True,
+            alt_model_plot=1
+        )
+        
+        fig = plt.gcf()
+        
+        display_name = FORCE_DISPLAY_NAMES.get(sf_type, sf_type)
+        unit = "kN" if sf_type in ["N", "Vy", "Vz"] else "kNm"
+        scale_to_kn = 1.0 / 1000.0
+        min_display = min_val * scale_to_kn
+        max_display = max_val * scale_to_kn
+
+        min_text = _format_opsvis_value(min_display, unit)
+        max_text = _format_opsvis_value(max_display, unit)
+
+        title_base = title if title else display_name
+        ax_returned.set_title(f"{title_base} [{unit}] (min: {min_text}, max: {max_text})")
+
+        _apply_opsvis_hatch(ax_returned)
+
+        if forces is not None and model is not None:
+            _annotate_opsvis_end_values(
+                ax_returned,
+                model,
+                forces,
+                unit,
+                mode=label_mode,
+                stride=label_stride,
+                font_size=label_font_size,
+            )
+        
+        plt.tight_layout()
+        return fig
+        
+    except Exception as e:
+        import logging
+        import traceback
+        error_msg = f"opsvis force diagram failed: {e}\n{traceback.format_exc()}"
+        logging.getLogger(__name__).warning(error_msg)
+        try:
+            import streamlit as st
+            st.session_state["_opsvis_last_error"] = str(e)
+        except:
+            pass
+        return None
+
+
 __all__ = [
     "VisualizationBackend",
     "VisualizationExtractionConfig",
@@ -2850,6 +3963,9 @@ __all__ = [
     "create_model_summary_figure",
     "get_model_statistics",
     "calculate_auto_scale_factor",
+    "calculate_opsvis_scale",
     "render_section_forces",
     "render_section_forces_plan",
+    "create_opsvis_force_diagram",
+    "OPSVIS_AVAILABLE",
 ]

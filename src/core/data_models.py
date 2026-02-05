@@ -695,7 +695,9 @@ class CouplingBeamResult(DesignResult):
 @dataclass
 class ColumnResult(DesignResult):
     """Column design results"""
-    dimension: int = 0          # mm (square column)
+    dimension: int = 0          # mm (legacy square column)
+    width: int = 0              # mm (column width)
+    depth: int = 0              # mm (column depth)
     axial_load: float = 0.0     # kN
     moment: float = 0.0         # kNm (gravity moment if any)
     is_slender: bool = False

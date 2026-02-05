@@ -13,7 +13,11 @@ from src.core.data_models import (
     CoreWallGeometry,
     LoadCombination,
     ExposureClass,
+    SlabResult,
+    BeamResult,
+    ColumnResult,
 )
+from src.core.constants import CONCRETE_DENSITY
 from src.fem.core_wall_helpers import calculate_core_wall_properties
 
 
@@ -59,6 +63,48 @@ def build_project_from_inputs(
         fcu_column=inputs.get("fcu_column", 55),
         exposure=inputs.get("selected_exposure", ExposureClass.MODERATE),
     )
+
+    # Section properties (optional overrides for FEM model)
+    override_slab = inputs.get("override_slab_thickness", 0)
+    if override_slab and override_slab > 0:
+        thickness_m = override_slab / 1000.0
+        project.slab_result = SlabResult(
+            thickness=override_slab,
+            self_weight=thickness_m * CONCRETE_DENSITY,
+        )
+
+    override_pri_w = inputs.get("override_pri_beam_width", 0)
+    override_pri_d = inputs.get("override_pri_beam_depth", 0)
+    if (override_pri_w and override_pri_w > 0) or (override_pri_d and override_pri_d > 0):
+        width = override_pri_w if override_pri_w > 0 else (project.primary_beam_result.width if project.primary_beam_result else 0)
+        depth = override_pri_d if override_pri_d > 0 else (project.primary_beam_result.depth if project.primary_beam_result else 0)
+        project.primary_beam_result = BeamResult(width=width, depth=depth)
+
+    override_sec_w = inputs.get("override_sec_beam_width", 0)
+    override_sec_d = inputs.get("override_sec_beam_depth", 0)
+    if (override_sec_w and override_sec_w > 0) or (override_sec_d and override_sec_d > 0):
+        width = override_sec_w if override_sec_w > 0 else (project.secondary_beam_result.width if project.secondary_beam_result else 0)
+        depth = override_sec_d if override_sec_d > 0 else (project.secondary_beam_result.depth if project.secondary_beam_result else 0)
+        project.secondary_beam_result = BeamResult(width=width, depth=depth)
+
+    override_col_w = inputs.get("override_column_width", 0)
+    override_col_d = inputs.get("override_column_depth", 0)
+    if (override_col_w and override_col_w > 0) or (override_col_d and override_col_d > 0):
+        width = override_col_w if override_col_w > 0 else (
+            project.column_result.width if project.column_result else 0
+        )
+        depth = override_col_d if override_col_d > 0 else (
+            project.column_result.depth if project.column_result else 0
+        )
+        if width <= 0 and project.column_result:
+            width = project.column_result.dimension
+        if depth <= 0 and project.column_result:
+            depth = project.column_result.dimension
+        project.column_result = ColumnResult(
+            width=width,
+            depth=depth,
+            dimension=max(width, depth),
+        )
     
     # Calculate total building dimensions for lateral analysis
     total_width_x = project.geometry.bay_x * project.geometry.num_bays_x
@@ -138,6 +184,8 @@ def get_override_params(inputs: Dict[str, Any]) -> Dict[str, Any]:
         "override_sec_beam_w": inputs.get("override_sec_beam_width", 0),
         "override_sec_beam_d": inputs.get("override_sec_beam_depth", 0),
         "override_col": inputs.get("override_column_size", 0),
+        "override_col_w": inputs.get("override_column_width", 0),
+        "override_col_d": inputs.get("override_column_depth", 0),
         "secondary_along_x": inputs.get("secondary_along_x", True),
         "num_secondary_beams": inputs.get("num_secondary_beams", 3),
     }

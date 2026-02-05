@@ -5,9 +5,12 @@ This module provides analysis and solution extraction capabilities for
 structural finite element models.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 import numpy as np
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -194,10 +197,22 @@ class FEMSolver:
         
         # Extract element forces
         elem_tags = ops.getEleTags()
+        _logger.info(f"Extracting forces for {len(elem_tags)} elements")
+        extracted_count = 0
+        zero_force_count = 0
+        
         for elem_tag in elem_tags:
             try:
                 # Get element forces (returns different values for different element types)
                 forces = ops.eleForce(elem_tag)
+                
+                # Debug: Log first few elements to verify force values
+                if extracted_count < 5:
+                    _logger.debug(f"Element {elem_tag}: forces={forces[:6] if len(forces) >= 6 else forces}")
+                
+                # Check if all forces are essentially zero
+                if all(abs(f) < 1e-10 for f in forces):
+                    zero_force_count += 1
                 
                 # For beam-column elements in 3D, forces are typically:
                 # [Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j]
@@ -218,6 +233,7 @@ class FEMSolver:
                         'My_j': forces[10],    # Moment Y at j
                         'Mz_j': forces[11],    # Moment Z at j
                     }
+                    extracted_count += 1
                 elif len(forces) == 6:  # 2D beam element
                     result.element_forces[elem_tag] = {
                         'N_i': forces[0],      # Axial force at i
@@ -227,14 +243,20 @@ class FEMSolver:
                         'V_j': forces[4],      # Shear at j
                         'M_j': forces[5],      # Moment at j
                     }
+                    extracted_count += 1
                 else:
                     # Store raw forces for other element types
                     result.element_forces[elem_tag] = {
                         f'force_{i}': f for i, f in enumerate(forces)
                     }
-            except:
-                # Skip elements that don't support force extraction
+                    extracted_count += 1
+            except Exception as e:
+                _logger.debug(f"Could not extract forces for element {elem_tag}: {e}")
                 pass
+        
+        _logger.info(f"Extracted forces for {len(result.element_forces)} elements out of {len(elem_tags)} total")
+        if zero_force_count > 0:
+            _logger.warning(f"WARNING: {zero_force_count} elements have all-zero forces - check load application")
         
         return result
     
@@ -287,50 +309,116 @@ class FEMSolver:
             self.ops.wipe()
 
 
-def analyze_model(model, load_pattern: int = 1) -> AnalysisResult:
-    """Convenience function to build and analyze a FEMModel.
+def analyze_model(
+    model,
+    load_pattern: int = 1,
+    load_cases: Optional[List[str]] = None
+) -> Dict[str, AnalysisResult]:
+    """Build and analyze a FEMModel for multiple load cases.
     
     Args:
         model: FEMModel instance
-        load_pattern: Load pattern to analyze
+        load_pattern: Load pattern to analyze (for backward compatibility)
+        load_cases: List of load case names to analyze. 
+                   If None or ["combined"], returns single result with "combined" key.
+                   Supported: ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
     
     Returns:
-        AnalysisResult with analysis outcomes
+        Dict of {load_case_name: AnalysisResult}
+        For backward compatibility, if load_cases is None, returns {"combined": AnalysisResult}
     """
     from src.fem.fem_engine import FEMModel
     
     if not isinstance(model, FEMModel):
         raise TypeError("model must be a FEMModel instance")
     
+    # Default to combined analysis for backward compatibility
+    if load_cases is None:
+        load_cases = ["combined"]
+    
     # Validate model
     is_valid, errors = model.validate_model()
     if not is_valid:
-        return AnalysisResult(
+        error_result = AnalysisResult(
             success=False,
             converged=False,
             message=f"Model validation failed: {'; '.join(errors)}"
         )
+        return {lc: error_result for lc in load_cases}
     
-    # Build OpenSeesPy model
-    try:
-        model.build_openseespy_model()
-    except Exception as e:
-        return AnalysisResult(
-            success=False,
-            converged=False,
-            message=f"Model build failed: {str(e)}"
-        )
-    
-    # Run analysis
+    # Check solver availability
     solver = FEMSolver()
     if not solver.check_availability():
-        return AnalysisResult(
+        error_result = AnalysisResult(
             success=False,
             converged=False,
             message="OpenSeesPy not available. Install with: pip install openseespy"
         )
+        return {lc: error_result for lc in load_cases}
     
-    return solver.run_linear_static_analysis(load_pattern=load_pattern)
+    results: Dict[str, AnalysisResult] = {}
+    
+    for lc in load_cases:
+        # Run analysis for each load case
+        result = _run_single_load_case(model, solver, lc, load_pattern)
+        results[lc] = result
+    
+    return results
+
+
+# Load case to load pattern ID mapping
+LOAD_CASE_PATTERN_MAP: Dict[str, int] = {
+    "DL": 1,      # Dead Load
+    "SDL": 2,     # Superimposed Dead Load
+    "LL": 3,      # Live Load
+    "Wx+": 4,     # Wind +X
+    "Wx-": 5,     # Wind -X
+    "Wy+": 6,     # Wind +Y
+    "Wy-": 7,     # Wind -Y
+    "combined": 0,  # All loads combined (special case)
+}
+
+
+def _run_single_load_case(
+    model,
+    solver: FEMSolver,
+    load_case: str,
+    default_pattern: int = 1
+) -> AnalysisResult:
+    """Run analysis for a single load case.
+    
+    Args:
+        model: FEMModel instance
+        solver: FEMSolver instance
+        load_case: Load case name (e.g., "DL", "Wx+", "combined")
+        default_pattern: Default load pattern for "combined" case
+    
+    Returns:
+        AnalysisResult for this load case
+    """
+    try:
+        # Wipe previous model state and rebuild
+        solver.reset_model()
+        
+        if load_case == "combined":
+            # Build with all loads
+            model.build_openseespy_model()
+        else:
+            # Build with specific load pattern only
+            pattern_id = LOAD_CASE_PATTERN_MAP.get(load_case, default_pattern)
+            model.build_openseespy_model(active_pattern=pattern_id)
+        
+        # Run analysis
+        result = solver.run_linear_static_analysis(load_pattern=1)
+        result.message = f"{load_case}: {result.message}"
+        return result
+        
+    except Exception as e:
+        return AnalysisResult(
+            success=False,
+            converged=False,
+            message=f"{load_case}: Analysis error - {str(e)}"
+        )
 
 
 def print_analysis_summary(result: AnalysisResult) -> None:

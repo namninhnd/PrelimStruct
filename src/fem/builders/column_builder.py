@@ -7,13 +7,13 @@ omissions near core walls and ghost column tracking.
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple
 
 from src.core.data_models import GeometryInput, ProjectData
 from src.fem.fem_engine import Element, ElementType, FEMModel
 
 if TYPE_CHECKING:
-    from src.fem.model_builder import ModelBuilderOptions
+    from src.fem.model_builder import ModelBuilderOptions, NodeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -51,10 +51,14 @@ class ColumnBuilder:
         column_material_tag: int,
         column_section_tag: int,
         omit_column_ids: Optional[Set[str]] = None,
+        registry: Optional["NodeRegistry"] = None,
     ) -> int:
-        """Create all columns for the building.
+        """Create all columns for the building with subdivision.
         
         Creates columns connecting grid nodes between floor levels.
+        Each column is subdivided into 6 sub-elements (7 nodes) for accurate
+        force diagram visualization.
+        
         Columns in the omit_column_ids set are skipped and tracked as ghost columns.
         
         Args:
@@ -62,6 +66,7 @@ class ColumnBuilder:
             column_material_tag: Material tag for columns
             column_section_tag: Section tag for columns
             omit_column_ids: Set of column IDs to omit (e.g., {"A-1", "B-2"})
+            registry: NodeRegistry for creating intermediate nodes
             
         Returns:
             Next available element tag after column creation
@@ -70,6 +75,7 @@ class ColumnBuilder:
             omit_column_ids = set()
         
         omitted_columns: List[str] = []
+        NUM_SUBDIVISIONS = 6  # 6 sub-elements, 7 nodes
         
         for level in range(self.geometry.floors):
             for ix in range(self.geometry.num_bays_x + 1):
@@ -87,17 +93,64 @@ class ColumnBuilder:
                     start_node = grid_nodes[(ix, iy, level)]
                     end_node = grid_nodes[(ix, iy, level + 1)]
                     
-                    self.model.add_element(
-                        Element(
-                            tag=self.element_tag,
-                            element_type=ElementType.ELASTIC_BEAM,
-                            node_tags=[start_node, end_node],
-                            material_tag=column_material_tag,
-                            section_tag=column_section_tag,
-                            geometry={"local_y": (0.0, 1.0, 0.0)},
+                    # Get start and end node coordinates
+                    start_node_obj = self.model.nodes[start_node]
+                    end_node_obj = self.model.nodes[end_node]
+                    
+                    start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
+                    end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
+                    
+                    # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+                    node_tags = [start_node]
+                    
+                    if registry:
+                        for i in range(1, NUM_SUBDIVISIONS):
+                            t = i / NUM_SUBDIVISIONS  # 1/6 to 5/6
+                            inter_x = start_x + t * (end_x - start_x)
+                            inter_y = start_y + t * (end_y - start_y)
+                            inter_z = start_z + t * (end_z - start_z)  # Z is vertical for columns
+                            
+                            inter_node = registry.get_or_create(
+                                inter_x, inter_y, inter_z, floor_level=level
+                            )
+                            node_tags.append(inter_node)
+                    
+                    node_tags.append(end_node)
+                    
+                    parent_column_id = self.element_tag
+                    
+                    if registry:
+                        for i in range(NUM_SUBDIVISIONS):
+                            current_tag = self.element_tag
+                            
+                            geom: Dict[str, Any] = {"local_y": (0.0, 1.0, 0.0)}
+                            geom["parent_column_id"] = parent_column_id
+                            geom["sub_element_index"] = i
+                            
+                            self.model.add_element(
+                                Element(
+                                    tag=current_tag,
+                                    element_type=ElementType.ELASTIC_BEAM,
+                                    node_tags=[node_tags[i], node_tags[i + 1]],
+                                    material_tag=column_material_tag,
+                                    section_tag=column_section_tag,
+                                    geometry=geom,
+                                )
+                            )
+                            
+                            self.element_tag += 1
+                    else:
+                        self.model.add_element(
+                            Element(
+                                tag=self.element_tag,
+                                element_type=ElementType.ELASTIC_BEAM,
+                                node_tags=[start_node, end_node],
+                                material_tag=column_material_tag,
+                                section_tag=column_section_tag,
+                                geometry={"local_y": (0.0, 1.0, 0.0)},
+                            )
                         )
-                    )
-                    self.element_tag += 1
+                        self.element_tag += 1
         
         # Log omitted columns and add to model for ghost visualization
         if omitted_columns:

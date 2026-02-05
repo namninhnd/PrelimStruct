@@ -172,19 +172,25 @@ class SlabMeshGenerator:
         slab: SlabPanel,
         floor_level: int,
         section_tag: int,
-        elements_along_x: int = 2,
-        elements_along_y: int = 2,
+        elements_along_x: Optional[int] = None,
+        elements_along_y: Optional[int] = None,
+        beam_subdivision_count: int = 6,
         existing_nodes: Optional[Dict[Tuple[float, float, float], int]] = None,
         openings: Optional[List['SlabOpening']] = None,
     ) -> SlabMeshResult:
         """Generate mesh for a slab panel.
         
+        By default, slab mesh is aligned with beam subdivision points (6 subdivisions per bay)
+        to ensure proper node sharing and force transfer at beam-slab connections.
+        
         Args:
             slab: Slab panel definition
             floor_level: Floor level index (1-based)
             section_tag: Section tag for ElasticMembranePlateSection
-            elements_along_x: Number of elements along X direction
-            elements_along_y: Number of elements along Y direction
+            elements_along_x: Number of elements along X direction (default: beam_subdivision_count)
+            elements_along_y: Number of elements along Y direction (default: beam_subdivision_count)
+            beam_subdivision_count: Default subdivision count matching beam elements (default: 6)
+                                   Used when elements_along_x/y are not provided
             existing_nodes: Optional dict mapping (x,y,z) coords to existing node tags
                            for sharing nodes with beams
             openings: Optional list of SlabOpening to exclude from mesh
@@ -192,6 +198,11 @@ class SlabMeshGenerator:
         Returns:
             SlabMeshResult with nodes, elements, and boundary nodes
         """
+        if elements_along_x is None:
+            elements_along_x = beam_subdivision_count
+        if elements_along_y is None:
+            elements_along_y = beam_subdivision_count
+        
         nodes: List[Tuple[int, float, float, float, int]] = []
         elements: List[SlabQuad] = []
         boundary_nodes: Dict[str, List[int]] = {
@@ -204,7 +215,6 @@ class SlabMeshGenerator:
         existing_nodes = existing_nodes or {}
         openings = openings or []
         
-        # Calculate node spacing
         num_nodes_x = elements_along_x + 1
         num_nodes_y = elements_along_y + 1
         

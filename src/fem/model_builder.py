@@ -182,8 +182,14 @@ class ModelBuilderOptions:
     secondary_beam_direction: str = "Y"  # "X" or "Y" - direction of secondary beams
     num_secondary_beams: int = 0  # Number of internal secondary beams per bay (default: no subdivisions)
     lateral_load_direction: str = "X"
-    gravity_load_pattern: int = 1
-    wind_load_pattern: int = 2
+    # Individual load pattern IDs for separate load case analysis
+    dl_load_pattern: int = 1      # Dead load (self-weight: slab + beam)
+    sdl_load_pattern: int = 2     # Superimposed dead load (finishes, services)
+    ll_load_pattern: int = 3      # Live load
+    wx_plus_pattern: int = 4      # Wind +X direction
+    wx_minus_pattern: int = 5     # Wind -X direction
+    wy_plus_pattern: int = 6      # Wind +Y direction
+    wy_minus_pattern: int = 7     # Wind -Y direction
     tolerance: float = 1e-6
     edge_clearance_m: float = 0.5
     slab_thickness: float = 0.15
@@ -688,38 +694,83 @@ def trim_beam_segment_against_polygon(start: Tuple[float, float],
     return segments
 
 
-def _get_slab_design_load(project: ProjectData) -> float:
-    """Get factored slab load in kPa based on ProjectData load combination."""
-    # HK Code 2013 load factors are handled in ProjectData.get_design_load().
-    return project.get_design_load()
+def _get_characteristic_loads(
+    project: ProjectData,
+    slab_thickness_m: Optional[float] = None,
+) -> Tuple[float, float, float]:
+    """Get unfactored characteristic loads in kPa.
+    
+    Returns:
+        Tuple of (dead_load, sdl, live_load) in kPa
+    """
+    # Dead load = slab self-weight
+    if project.slab_result:
+        slab_self_weight = project.slab_result.self_weight  # kPa
+    elif slab_thickness_m is not None:
+        slab_self_weight = slab_thickness_m * CONCRETE_DENSITY
+    else:
+        slab_self_weight = 0.2 * 24.5  # Estimate: 200mm slab * 24.5 kN/m³
+    
+    # SDL = superimposed dead load (finishes, services) from user input
+    sdl = project.loads.dead_load  # kPa (this is actually SDL in the UI)
+    
+    # Live load from code tables
+    live_load = project.loads.live_load  # kPa
+    
+    return (slab_self_weight, sdl, live_load)
 
 
 def _apply_slab_surface_loads(
     model: FEMModel,
     project: ProjectData,
     slab_element_tags: List[int],
-    load_pattern: int = 1,
+    dl_pattern: int = 1,
+    sdl_pattern: int = 2,
+    ll_pattern: int = 3,
+    slab_thickness_m: Optional[float] = None,
 ) -> None:
-    """Apply surface load to slab shell elements.
-    
-    Args:
-        model: FEM model
-        project: Project data with load definitions
-        slab_element_tags: Tags of slab elements to load
-        load_pattern: Load pattern for gravity
-    """
+    """Apply surface loads to slab shell elements using separate patterns."""
     from src.fem.fem_engine import SurfaceLoad
     
-    # Get design load (kPa = kN/m² → convert to Pa for OpenSees)
-    slab_load_kpa = _get_slab_design_load(project)  # kN/m²
-    pressure_pa = slab_load_kpa * 1000.0  # N/m²
+    dl, sdl, ll = _get_characteristic_loads(project, slab_thickness_m=slab_thickness_m)
+    
+    # Convert kPa to Pa
+    dl_pa = dl * 1000.0
+    sdl_pa = sdl * 1000.0
+    ll_pa = ll * 1000.0
+    
+    dl_count = 0
+    sdl_count = 0
+    ll_count = 0
     
     for elem_tag in slab_element_tags:
-        model.add_surface_load(SurfaceLoad(
-            element_tag=elem_tag,
-            pressure=pressure_pa,
-            load_pattern=load_pattern,
-        ))
+        if dl_pa > 0:
+            model.add_surface_load(SurfaceLoad(
+                element_tag=elem_tag,
+                pressure=dl_pa,
+                load_pattern=dl_pattern,
+            ))
+            dl_count += 1
+        if sdl_pa > 0:
+            model.add_surface_load(SurfaceLoad(
+                element_tag=elem_tag,
+                pressure=sdl_pa,
+                load_pattern=sdl_pattern,
+            ))
+            sdl_count += 1
+        if ll_pa > 0:
+            model.add_surface_load(SurfaceLoad(
+                element_tag=elem_tag,
+                pressure=ll_pa,
+                load_pattern=ll_pattern,
+            ))
+            ll_count += 1
+    
+    logger.info(
+        f"Applied slab loads: DL={dl:.2f}kPa (pattern {dl_pattern}, {dl_count} elements), "
+        f"SDL={sdl:.2f}kPa (pattern {sdl_pattern}, {sdl_count} elements), "
+        f"LL={ll:.2f}kPa (pattern {ll_pattern}, {ll_count} elements)"
+    )
 
 
 def _extract_beam_sizes(project: ProjectData) -> Dict[str, Tuple[float, float]]:
@@ -743,11 +794,21 @@ def _extract_beam_sizes(project: ProjectData) -> Dict[str, Tuple[float, float]]:
     }
 
 
-def _extract_column_size(project: ProjectData) -> float:
-    """Get column dimension in mm."""
+def _extract_column_dims(project: ProjectData) -> Tuple[float, float]:
+    """Get column dimensions (width, depth) in mm."""
+    width = MIN_COLUMN_SIZE
+    depth = MIN_COLUMN_SIZE
+
     if project.column_result:
-        return max(MIN_COLUMN_SIZE, project.column_result.dimension)
-    return MIN_COLUMN_SIZE
+        if project.column_result.width > 0:
+            width = max(width, project.column_result.width)
+        if project.column_result.depth > 0:
+            depth = max(depth, project.column_result.depth)
+        if project.column_result.dimension > 0:
+            width = max(width, project.column_result.dimension)
+            depth = max(depth, project.column_result.dimension)
+
+    return width, depth
 
 
 def _compute_floor_shears(wind_result: WindResult,
@@ -986,6 +1047,84 @@ def get_column_omission_suggestions(
     return _suggest_column_omissions(project.geometry, core_polygon_m, threshold_m)
 
 
+# Number of sub-elements per beam (consistent with beam_builder.py)
+NUM_SUBDIVISIONS = 6
+
+
+def _create_subdivided_beam(
+    model: FEMModel,
+    registry: "NodeRegistry",
+    start_node: int,
+    end_node: int,
+    section_tag: int,
+    material_tag: int,
+    floor_level: int,
+    element_tag: int,
+    element_type: ElementType = ElementType.ELASTIC_BEAM,
+) -> Tuple[int, int]:
+    """Create a beam with 6 sub-elements and 5 intermediate nodes.
+    
+    Args:
+        model: FEM model to add elements to
+        registry: Node registry for creating intermediate nodes
+        start_node: Tag of start node
+        end_node: Tag of end node
+        section_tag: Section property tag
+        material_tag: Material tag
+        floor_level: Floor level for node creation
+        element_tag: Starting element tag
+        element_type: Type of beam element (ELASTIC_BEAM or SECONDARY_BEAM)
+        
+    Returns:
+        Tuple of (next_element_tag, parent_beam_id)
+    """
+    # Get start and end node coordinates
+    start_node_obj = model.nodes[start_node]
+    end_node_obj = model.nodes[end_node]
+    
+    start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
+    end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
+    
+    # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+    node_tags = [start_node]
+    
+    for i in range(1, NUM_SUBDIVISIONS):
+        t = i / NUM_SUBDIVISIONS  # 1/6, 2/6, 3/6, 4/6, 5/6
+        inter_x = start_x + t * (end_x - start_x)
+        inter_y = start_y + t * (end_y - start_y)
+        inter_z = start_z + t * (end_z - start_z)
+        
+        inter_node = registry.get_or_create(inter_x, inter_y, inter_z, floor_level=floor_level)
+        node_tags.append(inter_node)
+    
+    node_tags.append(end_node)
+    
+    # Track parent beam ID for logical grouping
+    parent_beam_id = element_tag
+    
+    # Create 6 sub-elements connecting the 7 nodes sequentially
+    for i in range(NUM_SUBDIVISIONS):
+        current_tag = element_tag
+        
+        geom = {
+            "local_y": (0.0, 0.0, 1.0),
+            "parent_beam_id": parent_beam_id,
+            "sub_element_index": i,
+        }
+        
+        model.add_element(Element(
+            tag=current_tag,
+            element_type=element_type,
+            node_tags=[node_tags[i], node_tags[i + 1]],
+            material_tag=material_tag,
+            section_tag=section_tag,
+            geometry=geom,
+        ))
+        
+        element_tag += 1
+    
+    return element_tag, parent_beam_id
+
 
 def build_fem_model(project: ProjectData,
                     options: Optional[ModelBuilderOptions] = None) -> FEMModel:
@@ -997,7 +1136,7 @@ def build_fem_model(project: ProjectData,
     registry = NodeRegistry(model, tolerance=options.tolerance)
 
     beam_sizes = _extract_beam_sizes(project)
-    column_size = _extract_column_size(project)
+    column_width, column_depth = _extract_column_dims(project)
 
     beam_concrete = ConcreteProperties(fcu=project.materials.fcu_beam)
     column_concrete = ConcreteProperties(fcu=project.materials.fcu_column)
@@ -1042,8 +1181,8 @@ def build_fem_model(project: ProjectData,
     )
     column_section = get_elastic_beam_section(
         column_concrete,
-        width=column_size,
-        height=column_size,
+        width=column_width,
+        height=column_depth,
         section_tag=column_section_tag,
     )
 
@@ -1100,17 +1239,73 @@ def build_fem_model(project: ProjectData,
                 
                 start_node = grid_nodes[(ix, iy, level)]
                 end_node = grid_nodes[(ix, iy, level + 1)]
-                model.add_element(
-                    Element(
-                        tag=element_tag,
-                        element_type=ElementType.ELASTIC_BEAM,
-                        node_tags=[start_node, end_node],
-                        material_tag=column_material_tag,
-                        section_tag=column_section_tag,
-                        geometry={"local_y": (0.0, 1.0, 0.0)},
+
+                start_node_obj = model.nodes[start_node]
+                end_node_obj = model.nodes[end_node]
+
+                start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
+                end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
+
+                node_tags = [start_node]
+                for i in range(1, NUM_SUBDIVISIONS):
+                    t = i / NUM_SUBDIVISIONS
+                    inter_x = start_x + t * (end_x - start_x)
+                    inter_y = start_y + t * (end_y - start_y)
+                    inter_z = start_z + t * (end_z - start_z)
+                    inter_node = registry.get_or_create(
+                        inter_x, inter_y, inter_z, floor_level=level
                     )
-                )
-                element_tag += 1
+                    node_tags.append(inter_node)
+
+                node_tags.append(end_node)
+
+                parent_column_id = element_tag
+                for i in range(NUM_SUBDIVISIONS):
+                    geom = {
+                        "local_y": (0.0, 1.0, 0.0),
+                        "parent_column_id": parent_column_id,
+                        "sub_element_index": i,
+                    }
+                    model.add_element(
+                        Element(
+                            tag=element_tag,
+                            element_type=ElementType.ELASTIC_BEAM,
+                            node_tags=[node_tags[i], node_tags[i + 1]],
+                            material_tag=column_material_tag,
+                            section_tag=column_section_tag,
+                            geometry=geom,
+                        )
+                    )
+                    element_tag += 1
+
+                if options.apply_gravity_loads:
+                    width_m = column_width / 1000.0
+                    depth_m = column_depth / 1000.0
+                    area_m2 = width_m * depth_m
+                    line_weight_n = CONCRETE_DENSITY * area_m2 * 1000.0
+                    for i in range(NUM_SUBDIVISIONS):
+                        node_i = model.nodes.get(node_tags[i])
+                        node_j = model.nodes.get(node_tags[i + 1])
+                        if node_i is None or node_j is None:
+                            continue
+                        length_m = abs(node_j.z - node_i.z)
+                        if length_m <= 1e-6:
+                            continue
+                        nodal_load = -line_weight_n * length_m / 2.0
+                        model.add_load(
+                            Load(
+                                node_tag=node_tags[i],
+                                load_values=[0.0, 0.0, nodal_load, 0.0, 0.0, 0.0],
+                                load_pattern=options.dl_load_pattern,
+                            )
+                        )
+                        model.add_load(
+                            Load(
+                                node_tag=node_tags[i + 1],
+                                load_values=[0.0, 0.0, nodal_load, 0.0, 0.0, 0.0],
+                                load_pattern=options.dl_load_pattern,
+                            )
+                        )
     
     # Log omitted columns and add to model for ghost visualization
     if omitted_columns:
@@ -1195,32 +1390,32 @@ def build_fem_model(project: ProjectData,
                     if segment.end_connection == BeamConnectionType.MOMENT:
                         core_boundary_points.append(segment.end)
 
-                    model.add_element(
-                        Element(
-                            tag=element_tag,
-                            element_type=ElementType.ELASTIC_BEAM,
-                            node_tags=[start_node, end_node],
-                            material_tag=beam_material_tag,
-                            section_tag=section_tag,
-                        )
+                    element_tag, parent_beam_id = _create_subdivided_beam(
+                        model=model,
+                        registry=registry,
+                        start_node=start_node,
+                        end_node=end_node,
+                        section_tag=section_tag,
+                        material_tag=beam_material_tag,
+                        floor_level=level,
+                        element_tag=element_tag,
+                        element_type=ElementType.ELASTIC_BEAM,
                     )
 
                     if options.apply_gravity_loads:
-                        # Self-weight only - slab load applied via surface loads on slab elements
                         width_m = section_dims[0] / 1000.0
                         depth_m = section_dims[1] / 1000.0
                         beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
                         w_total = beam_self_weight * 1000.0  # N/m
-                        model.add_uniform_load(
-                            UniformLoad(
-                                element_tag=element_tag,
-                                load_type="Gravity",
-                                magnitude=w_total,
-                                load_pattern=options.gravity_load_pattern,
+                        for sub_idx in range(NUM_SUBDIVISIONS):
+                            model.add_uniform_load(
+                                UniformLoad(
+                                    element_tag=parent_beam_id + sub_idx,
+                                    load_type="Gravity",
+                                    magnitude=w_total,
+                                    load_pattern=options.dl_load_pattern,
+                                )
                             )
-                        )
-
-                    element_tag += 1
 
     # Beams along Y direction (AT ALL GRIDLINES)
     # These are the gridline beams and should ALL be PRIMARY beams
@@ -1261,32 +1456,32 @@ def build_fem_model(project: ProjectData,
                     if segment.end_connection == BeamConnectionType.MOMENT:
                         core_boundary_points.append(segment.end)
 
-                    model.add_element(
-                        Element(
-                            tag=element_tag,
-                            element_type=ElementType.ELASTIC_BEAM,
-                            node_tags=[start_node, end_node],
-                            material_tag=beam_material_tag,
-                            section_tag=section_tag,
-                        )
+                    element_tag, parent_beam_id = _create_subdivided_beam(
+                        model=model,
+                        registry=registry,
+                        start_node=start_node,
+                        end_node=end_node,
+                        section_tag=section_tag,
+                        material_tag=beam_material_tag,
+                        floor_level=level,
+                        element_tag=element_tag,
+                        element_type=ElementType.ELASTIC_BEAM,
                     )
 
                     if options.apply_gravity_loads:
-                        # Self-weight only - slab load applied via surface loads on slab elements
                         width_m = section_dims[0] / 1000.0
                         depth_m = section_dims[1] / 1000.0
                         beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
                         w_total = beam_self_weight * 1000.0  # N/m
-                        model.add_uniform_load(
-                            UniformLoad(
-                                element_tag=element_tag,
-                                load_type="Gravity",
-                                magnitude=w_total,
-                                load_pattern=options.gravity_load_pattern,
+                        for sub_idx in range(NUM_SUBDIVISIONS):
+                            model.add_uniform_load(
+                                UniformLoad(
+                                    element_tag=parent_beam_id + sub_idx,
+                                    load_type="Gravity",
+                                    magnitude=w_total,
+                                    load_pattern=options.dl_load_pattern,
+                                )
                             )
-                        )
-
-                    element_tag += 1
 
     # Internal secondary beam subdivision (NEW: Task 18.2)
     # Generate num_secondary_beams internal beams per bay, equally spaced
@@ -1344,34 +1539,34 @@ def build_fem_model(project: ProjectData,
                                 if segment.end_connection == BeamConnectionType.MOMENT:
                                     core_boundary_points.append(segment.end)
                                 
-                                # Create beam element with secondary section tag
-                                model.add_element(
-                                    Element(
-                                        tag=element_tag,
-                                        element_type=ElementType.SECONDARY_BEAM,
-                                        node_tags=[start_node, end_node],
-                                        material_tag=beam_material_tag,
-                                        section_tag=secondary_section_tag,
-                                        geometry={"local_y": (0.0, 0.0, 1.0)},
-                                    )
+                                # Create subdivided secondary beam (6 sub-elements)
+                                element_tag, _ = _create_subdivided_beam(
+                                    model=model,
+                                    registry=registry,
+                                    start_node=start_node,
+                                    end_node=end_node,
+                                    section_tag=secondary_section_tag,
+                                    material_tag=beam_material_tag,
+                                    floor_level=floor_level,
+                                    element_tag=element_tag,
+                                    element_type=ElementType.SECONDARY_BEAM,
                                 )
-                                
-                                # Apply gravity loads if enabled (self-weight only)
+
+                                # Apply gravity loads to all sub-elements
                                 if options.apply_gravity_loads:
                                     width_m = beam_sizes["secondary"][0] / 1000.0
                                     depth_m = beam_sizes["secondary"][1] / 1000.0
                                     beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
                                     w_total = beam_self_weight * 1000.0  # N/m
-                                    model.add_uniform_load(
-                                        UniformLoad(
-                                            element_tag=element_tag,
-                                            load_type="Gravity",
-                                            magnitude=w_total,
-                                            load_pattern=options.gravity_load_pattern,
+                                    for sub_idx in range(NUM_SUBDIVISIONS):
+                                        model.add_uniform_load(
+                                            UniformLoad(
+                                                element_tag=element_tag - NUM_SUBDIVISIONS + sub_idx,
+                                                load_type="Gravity",
+                                                magnitude=w_total,
+                                                load_pattern=options.dl_load_pattern,
+                                            )
                                         )
-                                    )
-                                
-                                element_tag += 1
             else:  # secondary_beam_direction == "X"
                 # Secondary beams run along X (internal to Y bays)
                 for iy in range(geometry.num_bays_y):
@@ -1416,34 +1611,34 @@ def build_fem_model(project: ProjectData,
                                 if segment.end_connection == BeamConnectionType.MOMENT:
                                     core_boundary_points.append(segment.end)
                                 
-                                # Create beam element with secondary section tag
-                                model.add_element(
-                                    Element(
-                                        tag=element_tag,
-                                        element_type=ElementType.SECONDARY_BEAM,
-                                        node_tags=[start_node, end_node],
-                                        material_tag=beam_material_tag,
-                                        section_tag=secondary_section_tag,
-                                        geometry={"local_y": (0.0, 0.0, 1.0)},
-                                    )
+                                # Create subdivided secondary beam (6 sub-elements)
+                                element_tag, _ = _create_subdivided_beam(
+                                    model=model,
+                                    registry=registry,
+                                    start_node=start_node,
+                                    end_node=end_node,
+                                    section_tag=secondary_section_tag,
+                                    material_tag=beam_material_tag,
+                                    floor_level=floor_level,
+                                    element_tag=element_tag,
+                                    element_type=ElementType.SECONDARY_BEAM,
                                 )
-                                
-                                # Apply gravity loads if enabled (self-weight only)
+
+                                # Apply gravity loads to all sub-elements
                                 if options.apply_gravity_loads:
                                     width_m = beam_sizes["secondary"][0] / 1000.0
                                     depth_m = beam_sizes["secondary"][1] / 1000.0
                                     beam_self_weight = CONCRETE_DENSITY * width_m * depth_m
                                     w_total = beam_self_weight * 1000.0  # N/m
-                                    model.add_uniform_load(
-                                        UniformLoad(
-                                            element_tag=element_tag,
-                                            load_type="Gravity",
-                                            magnitude=w_total,
-                                            load_pattern=options.gravity_load_pattern,
+                                    for sub_idx in range(NUM_SUBDIVISIONS):
+                                        model.add_uniform_load(
+                                            UniformLoad(
+                                                element_tag=element_tag - NUM_SUBDIVISIONS + sub_idx,
+                                                load_type="Gravity",
+                                                magnitude=w_total,
+                                                load_pattern=options.dl_load_pattern,
+                                            )
                                         )
-                                    )
-                            
-                            element_tag += 1
 
 
     # Core wall elements (ShellMITC4 mesh with PlateFiberSection)
@@ -1601,19 +1796,39 @@ def build_fem_model(project: ProjectData,
                             end_x, end_y, z, floor_level=level
                         )
                         
-                        # Create coupling beam element
-                        model.add_element(
-                            Element(
-                                tag=coupling_element_tag,
-                                element_type=ElementType.ELASTIC_BEAM,
-                                node_tags=[start_node, end_node],
-                                material_tag=beam_material_tag,
-                                section_tag=coupling_section_tag,
-                                geometry={"local_y": (0.0, 0.0, 1.0)},  # Local Y axis pointing up
+                        # Create 5 intermediate nodes at 1/6, 2/6, 3/6, 4/6, 5/6 positions
+                        node_tags = [start_node]
+                        for i in range(1, NUM_SUBDIVISIONS):
+                            t = i / NUM_SUBDIVISIONS
+                            inter_x = start_x + t * (end_x - start_x)
+                            inter_y = start_y + t * (end_y - start_y)
+                            inter_z = z  # Same elevation
+                            inter_node = registry.get_or_create(
+                                inter_x, inter_y, inter_z, floor_level=level
                             )
-                        )
+                            node_tags.append(inter_node)
+                        node_tags.append(end_node)
                         
-                        coupling_element_tag += 1
+                        # Track parent coupling beam ID for logical grouping
+                        parent_coupling_beam_id = coupling_element_tag
+                        
+                        # Create 6 sub-elements connecting the 7 nodes
+                        for i in range(NUM_SUBDIVISIONS):
+                            model.add_element(
+                                Element(
+                                    tag=coupling_element_tag,
+                                    element_type=ElementType.ELASTIC_BEAM,
+                                    node_tags=[node_tags[i], node_tags[i + 1]],
+                                    material_tag=beam_material_tag,
+                                    section_tag=coupling_section_tag,
+                                    geometry={
+                                        "parent_coupling_beam_id": parent_coupling_beam_id,
+                                        "sub_element_index": i,
+                                        "local_y": (0.0, 0.0, 1.0),
+                                    },
+                                )
+                            )
+                            coupling_element_tag += 1
                         coupling_beams_created += 1
                 
                 logger.info(
@@ -1637,8 +1852,7 @@ def build_fem_model(project: ProjectData,
         # Build existing node lookup for beam/wall node sharing
         existing_nodes: Dict[Tuple[float, float, float], int] = {}
         for node in model.nodes.values():
-            key = (round(node.x, 6), round(node.y, 6), round(node.z, 6))
-            existing_nodes[key] = node.tag
+            existing_nodes[(round(node.x, 6), round(node.y, 6), round(node.z, 6))] = node.tag
         
         slab_generator = SlabMeshGenerator(
             base_node_tag=60000,
@@ -1686,18 +1900,7 @@ def build_fem_model(project: ProjectData,
                     # Logic: If secondary beams exist, they split the bay into (N+1) strips
                     if options.num_secondary_beams > 0:
                         if options.secondary_beam_direction == "Y":
-                            # Beams run Y-dir, splitting X-dimension
-                            num_strips = options.num_secondary_beams + 1
-                            strip_width = geometry.bay_x / num_strips
-                            
-                            for k in range(num_strips):
-                                sub_panels.append({
-                                    "suffix": f"_{k}",
-                                    "origin": (base_origin_x + k * strip_width, base_origin_y),
-                                    "dims": (strip_width, geometry.bay_y)
-                                })
-                        else:
-                            # Beams run X-dir, splitting Y-dimension
+                            # Beams run Y-dir, split Y-dimension to run strips along X
                             num_strips = options.num_secondary_beams + 1
                             strip_width = geometry.bay_y / num_strips
                             
@@ -1706,6 +1909,17 @@ def build_fem_model(project: ProjectData,
                                     "suffix": f"_{k}",
                                     "origin": (base_origin_x, base_origin_y + k * strip_width),
                                     "dims": (geometry.bay_x, strip_width)
+                                })
+                        else:
+                            # Beams run X-dir, split X-dimension to run strips along Y
+                            num_strips = options.num_secondary_beams + 1
+                            strip_width = geometry.bay_x / num_strips
+                            
+                            for k in range(num_strips):
+                                sub_panels.append({
+                                    "suffix": f"_{k}",
+                                    "origin": (base_origin_x + k * strip_width, base_origin_y),
+                                    "dims": (strip_width, geometry.bay_y)
                                 })
                     else:
                         # No secondary beams, single panel per bay
@@ -1729,12 +1943,38 @@ def build_fem_model(project: ProjectData,
                             fcu=project.materials.fcu_beam,
                         )
                         
+                        target_size = 0.1 * max(sp_width_x, sp_width_y)
+                        if options.slab_elements_per_bay > 1:
+                            target_size = target_size / options.slab_elements_per_bay
+
+                        base_x = max(1, int(round(sp_width_x / target_size)))
+                        base_y = max(1, int(round(sp_width_y / target_size)))
+                        beam_div = NUM_SUBDIVISIONS
+                        sec_div = options.num_secondary_beams + 1 if options.num_secondary_beams > 0 else 1
+
+                        def _snap_divisions(base: int, divisor: int) -> int:
+                            if divisor <= 1:
+                                return max(1, base)
+                            snapped = int(round(base / divisor)) * divisor
+                            if snapped < divisor:
+                                snapped = divisor
+                            return snapped
+
+                        if options.secondary_beam_direction == "Y":
+                            align_x = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                            elements_along_x = _snap_divisions(base_x, align_x)
+                            elements_along_y = _snap_divisions(base_y, beam_div)
+                        else:
+                            align_y = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                            elements_along_x = _snap_divisions(base_x, beam_div)
+                            elements_along_y = _snap_divisions(base_y, align_y)
+
                         mesh_result = slab_generator.generate_mesh(
                             slab=slab,
                             floor_level=level,
                             section_tag=slab_section_tag,
-                            elements_along_x=max(1, int(options.slab_elements_per_bay * (sp_width_x / geometry.bay_x))), # Scale mesh density
-                            elements_along_y=max(1, int(options.slab_elements_per_bay * (sp_width_y / geometry.bay_y))),
+                            elements_along_x=elements_along_x,
+                            elements_along_y=elements_along_y,
                             existing_nodes=existing_nodes,
                             openings=slab_openings
                         )
@@ -1771,11 +2011,10 @@ def build_fem_model(project: ProjectData,
                 model=model,
                 project=project,
                 slab_element_tags=slab_element_tags,
-                load_pattern=options.gravity_load_pattern,
-            )
-            logger.info(
-                f"Applied surface loads to {len(slab_element_tags)} slab elements "
-                f"({_get_slab_design_load(project):.2f} kPa)"
+                dl_pattern=options.dl_load_pattern,
+                sdl_pattern=options.sdl_load_pattern,
+                ll_pattern=options.ll_load_pattern,
+                slab_thickness_m=options.slab_thickness,
             )
 
 
@@ -1802,14 +2041,49 @@ def build_fem_model(project: ProjectData,
         else:
             floor_shears = _compute_floor_shears(wind_result, geometry.story_height, geometry.floors)
             if floor_shears:
+                # Wind +X (pattern 4)
                 apply_lateral_loads_to_diaphragms(
                     model,
                     floor_shears=floor_shears,
-                    direction=options.lateral_load_direction,
-                    load_pattern=options.wind_load_pattern,
+                    direction="X",
+                    load_pattern=options.wx_plus_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
+                logger.info(f"Applied Wx+ loads to {len(floor_shears)} floors (pattern {options.wx_plus_pattern})")
+                
+                # Wind -X (pattern 5) - negative shears
+                apply_lateral_loads_to_diaphragms(
+                    model,
+                    floor_shears={k: -v for k, v in floor_shears.items()},
+                    direction="X",
+                    load_pattern=options.wx_minus_pattern,
+                    tolerance=options.tolerance,
+                    master_lookup=master_by_level if master_by_level else None,
+                )
+                logger.info(f"Applied Wx- loads to {len(floor_shears)} floors (pattern {options.wx_minus_pattern})")
+                
+                # Wind +Y (pattern 6)
+                apply_lateral_loads_to_diaphragms(
+                    model,
+                    floor_shears=floor_shears,
+                    direction="Y",
+                    load_pattern=options.wy_plus_pattern,
+                    tolerance=options.tolerance,
+                    master_lookup=master_by_level if master_by_level else None,
+                )
+                logger.info(f"Applied Wy+ loads to {len(floor_shears)} floors (pattern {options.wy_plus_pattern})")
+                
+                # Wind -Y (pattern 7) - negative shears
+                apply_lateral_loads_to_diaphragms(
+                    model,
+                    floor_shears={k: -v for k, v in floor_shears.items()},
+                    direction="Y",
+                    load_pattern=options.wy_minus_pattern,
+                    tolerance=options.tolerance,
+                    master_lookup=master_by_level if master_by_level else None,
+                )
+                logger.info(f"Applied Wy- loads to {len(floor_shears)} floors (pattern {options.wy_minus_pattern})")
 
     # Phase 3: Analysis Preparation (OpenSees BuildingTcl pattern)
     # Validate model before returning

@@ -41,8 +41,11 @@ _classify_elements = _viz_module._classify_elements
 _get_support_symbol = _viz_module._get_support_symbol
 _get_floor_elevations = _viz_module._get_floor_elevations
 calculate_auto_scale_factor = _viz_module.calculate_auto_scale_factor
+calculate_opsvis_scale = _viz_module.calculate_opsvis_scale
 render_section_forces = _viz_module.render_section_forces
 render_section_forces_plan = _viz_module.render_section_forces_plan
+FORCE_DISPLAY_NAMES = _viz_module.FORCE_DISPLAY_NAMES
+create_opsvis_force_diagram = _viz_module.create_opsvis_force_diagram
 PLOTLY_AVAILABLE = _viz_module.PLOTLY_AVAILABLE
 OPSVIS_AVAILABLE = _viz_module.OPSVIS_AVAILABLE
 LEGACY_COLORS = _viz_module.COLORS
@@ -99,9 +102,12 @@ __all__ = [
     "PLOTLY_AVAILABLE",
     "OPSVIS_AVAILABLE",
     "LEGACY_COLORS",
+    "FORCE_DISPLAY_NAMES",
     "calculate_auto_scale_factor",
+    "calculate_opsvis_scale",
     "render_section_forces",
     "render_section_forces_plan",
+    "create_opsvis_force_diagram",
     "get_floor_elevations",
     "filter_nodes_at_elevation",
     "project_to_plan",
