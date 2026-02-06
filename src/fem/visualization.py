@@ -76,6 +76,7 @@ from src.fem.fem_engine import (
     SurfaceLoad,
     RigidDiaphragm,
 )
+from src.fem.force_normalization import normalize_end_force as _normalize_end_force_shared
 
 
 class VisualizationBackend(Enum):
@@ -605,17 +606,19 @@ def _clamp(value: float, min_value: float, max_value: float) -> float:
 
 
 def _normalize_end_force(force_i: float, force_j: float) -> float:
-    if abs(force_i + force_j) < abs(force_i - force_j):
-        return -force_j
-    return force_j
+    return _normalize_end_force_shared(force_i, force_j, "N")
 
 
 def _display_end_force(force_i: float, force_j: float, force_type: str) -> float:
-    if force_type in {"My", "Mz", "T"}:
-        return -force_j
-    if force_type in {"Vy", "Vz"}:
-        return force_j
-    return _normalize_end_force(force_i, force_j)
+    return _normalize_end_force_shared(force_i, force_j, force_type)
+
+
+def _display_node_force(force_i: float, force_j: float, force_type: str, at_j_end: bool = False) -> float:
+    value = _display_end_force(force_i, force_j, force_type) if at_j_end else force_i
+    if force_type == "N":
+        # Display compression as positive so axial accumulation increases downward.
+        return -value
+    return value
 
 
 def _add_force_value_markers(
@@ -1172,9 +1175,12 @@ def render_section_forces(
                         node_i_tag = sub_elem.node_tags[0]
                         if node_i_tag in model.nodes:
                             node_i = model.nodes[node_i_tag]
-                            force_value = sub_force.force_i
-                            if forces.force_type == "N":
-                                force_value = -force_value
+                            force_value = _display_node_force(
+                                sub_force.force_i,
+                                sub_force.force_j,
+                                forces.force_type,
+                                at_j_end=False,
+                            )
                             force_values.append(force_value)
                             h_baseline.append(get_h(node_i))
                             v_baseline.append(get_v(node_i))
@@ -1188,10 +1194,11 @@ def render_section_forces(
                         node_j_tag = last_sub_elem.node_tags[1]
                         if node_j_tag in model.nodes:
                             node_j = model.nodes[node_j_tag]
-                            normalized_j = _display_end_force(
+                            normalized_j = _display_node_force(
                                 last_sub_force.force_i,
                                 last_sub_force.force_j,
                                 forces.force_type,
+                                at_j_end=True,
                             )
                             force_values.append(normalized_j)
                             h_baseline.append(get_h(node_j))
@@ -1295,8 +1302,18 @@ def render_section_forces(
         nep = 17
         t = np.linspace(0.0, 1.0, nep)
 
-        force_i = elem_force.force_i
-        force_j = _display_end_force(force_i, elem_force.force_j, forces.force_type)
+        force_i = _display_node_force(
+            elem_force.force_i,
+            elem_force.force_j,
+            forces.force_type,
+            at_j_end=False,
+        )
+        force_j = _display_node_force(
+            elem_force.force_i,
+            elem_force.force_j,
+            forces.force_type,
+            at_j_end=True,
+        )
         forces_interp = force_i + (force_j - force_i) * t
         forces_scaled = forces_interp * scale_factor
 
@@ -1453,7 +1470,12 @@ def render_section_forces_plan(
                             node_i = model.nodes[node_i_tag]
                             # Check floor filter for each sub-element
                             if abs(node_i.z - floor_z) <= tolerance:
-                                force_value = sub_force.force_i
+                                force_value = _display_node_force(
+                                    sub_force.force_i,
+                                    sub_force.force_j,
+                                    forces.force_type,
+                                    at_j_end=False,
+                                )
                                 force_values.append(force_value)
                                 node_positions.append((node_i.x, node_i.y))
                 
@@ -1467,10 +1489,11 @@ def render_section_forces_plan(
                         if node_j_tag in model.nodes:
                             node_j = model.nodes[node_j_tag]
                             if abs(node_j.z - floor_z) <= tolerance:
-                                normalized_j = _display_end_force(
+                                normalized_j = _display_node_force(
                                     last_sub_force.force_i,
                                     last_sub_force.force_j,
                                     forces.force_type,
+                                    at_j_end=True,
                                 )
                                 force_values.append(normalized_j)
                                 node_positions.append((node_j.x, node_j.y))
@@ -1579,8 +1602,18 @@ def render_section_forces_plan(
         xl = np.linspace(0, L, nep)
         
         # Linear interpolation of forces
-        force_i = elem_force.force_i
-        force_j = _display_end_force(force_i, elem_force.force_j, forces.force_type)
+        force_i = _display_node_force(
+            elem_force.force_i,
+            elem_force.force_j,
+            forces.force_type,
+            at_j_end=False,
+        )
+        force_j = _display_node_force(
+            elem_force.force_i,
+            elem_force.force_j,
+            forces.force_type,
+            at_j_end=True,
+        )
         forces_interp = force_i + (force_j - force_i) * (xl / L)
         forces_scaled = forces_interp * scale_factor
         

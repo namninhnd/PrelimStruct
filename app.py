@@ -18,8 +18,9 @@ from src.core.data_models import (
     ExposureClass, TerrainCategory,
     CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties,
     ColumnPosition, LoadCombination, PRESETS,
+    SlabResult, BeamResult, ColumnResult,
 )
-from src.core.constants import CARBON_FACTORS
+from src.core.constants import CARBON_FACTORS, CONCRETE_DENSITY
 from src.core.load_tables import LIVE_LOAD_TABLE
 
 # V3.5: Engine imports removed - FEM-only architecture
@@ -976,15 +977,112 @@ def run_calculations(project: ProjectData,
                      override_sec_beam_w: int = 0,
                      override_sec_beam_d: int = 0,
                      override_col: int = 0,
+                     override_col_w: int = 0,
+                     override_col_d: int = 0,
                      secondary_along_x: bool = False,
                      num_secondary_beams: int = 3) -> ProjectData:
-    """DEPRECATED IN V3.5: Run all structural calculations with optional overrides
-    
-    This function is deprecated as part of the FEM-only architecture.
-    Use FEM analysis workflow instead of simplified calculations.
+    """Apply section-property updates in FEM-only mode.
+
+    In v3.5, simplified design engines are removed. This function now updates
+    section properties on project results so FEM model generation reflects
+    sidebar edits immediately.
     """
-    # For now, simply return the project without modification
-    # This prevents the DeprecationWarning from crashing the app until we fully remove the calls
+    _ = secondary_along_x
+    _ = num_secondary_beams
+
+    def _resolve_dimension(override_value: int, fallback: int) -> int:
+        if override_value and override_value > 0:
+            return int(override_value)
+        return int(fallback)
+
+    # Slab thickness (affects DL self-weight)
+    if override_slab and override_slab > 0:
+        slab_thickness = int(override_slab)
+        slab_self_weight = (slab_thickness / 1000.0) * CONCRETE_DENSITY
+        if project.slab_result is not None:
+            project.slab_result.thickness = slab_thickness
+            project.slab_result.self_weight = slab_self_weight
+            project.slab_result.size = f"{slab_thickness} mm"
+        else:
+            project.slab_result = SlabResult(
+                element_type="Slab",
+                size=f"{slab_thickness} mm",
+                thickness=slab_thickness,
+                self_weight=slab_self_weight,
+            )
+
+    # Primary beam section
+    if (override_pri_beam_w and override_pri_beam_w > 0) or (override_pri_beam_d and override_pri_beam_d > 0):
+        existing_w = project.primary_beam_result.width if project.primary_beam_result else 300
+        existing_d = project.primary_beam_result.depth if project.primary_beam_result else 600
+        width = _resolve_dimension(override_pri_beam_w, existing_w)
+        depth = _resolve_dimension(override_pri_beam_d, existing_d)
+
+        if project.primary_beam_result is not None:
+            project.primary_beam_result.width = width
+            project.primary_beam_result.depth = depth
+            project.primary_beam_result.size = f"{width} x {depth} mm"
+        else:
+            project.primary_beam_result = BeamResult(
+                element_type="Primary Beam",
+                size=f"{width} x {depth} mm",
+                width=width,
+                depth=depth,
+            )
+
+    # Secondary beam section
+    if (override_sec_beam_w and override_sec_beam_w > 0) or (override_sec_beam_d and override_sec_beam_d > 0):
+        existing_w = project.secondary_beam_result.width if project.secondary_beam_result else 300
+        existing_d = project.secondary_beam_result.depth if project.secondary_beam_result else 500
+        width = _resolve_dimension(override_sec_beam_w, existing_w)
+        depth = _resolve_dimension(override_sec_beam_d, existing_d)
+
+        if project.secondary_beam_result is not None:
+            project.secondary_beam_result.width = width
+            project.secondary_beam_result.depth = depth
+            project.secondary_beam_result.size = f"{width} x {depth} mm"
+        else:
+            project.secondary_beam_result = BeamResult(
+                element_type="Secondary Beam",
+                size=f"{width} x {depth} mm",
+                width=width,
+                depth=depth,
+            )
+
+    # Column section (supports rectangular and legacy square override)
+    if (
+        (override_col and override_col > 0)
+        or (override_col_w and override_col_w > 0)
+        or (override_col_d and override_col_d > 0)
+    ):
+        existing_w = 400
+        existing_d = 400
+        if project.column_result is not None:
+            existing_w = project.column_result.width or project.column_result.dimension or existing_w
+            existing_d = project.column_result.depth or project.column_result.dimension or existing_d
+
+        square_override = int(override_col) if override_col and override_col > 0 else 0
+        width_override = int(override_col_w) if override_col_w and override_col_w > 0 else square_override
+        depth_override = int(override_col_d) if override_col_d and override_col_d > 0 else square_override
+
+        width = _resolve_dimension(width_override, existing_w)
+        depth = _resolve_dimension(depth_override, existing_d)
+        dimension = max(width, depth)
+
+        if project.column_result is not None:
+            project.column_result.width = width
+            project.column_result.depth = depth
+            project.column_result.dimension = dimension
+            project.column_result.size = f"{width} x {depth} mm"
+        else:
+            project.column_result = ColumnResult(
+                element_type="Column",
+                size=f"{width} x {depth} mm",
+                width=width,
+                depth=depth,
+                dimension=dimension,
+            )
+
     return project
 
 
@@ -1576,49 +1674,129 @@ def main():
 
         st.divider()
 
-        # Element Overrides (Advanced)
-        st.markdown("##### Element Overrides")
-        use_overrides = st.checkbox("Override calculated sizes", value=False,
-                                   help="Enable manual override of structural element sizes")
+        # Section Properties
+        st.markdown("##### Section Properties")
+        st.caption("Selected sections used by FEM model. Changes auto-update the model and DL self-weight.")
 
-        if use_overrides:
-            st.caption("Leave at 0 to use calculated values")
-            override_slab_thickness = st.number_input(
-                "Slab Thickness (mm)", min_value=0, value=0, step=25,
-                help="Override slab thickness (0 = auto)")
+        current_project = st.session_state.project
 
-            st.caption("Primary Beam")
-            col1, col2 = st.columns(2)
-            with col1:
-                override_pri_beam_width = st.number_input(
-                    "Pri. Width (mm)", min_value=0, value=0, step=25,
-                    help="Primary beam width (0 = auto)")
-            with col2:
-                override_pri_beam_depth = st.number_input(
-                    "Pri. Depth (mm)", min_value=0, value=0, step=50,
-                    help="Primary beam depth (0 = auto)")
+        slab_default = 200
+        if current_project.slab_result and current_project.slab_result.thickness > 0:
+            slab_default = int(current_project.slab_result.thickness)
 
-            st.caption("Secondary Beam")
-            col1, col2 = st.columns(2)
-            with col1:
-                override_sec_beam_width = st.number_input(
-                    "Sec. Width (mm)", min_value=0, value=0, step=25,
-                    help="Secondary beam width (0 = auto)")
-            with col2:
-                override_sec_beam_depth = st.number_input(
-                    "Sec. Depth (mm)", min_value=0, value=0, step=50,
-                    help="Secondary beam depth (0 = auto)")
+        override_slab_thickness = st.number_input(
+            "Slab Thickness (mm)",
+            min_value=100,
+            max_value=500,
+            value=slab_default,
+            step=25,
+            help="Used directly for FEM slab self-weight in DL.",
+            disabled=inputs_locked,
+        )
 
-            override_column_size = st.number_input(
-                "Column Size (mm)", min_value=0, value=0, step=25,
-                help="Override column dimension (0 = auto)")
-        else:
-            override_slab_thickness = 0
-            override_pri_beam_width = 0
-            override_pri_beam_depth = 0
-            override_sec_beam_width = 0
-            override_sec_beam_depth = 0
-            override_column_size = 0
+        st.caption("Primary Beam")
+        col1, col2 = st.columns(2)
+        with col1:
+            pri_width_default = 300
+            if current_project.primary_beam_result and current_project.primary_beam_result.width > 0:
+                pri_width_default = int(current_project.primary_beam_result.width)
+            override_pri_beam_width = st.number_input(
+                "Pri. Width (mm)",
+                min_value=150,
+                max_value=1200,
+                value=pri_width_default,
+                step=25,
+                help="Primary beam section width.",
+                disabled=inputs_locked,
+            )
+        with col2:
+            pri_depth_default = 600
+            if current_project.primary_beam_result and current_project.primary_beam_result.depth > 0:
+                pri_depth_default = int(current_project.primary_beam_result.depth)
+            override_pri_beam_depth = st.number_input(
+                "Pri. Depth (mm)",
+                min_value=250,
+                max_value=1500,
+                value=pri_depth_default,
+                step=50,
+                help="Primary beam section depth.",
+                disabled=inputs_locked,
+            )
+
+        st.caption("Secondary Beam")
+        col1, col2 = st.columns(2)
+        with col1:
+            sec_width_default = 300
+            if current_project.secondary_beam_result and current_project.secondary_beam_result.width > 0:
+                sec_width_default = int(current_project.secondary_beam_result.width)
+            override_sec_beam_width = st.number_input(
+                "Sec. Width (mm)",
+                min_value=150,
+                max_value=1200,
+                value=sec_width_default,
+                step=25,
+                help="Secondary beam section width.",
+                disabled=inputs_locked,
+            )
+        with col2:
+            sec_depth_default = 500
+            if current_project.secondary_beam_result and current_project.secondary_beam_result.depth > 0:
+                sec_depth_default = int(current_project.secondary_beam_result.depth)
+            override_sec_beam_depth = st.number_input(
+                "Sec. Depth (mm)",
+                min_value=250,
+                max_value=1500,
+                value=sec_depth_default,
+                step=50,
+                help="Secondary beam section depth.",
+                disabled=inputs_locked,
+            )
+
+        st.caption("Column (Rectangular)")
+        col1, col2 = st.columns(2)
+        with col1:
+            col_width_default = 400
+            if current_project.column_result:
+                col_width_default = int(
+                    current_project.column_result.width
+                    or current_project.column_result.dimension
+                    or col_width_default
+                )
+            override_column_width = st.number_input(
+                "Column Width (mm)",
+                min_value=200,
+                max_value=2000,
+                value=col_width_default,
+                step=25,
+                help="Column section width (X).",
+                disabled=inputs_locked,
+            )
+        with col2:
+            col_depth_default = 400
+            if current_project.column_result:
+                col_depth_default = int(
+                    current_project.column_result.depth
+                    or current_project.column_result.dimension
+                    or col_depth_default
+                )
+            override_column_depth = st.number_input(
+                "Column Depth (mm)",
+                min_value=200,
+                max_value=2000,
+                value=col_depth_default,
+                step=25,
+                help="Column section depth (Y).",
+                disabled=inputs_locked,
+            )
+
+        override_column_size = max(override_column_width, override_column_depth)
+
+        st.caption(
+            f"Selected: Slab {override_slab_thickness} mm | "
+            f"Pri {override_pri_beam_width}x{override_pri_beam_depth} mm | "
+            f"Sec {override_sec_beam_width}x{override_sec_beam_depth} mm | "
+            f"Col {override_column_width}x{override_column_depth} mm"
+        )
 
         st.divider()
 
@@ -1798,6 +1976,8 @@ def main():
         override_sec_beam_w=override_sec_beam_width,
         override_sec_beam_d=override_sec_beam_depth,
         override_col=override_column_size,
+        override_col_w=override_column_width,
+        override_col_d=override_column_depth,
         secondary_along_x=secondary_along_x,
         num_secondary_beams=num_secondary_beams
     )

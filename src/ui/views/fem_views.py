@@ -25,6 +25,11 @@ from src.fem.visualization import (
 )
 from src.ui.components.reaction_table import ReactionTable
 from src.ui.components.beam_forces_table import BeamForcesTable
+from src.ui.components.column_forces_table import ColumnForcesTable
+from src.ui.floor_labels import (
+    format_floor_label_from_elevation,
+    format_floor_label_from_floor_number,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -151,28 +156,12 @@ def _analysis_result_to_displacements(result: Any) -> Optional[Dict[int, Tuple[f
     return displacements
 
 
-def _format_floor_label(z: float, floor_levels: List[float]) -> str:
+def _format_floor_label(z: float, floor_levels: List[float], story_height: float) -> str:
     """Format floor elevation as HK convention: G/F, 1/F, 2/F, etc."""
-    if not floor_levels:
-        return f"Z = {z:.2f}m"
-        
-    # Sort levels and find index with tolerance
-    sorted_levels = sorted(floor_levels)
-    floor_index = -1
-    
-    for i, level in enumerate(sorted_levels):
-        if abs(level - z) < 0.01:
-            floor_index = i
-            break
-            
-    if floor_index == -1:
-        return f"Z = {z:.2f}m"
-        
-    # Ground floor is index 0, then 1/F, 2/F, etc.
-    if floor_index == 0:
-        return f"G/F (+{z:.2f})"
-    else:
-        return f"{floor_index}/F (+{z:.2f})"
+    if story_height > 1e-6:
+        floor_number = int(round(z / story_height))
+        return format_floor_label_from_floor_number(floor_number, story_height)
+    return format_floor_label_from_elevation(z, floor_levels)
 
 
 def render_unified_fem_views(
@@ -208,6 +197,7 @@ def render_unified_fem_views(
         "fem_view_force_scale": 1.0,
         "fem_view_force_auto_scale": True,
         "fem_view_force_font_size": 12,
+        "fem_view_grid_spacing": 1.0,
         "fem_view_use_opsvis": False,
         "fem_view_opsvis_label_mode": "Max abs",
         "fem_view_opsvis_label_stride": 1,
@@ -293,7 +283,7 @@ def render_unified_fem_views(
         show_slab_mesh_grid=st.session_state.fem_view_show_mesh,
         show_ghost_columns=st.session_state.fem_view_show_ghost,
         show_diaphragms=st.session_state.fem_view_show_diaphragms,
-        grid_spacing=None,
+        grid_spacing=st.session_state.fem_view_grid_spacing,
         colorscale="RdYlGn_r",
         show_deformed=st.session_state.fem_view_show_deformed,
         show_reactions=st.session_state.fem_view_show_reactions,
@@ -358,8 +348,11 @@ def render_unified_fem_views(
                 status_text.text("Running OpenSees analysis...")
                 progress_bar.progress(0.3)
                 
-                # Run analysis for all 7 load cases
-                results_dict = analyze_model(model, load_cases=["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"])
+                run_load_cases = ["DL", "SDL", "LL"]
+                if include_wind:
+                    run_load_cases.extend(["Wx+", "Wx-", "Wy+", "Wy-"])
+
+                results_dict = analyze_model(model, load_cases=run_load_cases)
                 progress_bar.progress(0.8)
                 
                 status_text.text("Analysis complete!")
@@ -368,8 +361,31 @@ def render_unified_fem_views(
                 result = results_dict.get("DL") or next(iter(results_dict.values()), None)
                 st.session_state["fem_preview_analysis_result"] = result
                 st.session_state["fem_analysis_results_dict"] = results_dict
-                st.session_state["fem_analysis_status"] = "success" if getattr(result, "success", False) else "failed"
-                st.session_state["fem_analysis_message"] = getattr(result, "message", "Analysis completed")
+
+                successful_cases = [
+                    case
+                    for case in run_load_cases
+                    if getattr(results_dict.get(case), "success", False)
+                ]
+                failed_cases = [case for case in run_load_cases if case not in successful_cases]
+
+                if failed_cases:
+                    st.session_state["fem_analysis_status"] = "failed"
+                    if successful_cases:
+                        st.session_state["fem_analysis_message"] = (
+                            f"{len(successful_cases)}/{len(run_load_cases)} load cases completed. "
+                            f"Failed: {', '.join(failed_cases)}"
+                        )
+                    else:
+                        first_failed = results_dict.get(failed_cases[0])
+                        st.session_state["fem_analysis_message"] = getattr(
+                            first_failed,
+                            "message",
+                            "Analysis failed",
+                        )
+                else:
+                    st.session_state["fem_analysis_status"] = "success"
+                    st.session_state["fem_analysis_message"] = f"All {len(run_load_cases)} load cases completed"
                 _lock_inputs()
                 st.rerun()
             except Exception as e:
@@ -385,13 +401,18 @@ def render_unified_fem_views(
         else:
             st.caption("Run analysis to lock inputs")
     
-    LOAD_CASES = ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
+    all_load_cases = ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
+    available_load_cases = [lc for lc in all_load_cases if lc in results_dict] if results_dict else ["DL", "SDL", "LL"]
     
     selected_load_case = None
     if has_results:
+        current_case = st.session_state.get("fem_view_load_case")
+        if available_load_cases and current_case not in available_load_cases:
+            st.session_state["fem_view_load_case"] = available_load_cases[0]
+
         selected_load_case = st.selectbox(
             "Load Case",
-            options=LOAD_CASES,
+            options=available_load_cases,
             key="fem_view_load_case",
             help="Select load case to display in force diagrams"
         )
@@ -488,7 +509,10 @@ def render_unified_fem_views(
     if active_view == "Plan View":
         with nav_cols[3]:
             if floor_levels:
-                floor_labels = [_format_floor_label(z, floor_levels) for z in floor_levels]
+                floor_labels = [
+                    _format_floor_label(z, floor_levels, project.geometry.story_height)
+                    for z in floor_levels
+                ]
                 default_idx = len(floor_levels) - 1
                 selected_idx = st.selectbox(
                     "Floor Level",
@@ -794,6 +818,15 @@ def render_unified_fem_views(
                         key="fem_view_force_scale",
                         help="Manual scale factor for force diagram size"
                     )
+
+        st.slider(
+            "Grid spacing (m)",
+            min_value=0.5,
+            max_value=10.0,
+            step=0.5,
+            key="fem_view_grid_spacing",
+            help="Controls plot grid interval for plan and elevation views"
+        )
             
         st.divider()
         st.selectbox(
@@ -826,6 +859,20 @@ def render_unified_fem_views(
             )
             current_floor = int(round(selected_z / project.geometry.story_height)) if selected_z else None
             beam_forces_table.render(floor_filter=current_floor)
+
+    # --- 6c. Column Forces Table ---
+    if has_results:
+        with st.expander("Column Section Forces", expanded=False):
+            current_load_case = st.session_state.get("fem_view_load_case", "DL")
+            column_forces_table = ColumnForcesTable(
+                model=model,
+                analysis_result=analysis_result,
+                force_type=force_code if force_code else "N",
+                story_height=project.geometry.story_height,
+                load_case=current_load_case
+            )
+            current_floor = int(round(selected_z / project.geometry.story_height)) if selected_z else None
+            column_forces_table.render(floor_filter=current_floor)
 
     # --- 7. Model Statistics & Export ---
     

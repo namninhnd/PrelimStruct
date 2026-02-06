@@ -76,8 +76,10 @@ class ReactionTable:
             st.info(f"No reaction forces found for {selected_case}.")
             return
 
-        # Display table
-        st.dataframe(df.style.format("{:.2f}"), use_container_width=True)
+        # Display table (cast index to string to avoid mixed int/str Arrow conversion errors)
+        display_df = df.copy()
+        display_df.index = display_df.index.map(str)
+        st.dataframe(display_df.style.format("{:.2f}"), use_container_width=True)
         
         # Export Buttons
         col1, col2, col3 = st.columns(3)
