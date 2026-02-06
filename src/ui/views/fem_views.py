@@ -207,6 +207,7 @@ def render_unified_fem_views(
         "fem_view_force_type": "None",
         "fem_view_force_scale": 1.0,
         "fem_view_force_auto_scale": True,
+        "fem_view_force_font_size": 12,
         "fem_view_use_opsvis": False,
         "fem_view_opsvis_label_mode": "Max abs",
         "fem_view_opsvis_label_stride": 1,
@@ -298,6 +299,7 @@ def render_unified_fem_views(
         show_reactions=st.session_state.fem_view_show_reactions,
         section_force_type=force_code,
         section_force_scale=force_scale,
+        section_force_font_size=st.session_state.fem_view_force_font_size,
     )
     
     # Prepare Analysis Data
@@ -449,17 +451,32 @@ def render_unified_fem_views(
     nav_cols = st.columns([1, 1, 1, 2])
     
     with nav_cols[0]:
-        if st.button("Plan View", type="primary" if active_view == "Plan View" else "secondary", use_container_width=True):
+        if st.button(
+            "Plan View",
+            type="primary" if active_view == "Plan View" else "secondary",
+            width="stretch",
+            disabled=False,
+        ):
             st.session_state.fem_active_view = "Plan View"
             st.rerun()
             
     with nav_cols[1]:
-        if st.button("Elevation View", type="primary" if active_view == "Elevation View" else "secondary", use_container_width=True):
+        if st.button(
+            "Elevation View",
+            type="primary" if active_view == "Elevation View" else "secondary",
+            width="stretch",
+            disabled=False,
+        ):
             st.session_state.fem_active_view = "Elevation View"
             st.rerun()
             
     with nav_cols[2]:
-        if st.button("3D View", type="primary" if active_view == "3D View" else "secondary", use_container_width=True):
+        if st.button(
+            "3D View",
+            type="primary" if active_view == "3D View" else "secondary",
+            width="stretch",
+            disabled=False,
+        ):
             st.session_state.fem_active_view = "3D View"
             st.rerun()
             
@@ -505,6 +522,7 @@ def render_unified_fem_views(
             show_reactions=viz_config.show_reactions,
             section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
+            section_force_font_size=viz_config.section_force_font_size,
             load_pattern=active_load_pattern,
             load_case_label=active_load_case,
         )
@@ -516,7 +534,14 @@ def render_unified_fem_views(
             utilization=util_map,
             analysis_result=analysis_result
         )
-        st.plotly_chart(fig_plan, use_container_width=True, key=f"plan_view_{st.session_state.fem_view_force_type}_{selected_z}")
+        st.plotly_chart(
+            fig_plan,
+            width="stretch",
+            key=(
+                f"plan_view_{st.session_state.fem_view_force_type}_"
+                f"{selected_z}_{st.session_state.fem_view_force_font_size}"
+            ),
+        )
         active_fig = fig_plan
 
     # --- Elevation View Render ---
@@ -576,6 +601,7 @@ def render_unified_fem_views(
             show_reactions=viz_config.show_reactions,
             section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
+            section_force_font_size=viz_config.section_force_font_size,
             load_pattern=active_load_pattern,
             load_case_label=active_load_case,
         )
@@ -590,7 +616,14 @@ def render_unified_fem_views(
             reactions=reactions,
             analysis_result=analysis_result
         )
-        st.plotly_chart(fig_elev, use_container_width=True, key=f"elev_view_{st.session_state.fem_view_force_type}_{view_dir}_{grid_coord}")
+        st.plotly_chart(
+            fig_elev,
+            width="stretch",
+            key=(
+                f"elev_view_{st.session_state.fem_view_force_type}_"
+                f"{view_dir}_{grid_coord}_{st.session_state.fem_view_force_font_size}"
+            ),
+        )
         active_fig = fig_elev
         
     # --- 3D View Render ---
@@ -622,7 +655,11 @@ def render_unified_fem_views(
             displaced_nodes=displaced_nodes,
             reactions=reactions
         )
-        st.plotly_chart(fig_3d, use_container_width=True, key=f"3d_view_{st.session_state.fem_view_force_type}")
+        st.plotly_chart(
+            fig_3d,
+            width="stretch",
+            key=f"3d_view_{st.session_state.fem_view_force_type}",
+        )
         active_fig = fig_3d
 
     if use_opsvis and force_code and has_results:
@@ -668,6 +705,7 @@ def render_unified_fem_views(
             forces=opsvis_forces,
             label_mode=label_mode,
             label_stride=label_stride,
+            label_font_size=viz_config.section_force_font_size,
         )
 
         if opsvis_fig is None:
@@ -735,6 +773,15 @@ def render_unified_fem_views(
                     value=True,
                     key="fem_view_force_auto_scale",
                     help="Automatically calculate optimal scale based on building dimensions"
+                )
+
+                st.slider(
+                    "Label Font Size",
+                    min_value=6,
+                    max_value=24,
+                    step=1,
+                    key="fem_view_force_font_size",
+                    help="Font size for force diagram labels (Plotly and opsvis)"
                 )
                 
                 if not use_auto:
