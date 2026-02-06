@@ -355,10 +355,15 @@ class FEMModelDirector:
         """Apply loads to the model."""
         # Apply rigid diaphragms
         if self.options.apply_rigid_diaphragms:
+            floor_elevations = [
+                level * self.project.geometry.story_height
+                for level in range(1, self.project.geometry.floors + 1)
+            ]
             create_floor_rigid_diaphragms(
                 self.model,
                 base_elevation=0.0,
                 tolerance=self.options.tolerance,
+                floor_elevations=floor_elevations,
             )
         
         # Apply wind loads

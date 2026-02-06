@@ -73,7 +73,8 @@ def _group_nodes_by_elevation(model: FEMModel, tolerance: float = 1e-6) -> Dict[
 
 def create_floor_rigid_diaphragms(model: FEMModel,
                                   base_elevation: float = 0.0,
-                                  tolerance: float = 1e-6) -> Dict[float, int]:
+                                  tolerance: float = 1e-6,
+                                  floor_elevations: Optional[List[float]] = None) -> Dict[float, int]:
     """Automatically create rigid diaphragms for each floor level (except base).
 
     Args:
@@ -84,12 +85,25 @@ def create_floor_rigid_diaphragms(model: FEMModel,
     Returns:
         Mapping of floor elevation to diaphragm master node tag
     """
-    floors = _group_nodes_by_elevation(model, tolerance)
     master_by_level: Dict[float, int] = {}
 
-    for level, node_tags in floors.items():
+    if floor_elevations is None:
+        floors = _group_nodes_by_elevation(model, tolerance)
+        target_levels = list(floors.keys())
+        level_nodes = floors
+    else:
+        target_levels = floor_elevations
+        level_nodes: Dict[float, List[int]] = {}
+        for level in target_levels:
+            level_nodes[level] = [
+                node.tag for node in model.nodes.values()
+                if abs(node.z - level) <= tolerance
+            ]
+
+    for level in target_levels:
         if abs(level - base_elevation) <= tolerance:
             continue  # skip base support level
+        node_tags = level_nodes.get(level, [])
         if len(node_tags) < 2:
             continue  # no diaphragm needed for a single node
 
@@ -193,7 +207,7 @@ class ModelBuilderOptions:
     tolerance: float = 1e-6
     edge_clearance_m: float = 0.5
     slab_thickness: float = 0.15
-    slab_elements_per_bay: int = 1  # 1x1 mesh per bay (one quad element per bay)
+    slab_elements_per_bay: int = 1  # Mesh density multiplier (higher = finer)
     # Column omission near core walls
     omit_columns_near_core: bool = True
     column_omission_threshold: float = 0.5  # meters (400mm wall + 500mm column + 100mm clearance)
@@ -212,6 +226,8 @@ class BeamSegment:
     end: Tuple[float, float]
     start_connection: BeamConnectionType
     end_connection: BeamConnectionType
+
+
 
 
 class NodeRegistry:
@@ -1358,7 +1374,6 @@ def build_fem_model(project: ProjectData,
         z = level * geometry.story_height
         for iy in range(geometry.num_bays_y + 1):  # All Y gridlines
             y = iy * geometry.bay_y
-            tributary_width = geometry.bay_y / 2 if iy in (0, geometry.num_bays_y) else geometry.bay_y
             # All gridline beams are PRIMARY beams
             section_tag = primary_section_tag
             section_dims = beam_sizes["primary"]
@@ -1424,7 +1439,6 @@ def build_fem_model(project: ProjectData,
         z = level * geometry.story_height
         for ix in range(geometry.num_bays_x + 1):  # All X gridlines
             x = ix * geometry.bay_x
-            tributary_width = geometry.bay_x / 2 if ix in (0, geometry.num_bays_x) else geometry.bay_x
             # All gridline beams are PRIMARY beams
             section_tag = primary_section_tag
             section_dims = beam_sizes["primary"]
@@ -1567,6 +1581,7 @@ def build_fem_model(project: ProjectData,
                                                 load_pattern=options.dl_load_pattern,
                                             )
                                         )
+
             else:  # secondary_beam_direction == "X"
                 # Secondary beams run along X (internal to Y bays)
                 for iy in range(geometry.num_bays_y):
@@ -1639,6 +1654,7 @@ def build_fem_model(project: ProjectData,
                                                 load_pattern=options.dl_load_pattern,
                                             )
                                         )
+
 
 
     # Core wall elements (ShellMITC4 mesh with PlateFiberSection)
@@ -1942,7 +1958,7 @@ def build_fem_model(project: ProjectData,
                             elevation=z,
                             fcu=project.materials.fcu_beam,
                         )
-                        
+
                         target_size = 0.1 * max(sp_width_x, sp_width_y)
                         if options.slab_elements_per_bay > 1:
                             target_size = target_size / options.slab_elements_per_bay
@@ -2023,10 +2039,12 @@ def build_fem_model(project: ProjectData,
     # Apply diaphragms and lateral loads
     master_by_level: Dict[float, int] = {}
     if options.apply_rigid_diaphragms:
+        floor_elevations = [level * geometry.story_height for level in range(1, geometry.floors + 1)]
         master_by_level = create_floor_rigid_diaphragms(
             model,
             base_elevation=0.0,
             tolerance=options.tolerance,
+            floor_elevations=floor_elevations,
         )
 
     if options.apply_wind_loads:

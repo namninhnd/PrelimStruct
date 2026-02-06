@@ -17,6 +17,7 @@ from src.fem.model_builder import (
     create_floor_rigid_diaphragms,
     build_fem_model,
     ModelBuilderOptions,
+    NUM_SUBDIVISIONS,
     trim_beam_segment_against_polygon,
 )
 
@@ -148,9 +149,23 @@ def test_build_fem_model_basic_frame_counts() -> None:
         ModelBuilderOptions(include_core_wall=False, apply_wind_loads=False, include_slabs=False),
     )
 
-    assert len(model.nodes) == 12
-    assert len(model.elements) == 16
-    assert len(model.uniform_loads) == 8
+    base_grid_nodes = (project.geometry.floors + 1) * (project.geometry.num_bays_x + 1) * (project.geometry.num_bays_y + 1)
+    column_intermediate = (
+        (project.geometry.num_bays_x + 1)
+        * (project.geometry.num_bays_y + 1)
+        * project.geometry.floors
+        * (NUM_SUBDIVISIONS - 1)
+    )
+    beams_per_floor = (project.geometry.num_bays_x + 1) + (project.geometry.num_bays_y + 1)
+    beam_intermediate = project.geometry.floors * beams_per_floor * (NUM_SUBDIVISIONS - 1)
+    expected_nodes = base_grid_nodes + column_intermediate + beam_intermediate
+
+    base_columns = (project.geometry.num_bays_x + 1) * (project.geometry.num_bays_y + 1) * project.geometry.floors
+    base_beams = project.geometry.floors * beams_per_floor
+
+    assert len(model.nodes) == expected_nodes
+    assert len(model.elements) == (base_columns + base_beams) * NUM_SUBDIVISIONS
+    assert len(model.uniform_loads) == base_beams * NUM_SUBDIVISIONS
     base_nodes = [node for node in model.nodes.values() if node.z == 0.0]
     assert base_nodes
     assert all(node.is_fixed for node in base_nodes)
@@ -516,7 +531,7 @@ class TestBuildFEMModelIntegration:
             ),
         )
 
-        # Should have diaphragm for each floor (except base)
+        # One diaphragm per story level (except base)
         assert len(model.diaphragms) == project.geometry.floors
 
     def test_model_validation_passes(self) -> None:
@@ -723,7 +738,7 @@ def test_secondary_beam_subdivision() -> None:
     #   = 3 * 2 * 2 * 2 = 24 secondary beams
     # - NO gridline beams are secondary (all are primary)
     
-    expected = 3 * 2 * 2 * 2  # 24 internal subdivision beams
+    expected = 3 * 2 * 2 * 2 * NUM_SUBDIVISIONS  # subdivided beam elements
     assert secondary_count == expected, \
         f"Expected {expected} secondary beams (subdivision only, gridline are primary), got {secondary_count}"
 
@@ -835,8 +850,9 @@ def test_secondary_beams_trimmed_at_core_wall() -> None:
     
     # The key assertion: secondary beams with core should NOT equal without core
     # because trimming should either reduce beams (if completely inside) or split them
-    assert secondary_without_core == 18, \
-        f"Expected 18 secondary beams without core, got {secondary_without_core}"
+    expected_without_core = 18 * NUM_SUBDIVISIONS
+    assert secondary_without_core == expected_without_core, \
+        f"Expected {expected_without_core} secondary beams without core, got {secondary_without_core}"
     
     # With core, secondary beams passing through the core are handled:
     # - Beams fully inside core: skipped (0 segments returned)

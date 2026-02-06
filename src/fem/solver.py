@@ -134,7 +134,7 @@ class FEMSolver:
         # - analysis: Static
         
         try:
-            ops.constraints('Plain')
+            ops.constraints('Transformation')
             ops.numberer('RCM')
             ops.system('BandGeneral')
             ops.test('NormDispIncr', tolerance, max_iterations)

@@ -10,11 +10,18 @@ renders interactive visualizations without requiring OpenSeesPy to be running.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Dict, Tuple, Optional, Any, Protocol, Set, TYPE_CHECKING
+from typing import List, Dict, Tuple, Optional, Any, Protocol, Set, TYPE_CHECKING, cast
 import numpy as np
 
 if TYPE_CHECKING:
     from src.fem.results_processor import SectionForcesData
+
+go: Any = None
+plotly_colors: Any = None
+make_subplots: Any = None
+opsv: Any = None
+matplotlib: Any = None
+plt: Any = None
 
 try:
     import plotly.graph_objects as go
@@ -23,31 +30,41 @@ try:
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
-    go = None  # type: ignore
-    plotly_colors = None  # type: ignore
+    go = cast(Any, None)
+    plotly_colors = cast(Any, None)
+
+go = cast(Any, go)
+plotly_colors = cast(Any, plotly_colors)
+
+if PLOTLY_AVAILABLE:
+    go = cast(Any, go)
+    plotly_colors = cast(Any, plotly_colors)
+else:
+    go = cast(Any, None)
+    plotly_colors = cast(Any, None)
 
 try:
     import opsvis as opsv
     OPSVIS_AVAILABLE = True
 except Exception:
-    opsv = None  # type: ignore
+    opsv = cast(Any, None)
     OPSVIS_AVAILABLE = False
+
+opsv = cast(Any, opsv)
 
 try:
     import matplotlib
     import matplotlib.pyplot as plt
     MATPLOTLIB_AVAILABLE = True
 except ImportError:
-    matplotlib = None  # type: ignore
-    plt = None  # type: ignore
+    matplotlib = cast(Any, None)
+    plt = cast(Any, None)
     MATPLOTLIB_AVAILABLE = False
 
-try:
-    import vfo
-    VFO_AVAILABLE = True
-except Exception:
-    vfo = None  # type: ignore
-    VFO_AVAILABLE = False
+matplotlib = cast(Any, matplotlib)
+plt = cast(Any, plt)
+
+PlotlyFigure = Any
 
 from src.fem.fem_engine import (
     FEMModel,
@@ -65,7 +82,6 @@ class VisualizationBackend(Enum):
     """Visualization data extraction backend."""
     AUTO = "auto"
     OPSVIS = "opsvis"
-    VFO = "vfo"
     OPENSEES = "opensees"
 
 
@@ -82,15 +98,15 @@ FORCE_DISPLAY_NAMES: Dict[str, str] = {
 def _format_opsvis_value(value: float, value_unit: str) -> str:
     abs_val = abs(value)
     if abs_val >= 1000:
-        return f"{value / 1000.0:.2f} x10^3 {value_unit}"
-    return f"{value:.1f} {value_unit}"
+        return f"{value / 1000.0:.0f} x10^3 {value_unit}"
+    return f"{value:.0f} {value_unit}"
 
 
 def _format_opsvis_label(value: float) -> str:
     abs_val = abs(value)
     if abs_val >= 1000:
-        return f"{value / 1000.0:.2f} x10^3"
-    return f"{value:.1f}"
+        return f"{value / 1000.0:.0f} x10^3"
+    return f"{value:.0f}"
 
 
 def _hide_shell_elements_for_opsvis() -> List[int]:
@@ -109,7 +125,7 @@ def _hide_shell_elements_for_opsvis() -> List[int]:
         and before calling opsvis visualization functions.
     """
     try:
-        import openseespy.opensees as ops
+        ops = _resolve_ops_module(None)
     except ImportError:
         return []
     
@@ -146,6 +162,8 @@ def _prune_elements_for_opsvis() -> Dict[str, int]:
         import openseespy.opensees as ops
     except ImportError:
         return {"import_error": 1}
+
+    ops = cast(Any, ops)
 
     removed = {
         "shell": 0,
@@ -246,6 +264,7 @@ class ModelLike(Protocol):
     surface_loads: List[SurfaceLoad]
     diaphragms: List[RigidDiaphragm]
     omitted_columns: List[Dict[str, float]]
+    sections: Dict[int, Dict[str, Any]]
     _is_built: bool
 
     def get_summary(self) -> Dict[str, Any]:
@@ -302,6 +321,7 @@ class VisualizationConfig:
     show_reactions: bool = False
     section_force_type: Optional[str] = None
     section_force_scale: float = 1.0
+    section_force_font_size: int = 12
     load_pattern: Optional[int] = None
     load_case_label: Optional[str] = None
 
@@ -339,7 +359,7 @@ def _resolve_ops_module(ops_module: Optional[Any]) -> Any:
             "openseespy is required for OpenSees visualization extraction. "
             "Install with: pip install openseespy>=3.5.0"
         ) from exc
-    return ops
+    return cast(Any, ops)
 
 
 def _select_backend(backend: VisualizationBackend) -> VisualizationBackend:
@@ -347,8 +367,6 @@ def _select_backend(backend: VisualizationBackend) -> VisualizationBackend:
     if backend == VisualizationBackend.AUTO:
         if OPSVIS_AVAILABLE:
             return VisualizationBackend.OPSVIS
-        if VFO_AVAILABLE:
-            return VisualizationBackend.VFO
         return VisualizationBackend.OPENSEES
     return backend
 
@@ -527,41 +545,6 @@ def _extract_from_opsvis(ops: Any,
     )
 
 
-def _extract_from_vfo(ops: Any,
-                      config: VisualizationExtractionConfig) -> Optional[VisualizationData]:
-    """Extract visualization data using vfo (if available)."""
-    if not VFO_AVAILABLE or vfo is None:
-        return None
-
-    get_nodes = getattr(vfo, "get_model_nodes", None) or getattr(vfo, "get_nodes", None)
-    get_elements = getattr(vfo, "get_model_elements", None) or getattr(vfo, "get_elements", None)
-
-    if get_nodes is None or get_elements is None:
-        return None
-
-    try:
-        node_data = get_nodes()
-        elem_data = get_elements()
-    except Exception:
-        return None
-
-    fixed_nodes = _resolve_fixed_nodes(ops, config)
-    pinned_nodes = _resolve_pinned_nodes(config)
-
-    node_tags = list(ops.getNodeTags()) if hasattr(ops, "getNodeTags") else []
-    elem_tags = list(ops.getEleTags()) if hasattr(ops, "getEleTags") else []
-
-    nodes = _build_nodes_from_data(node_tags, node_data, fixed_nodes, pinned_nodes)
-    elements = _build_elements_from_data(elem_tags, elem_data, config.default_element_type)
-
-    return VisualizationData(
-        nodes=nodes,
-        elements=elements,
-        source="vfo",
-        _is_built=True,
-    )
-
-
 def extract_visualization_data_from_opensees(
     ops_module: Optional[Any] = None,
     config: Optional[VisualizationExtractionConfig] = None,
@@ -585,12 +568,6 @@ def extract_visualization_data_from_opensees(
             return data
         if not config.allow_fallback:
             raise RuntimeError("opsvis extraction failed and fallback is disabled")
-    elif backend == VisualizationBackend.VFO:
-        data = _extract_from_vfo(ops, config)
-        if data is not None:
-            return data
-        if not config.allow_fallback:
-            raise RuntimeError("vfo extraction failed and fallback is disabled")
 
     return _extract_from_opensees(ops, config)
 
@@ -634,9 +611,38 @@ def _normalize_end_force(force_i: float, force_j: float) -> float:
 
 
 def _display_end_force(force_i: float, force_j: float, force_type: str) -> float:
-    if force_type in {"Vy", "Vz", "My", "Mz", "T"}:
+    if force_type in {"My", "Mz", "T"}:
         return -force_j
+    if force_type in {"Vy", "Vz"}:
+        return force_j
     return _normalize_end_force(force_i, force_j)
+
+
+def _add_force_value_markers(
+    fig: PlotlyFigure,
+    x_vals: List[float],
+    y_vals: List[float],
+    force_values: List[float],
+    display_name: str,
+    unit: str,
+) -> None:
+    if not x_vals or not y_vals or not force_values:
+        return
+    if len(x_vals) != len(y_vals) or len(x_vals) != len(force_values):
+        return
+
+    fig.add_trace(go.Scatter(
+        x=x_vals,
+        y=y_vals,
+        mode='markers',
+        marker=dict(size=6, color='rgba(0,0,0,0.2)'),
+        customdata=force_values,
+        hovertemplate=(
+            f"{display_name}<br>"
+            f"Force: %{{customdata:.0f}} {unit}<extra></extra>"
+        ),
+        showlegend=False,
+    ))
 
 
 def _get_utilization_color(utilization: float, colorscale: str) -> str:
@@ -1038,7 +1044,7 @@ def _apply_opsvis_hatch(ax: Any) -> None:
 
 
 def render_section_forces(
-    fig: "go.Figure",
+    fig: PlotlyFigure,
     model: "ModelLike",
     forces: "SectionForcesData",
     view_direction: str,
@@ -1046,7 +1052,7 @@ def render_section_forces(
     gridline_coord: Optional[float] = None,
     gridline_tol: float = 0.5,
     label_positions: Optional[List[float]] = None,
-    label_font_size: int = 8,
+    label_font_size: int = 12,
 ) -> None:
     """Render section force diagrams on Plotly figure (opsvis-style).
     
@@ -1237,6 +1243,15 @@ def render_section_forces(
                             showlegend=False,
                             hoverinfo='skip'
                         ))
+
+                    _add_force_value_markers(
+                        fig=fig,
+                        x_vals=h_force.tolist(),
+                        y_vals=v_force.tolist(),
+                        force_values=force_values,
+                        display_name=display_name,
+                        unit=forces.unit,
+                    )
                     
                     # Annotations at 0L, 0.5L, 1.0L positions
                     for pos_frac in label_positions:
@@ -1249,7 +1264,7 @@ def render_section_forces(
                         fig.add_annotation(
                             x=h_force[idx],
                             y=v_force[idx],
-                            text=f'{force_at_pos:.1f}',
+                            text=f'{force_at_pos:.0f}',
                             showarrow=False,
                             font=dict(size=label_font_size, color='black'),
                             xanchor='left',
@@ -1316,6 +1331,15 @@ def render_section_forces(
                 showlegend=False,
                 hoverinfo='skip'
             ))
+
+        _add_force_value_markers(
+            fig=fig,
+            x_vals=[h_force[0], h_force[-1]],
+            y_vals=[v_force[0], v_force[-1]],
+            force_values=[force_i, force_j],
+            display_name=display_name,
+            unit=forces.unit,
+        )
         
         # Annotations at 3 points (ends + midpoint)
         for pos_frac in label_positions:
@@ -1329,7 +1353,7 @@ def render_section_forces(
             fig.add_annotation(
                 x=h_force[idx],
                 y=v_force[idx],
-                text=f'{force_at_pos:.1f}',
+                text=f'{force_at_pos:.0f}',
                 showarrow=False,
                 font=dict(size=label_font_size, color='black'),
                 xanchor='left',
@@ -1338,12 +1362,13 @@ def render_section_forces(
 
 
 def render_section_forces_plan(
-    fig: "go.Figure",
+    fig: PlotlyFigure,
     model: "ModelLike",
     forces: "SectionForcesData",
     floor_z: float,
     scale_factor: float = 0.001,
-    tolerance: float = 0.5
+    tolerance: float = 0.5,
+    label_font_size: int = 12,
 ) -> None:
     """Render section force diagrams on Plan View (XY plane).
     
@@ -1502,6 +1527,15 @@ def render_section_forces_plan(
                             showlegend=False,
                             hoverinfo='skip'
                         ))
+
+                    _add_force_value_markers(
+                        fig=fig,
+                        x_vals=x_force.tolist(),
+                        y_vals=y_force.tolist(),
+                        force_values=force_values,
+                        display_name=display_name,
+                        unit=forces.unit,
+                    )
                     
                     # Annotations at 0L, 0.5L, 1.0L positions
                     for pos_frac in [0.0, 0.5, 1.0]:
@@ -1514,9 +1548,9 @@ def render_section_forces_plan(
                         fig.add_annotation(
                             x=x_force[idx],
                             y=y_force[idx],
-                            text=f'{force_at_pos:.1f}',
+                            text=f'{force_at_pos:.0f}',
                             showarrow=False,
-                            font=dict(size=8, color='black'),
+                            font=dict(size=label_font_size, color='black'),
                             xanchor='left',
                             yanchor='bottom'
                         )
@@ -1583,6 +1617,15 @@ def render_section_forces_plan(
                 showlegend=False,
                 hoverinfo='skip'
             ))
+
+        _add_force_value_markers(
+            fig=fig,
+            x_vals=[x_force[0], x_force[-1]],
+            y_vals=[y_force[0], y_force[-1]],
+            force_values=[force_i, force_j],
+            display_name=display_name,
+            unit=forces.unit,
+        )
         
         # Annotations at 3 points (ends + midpoint)
         for pos_frac in [0.0, 0.5, 1.0]:
@@ -1596,9 +1639,9 @@ def render_section_forces_plan(
             fig.add_annotation(
                 x=x_force[idx],
                 y=y_force[idx],
-                text=f'{force_at_pos:.1f}',
+                text=f'{force_at_pos:.0f}',
                 showarrow=False,
-                font=dict(size=8, color='black'),
+                font=dict(size=label_font_size, color='black'),
                 xanchor='left',
                 yanchor='bottom'
             )
@@ -1608,7 +1651,7 @@ def create_plan_view(model: ModelLike,
                      config: Optional[VisualizationConfig] = None,
                      floor_elevation: Optional[float] = None,
                      utilization: Optional[Dict[int, float]] = None,
-                     analysis_result: Optional[Any] = None) -> "go.Figure":
+                     analysis_result: Optional[Any] = None) -> PlotlyFigure:
     """Create plan view (XY) visualization of FEM model.
 
     Args:
@@ -1623,6 +1666,7 @@ def create_plan_view(model: ModelLike,
     """
     _check_plotly()
     config = config or VisualizationConfig()
+    utilization_map = cast(Dict[int, float], utilization or {})
 
     # Determine floor elevation
     floors = _get_floor_elevations(model)
@@ -1644,7 +1688,7 @@ def create_plan_view(model: ModelLike,
         if abs(node.z - target_z) < tolerance
     }
 
-    use_utilization = utilization is not None and len(utilization) > 0
+    use_utilization = len(utilization_map) > 0
 
     # Draw core walls (vertical shell elements intersecting this floor)
     wall_x: List[Optional[float]] = []
@@ -1669,7 +1713,7 @@ def create_plan_view(model: ModelLike,
                 abs(n2.z - target_z) < tolerance):
                 
                 if use_utilization:
-                    util = utilization.get(elem_tag, 0.0)
+                    util = utilization_map.get(elem_tag, 0.0)
                     color = _get_utilization_color(util, config.colorscale)
                     fig.add_trace(go.Scatter(
                         x=[n1.x, n2.x],
@@ -1720,7 +1764,7 @@ def create_plan_view(model: ModelLike,
         if (abs(node_i.z - target_z) < tolerance and
             abs(node_j.z - target_z) < tolerance):
             length = float(np.hypot(node_j.x - node_i.x, node_j.y - node_i.y))
-            util = utilization.get(elem_tag, 0.0) if use_utilization else 0.0
+            util = utilization_map.get(elem_tag, 0.0) if use_utilization else 0.0
             hover_text = (
                 f"Primary Beam {elem_tag}<br>Length: {length:.2f} m<br>Util: {util:.1%}"
                 if use_utilization else f"Primary Beam {elem_tag}<br>Length: {length:.2f} m"
@@ -1826,7 +1870,7 @@ def create_plan_view(model: ModelLike,
         if (abs(node_i.z - target_z) < tolerance and
             abs(node_j.z - target_z) < tolerance):
             length = float(np.hypot(node_j.x - node_i.x, node_j.y - node_i.y))
-            util = utilization.get(elem_tag, 0.0) if use_utilization else 0.0
+            util = utilization_map.get(elem_tag, 0.0) if use_utilization else 0.0
             hover_text = (
                 f"Secondary Beam {elem_tag}<br>Length: {length:.2f} m<br>Util: {util:.1%}"
                 if use_utilization else f"Secondary Beam {elem_tag}<br>Length: {length:.2f} m"
@@ -1999,19 +2043,20 @@ def create_plan_view(model: ModelLike,
 
         # Show column at floor level
         for node in [node_i, node_j]:
-            if abs(node.z - target_z) < tolerance:
-                key = (round(node.x, 4), round(node.y, 4))
-                util = utilization.get(elem_tag, 0.0) if use_utilization else 0.0
-                if key not in column_points:
-                    column_points[key] = {
-                        "x": node.x,
-                        "y": node.y,
-                        "util": util,
-                        "labels": [elem_tag],
-                    }
-                else:
-                    column_points[key]["util"] = max(column_points[key]["util"], util)
-                    column_points[key]["labels"].append(elem_tag)
+            if abs(node.z - target_z) >= tolerance:
+                continue
+            key = (round(node.x, 4), round(node.y, 4))
+            util = utilization_map.get(elem_tag, 0.0) if use_utilization else 0.0
+            if key not in column_points:
+                column_points[key] = {
+                    "x": node.x,
+                    "y": node.y,
+                    "util": util,
+                    "labels": [elem_tag],
+                }
+            else:
+                column_points[key]["util"] = max(column_points[key]["util"], util)
+                column_points[key]["labels"].append(elem_tag)
 
     if column_points:
         col_x: List[float] = []
@@ -2498,7 +2543,8 @@ def create_plan_view(model: ModelLike,
             model=model,
             forces=forces,
             floor_z=target_z,
-            scale_factor=scale
+            scale_factor=scale,
+            label_font_size=config.section_force_font_size,
         )
 
     # Layout
@@ -2543,7 +2589,7 @@ def create_elevation_view(model: ModelLike,
                           utilization: Optional[Dict[int, float]] = None,
                           displaced_nodes: Optional[Dict[int, Tuple[float, float, float]]] = None,
                           reactions: Optional[Dict[int, List[float]]] = None,
-                          analysis_result: Optional[Any] = None) -> "go.Figure":
+                          analysis_result: Optional[Any] = None) -> PlotlyFigure:
     """Create elevation view visualization of FEM model.
 
     Args:
@@ -2563,12 +2609,15 @@ def create_elevation_view(model: ModelLike,
     """
     _check_plotly()
     config = config or VisualizationConfig()
+    utilization = cast(Dict[int, float], utilization or {})
+    displaced_nodes = cast(Dict[int, Tuple[float, float, float]], displaced_nodes or {})
+    reactions = cast(Dict[int, List[float]], reactions or {})
 
     classification = _classify_elements(model)
     view_direction = view_direction.upper()
 
     fig = go.Figure()
-    use_utilization = utilization is not None and len(utilization) > 0
+    use_utilization = len(utilization) > 0
     
     # Gridline filtering tolerance (m)
     gridline_tol = 0.5
@@ -3114,7 +3163,7 @@ def create_elevation_view(model: ModelLike,
             gridline_coord=gridline_coord,
             gridline_tol=gridline_tol,
             label_positions=[0.0, 1.0],
-            label_font_size=7,
+            label_font_size=config.section_force_font_size,
         )
 
     # Layout
@@ -3156,7 +3205,7 @@ def create_3d_view(model: ModelLike,
                    config: Optional[VisualizationConfig] = None,
                    utilization: Optional[Dict[int, float]] = None,
                    displaced_nodes: Optional[Dict[int, Tuple[float, float, float]]] = None,
-                   reactions: Optional[Dict[int, List[float]]] = None) -> "go.Figure":
+                   reactions: Optional[Dict[int, List[float]]] = None) -> PlotlyFigure:
     """Create 3D isometric visualization of FEM model.
 
     Args:
@@ -3171,9 +3220,12 @@ def create_3d_view(model: ModelLike,
     """
     _check_plotly()
     config = config or VisualizationConfig()
+    utilization = cast(Dict[int, float], utilization or {})
+    displaced_nodes = cast(Dict[int, Tuple[float, float, float]], displaced_nodes or {})
+    reactions = cast(Dict[int, List[float]], reactions or {})
 
     classification = _classify_elements(model)
-    use_utilization = utilization is not None and len(utilization) > 0
+    use_utilization = len(utilization) > 0
 
     fig = go.Figure()
 
@@ -3681,7 +3733,7 @@ def create_3d_view(model: ModelLike,
 
 
 def create_model_summary_figure(model: ModelLike,
-                                 config: Optional[VisualizationConfig] = None) -> "go.Figure":
+                                config: Optional[VisualizationConfig] = None) -> PlotlyFigure:
     """Create a multi-panel summary figure with plan, elevation, and 3D views.
 
     Args:
@@ -3797,7 +3849,7 @@ def get_model_statistics(model: ModelLike) -> Dict[str, Any]:
     }
 
 
-def export_plotly_figure_image(fig: "go.Figure",
+def export_plotly_figure_image(fig: PlotlyFigure,
                                format: str = "png",
                                width: int = 1200,
                                height: int = 900,
@@ -3868,6 +3920,8 @@ def create_opsvis_force_diagram(
         import matplotlib.pyplot as plt
         import logging
         logger = logging.getLogger(__name__)
+
+        ops = cast(Any, ops)
         
         existing_tags = ops.getEleTags()
         logger.info(f"opsvis: existing elements = {len(existing_tags) if existing_tags else 0}")
@@ -3880,7 +3934,7 @@ def create_opsvis_force_diagram(
             model.build_openseespy_model(ndm=3, ndf=6, active_pattern=load_pattern)
             
             if run_analysis:
-                ops.constraints('Plain')
+                ops.constraints('Transformation')
                 ops.numberer('RCM')
                 ops.system('BandGeneral')
                 ops.test('NormDispIncr', 1.0e-6, 100)
