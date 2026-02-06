@@ -189,6 +189,7 @@ class FEMSolver:
             result.node_displacements[node_tag] = list(disp)
         
         # Extract reactions for fixed nodes
+        ops.reactions()
         for node_tag in node_tags:
             reaction = ops.nodeReaction(node_tag)
             # Only store if non-zero (i.e., node has restraints)

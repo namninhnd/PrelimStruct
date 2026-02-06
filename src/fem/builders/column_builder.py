@@ -56,7 +56,7 @@ class ColumnBuilder:
         """Create all columns for the building with subdivision.
         
         Creates columns connecting grid nodes between floor levels.
-        Each column is subdivided into 6 sub-elements (7 nodes) for accurate
+        Each column is subdivided into 4 sub-elements (5 nodes) for accurate
         force diagram visualization.
         
         Columns in the omit_column_ids set are skipped and tracked as ghost columns.
@@ -75,7 +75,7 @@ class ColumnBuilder:
             omit_column_ids = set()
         
         omitted_columns: List[str] = []
-        NUM_SUBDIVISIONS = 6  # 6 sub-elements, 7 nodes
+        NUM_SUBDIVISIONS = 4  # 4 sub-elements, 5 nodes
         
         for level in range(self.geometry.floors):
             for ix in range(self.geometry.num_bays_x + 1):
@@ -100,12 +100,12 @@ class ColumnBuilder:
                     start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
                     end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
                     
-                    # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+                    # Create 3 intermediate nodes + reuse start/end (total 5 nodes)
                     node_tags = [start_node]
                     
                     if registry:
                         for i in range(1, NUM_SUBDIVISIONS):
-                            t = i / NUM_SUBDIVISIONS  # 1/6 to 5/6
+                            t = i / NUM_SUBDIVISIONS  # 1/4 to 3/4
                             inter_x = start_x + t * (end_x - start_x)
                             inter_y = start_y + t * (end_y - start_y)
                             inter_z = start_z + t * (end_z - start_z)  # Z is vertical for columns

@@ -1,0 +1,58 @@
+PrelimStruct v3.5 Performance Benchmark
+Testing: [10, 20, 30] floors
+Target: <60.0s for 30-floor building
+
+
+============================================================
+Benchmarking 10-floor building...
+============================================================
+  -> Building FEM model...
+  -> Running linear static analysis...
+
+  OK Analysis completed
+    - Wall time: 0.10s
+    - Peak memory: 1.75 MB
+    - Status: Analysis completed successfully
+    - Nodes: 365
+    - Elements: 610
+
+============================================================
+Benchmarking 20-floor building...
+============================================================
+  -> Building FEM model...
+  -> Running linear static analysis...
+
+  OK Analysis completed
+    - Wall time: 0.18s
+    - Peak memory: 3.18 MB
+    - Status: Analysis completed successfully
+    - Nodes: 705
+    - Elements: 1220
+
+============================================================
+Benchmarking 30-floor building...
+============================================================
+  -> Building FEM model...
+  -> Running linear static analysis...
+
+  OK Analysis completed
+    - Wall time: 0.29s
+    - Peak memory: 4.75 MB
+    - Status: Analysis completed successfully
+    - Nodes: 1045
+    - Elements: 1830
+
+============================================================
+BENCHMARK SUMMARY
+============================================================
+Floors     Time (s)        Memory (MB)     Status    
+------------------------------------------------------------
+10         0.10            1.75            OK PASS   
+20         0.18            3.18            OK PASS   
+30         0.29            4.75            OK PASS   
+============================================================
+
+VERIFICATION:
+  OK PASS: 30-floor building completed in 0.29s (<60.0s target)
+============================================================
+

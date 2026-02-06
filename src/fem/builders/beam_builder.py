@@ -115,9 +115,9 @@ class BeamBuilder:
         section_dims: Optional[Tuple[float, float]] = None,
         geometry_override: Optional[Dict] = None,
     ) -> int:
-        """Create a subdivided beam element (6 sub-elements, 7 nodes) and add to model.
+        """Create a subdivided beam element (4 sub-elements, 5 nodes) and add to model.
         
-        This method creates 6 sub-elements between start_node and end_node to enable
+        This method creates 4 sub-elements between start_node and end_node to enable
         accurate parabolic force diagram visualization using real analysis forces.
         
         Args:
@@ -131,7 +131,7 @@ class BeamBuilder:
         Returns:
             Element tag of first created sub-element (parent beam ID)
         """
-        NUM_SUBDIVISIONS = 6
+        NUM_SUBDIVISIONS = 4
         
         # Get start and end node coordinates
         start_node_obj = self.model.nodes[start_node]
@@ -143,11 +143,11 @@ class BeamBuilder:
         # Determine floor level from start node elevation
         floor_level = int(round(start_z / self.geometry.story_height))
         
-        # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+        # Create 3 intermediate nodes + reuse start/end (total 5 nodes)
         node_tags = [start_node]
         
         for i in range(1, NUM_SUBDIVISIONS):
-            t = i / NUM_SUBDIVISIONS  # 1/6, 2/6, 3/6, 4/6, 5/6
+            t = i / NUM_SUBDIVISIONS  # 1/4, 2/4, 3/4
             inter_x = start_x + t * (end_x - start_x)
             inter_y = start_y + t * (end_y - start_y)
             inter_z = start_z + t * (end_z - start_z)  # Same elevation for horizontal beams
@@ -165,7 +165,7 @@ class BeamBuilder:
         # Default geometry
         geom_base = geometry_override if geometry_override else {"local_y": (0.0, 0.0, 1.0)}
         
-        # Create 6 sub-elements connecting the 7 nodes sequentially
+        # Create 4 sub-elements connecting the 5 nodes sequentially
         for i in range(NUM_SUBDIVISIONS):
             current_tag = self.element_tag
             

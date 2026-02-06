@@ -17,10 +17,12 @@ class PatchedOps:
         self.reset()
         self.analyze_result = 0
         self.displacements: Dict[int, List[float]] = {}
-        self.reactions: Dict[int, List[float]] = {}
+        self._reaction_data: Dict[int, List[float]] = {}
         self.element_forces: Dict[int, List[float]] = {}
         self.element_responses: Dict[Tuple[int, str], Any] = {}
         self.eigenvalues: List[float] = []
+        self.reactions_called = False
+        self.strict_reaction_mode = False
 
     def reset(self) -> None:
         self.nodes: Dict[int, Tuple[float, ...]] = {}
@@ -42,6 +44,7 @@ class PatchedOps:
         self.integrator_args: List[Tuple[Any, ...]] = []
         self.analysis_args: List[Tuple[Any, ...]] = []
         self.wiped = False
+        self.reactions_called = False
 
     # Model level commands
     def wipe(self) -> None:
@@ -121,9 +124,8 @@ class PatchedOps:
         return self.analyze_result
 
     def reactions(self) -> None:
-        pass
+        self.reactions_called = True
 
-    # Result extraction
     def getNodeTags(self) -> List[int]:
         return sorted(self.nodes.keys())
 
@@ -135,7 +137,9 @@ class PatchedOps:
         return self.displacements.get(node_tag, [0.0] * 6)
 
     def nodeReaction(self, node_tag: int) -> List[float]:
-        return self.reactions.get(node_tag, [0.0] * 6)
+        if self.strict_reaction_mode and not self.reactions_called:
+            return [0.0] * 6
+        return self._reaction_data.get(node_tag, [0.0] * 6)
 
     def getEleTags(self) -> List[int]:
         return sorted(self.elements.keys())

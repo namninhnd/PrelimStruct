@@ -811,18 +811,28 @@ def _extract_beam_sizes(project: ProjectData) -> Dict[str, Tuple[float, float]]:
 
 
 def _extract_column_dims(project: ProjectData) -> Tuple[float, float]:
-    """Get column dimensions (width, depth) in mm."""
+    """Get column dimensions (width, depth) in mm.
+    
+    Prioritizes explicit width/depth over dimension field.
+    Falls back to dimension only if width/depth are not set.
+    """
     width = MIN_COLUMN_SIZE
     depth = MIN_COLUMN_SIZE
 
     if project.column_result:
-        if project.column_result.width > 0:
+        has_explicit_width = project.column_result.width > 0
+        has_explicit_depth = project.column_result.depth > 0
+        
+        if has_explicit_width:
             width = max(width, project.column_result.width)
-        if project.column_result.depth > 0:
+        if has_explicit_depth:
             depth = max(depth, project.column_result.depth)
+        
         if project.column_result.dimension > 0:
-            width = max(width, project.column_result.dimension)
-            depth = max(depth, project.column_result.dimension)
+            if not has_explicit_width:
+                width = max(width, project.column_result.dimension)
+            if not has_explicit_depth:
+                depth = max(depth, project.column_result.dimension)
 
     return width, depth
 
@@ -1064,7 +1074,7 @@ def get_column_omission_suggestions(
 
 
 # Number of sub-elements per beam (consistent with beam_builder.py)
-NUM_SUBDIVISIONS = 6
+NUM_SUBDIVISIONS = 4
 
 
 def _create_subdivided_beam(
@@ -1078,7 +1088,7 @@ def _create_subdivided_beam(
     element_tag: int,
     element_type: ElementType = ElementType.ELASTIC_BEAM,
 ) -> Tuple[int, int]:
-    """Create a beam with 6 sub-elements and 5 intermediate nodes.
+    """Create a beam with 4 sub-elements and 3 intermediate nodes.
     
     Args:
         model: FEM model to add elements to
@@ -1101,11 +1111,11 @@ def _create_subdivided_beam(
     start_x, start_y, start_z = start_node_obj.x, start_node_obj.y, start_node_obj.z
     end_x, end_y, end_z = end_node_obj.x, end_node_obj.y, end_node_obj.z
     
-    # Create 5 intermediate nodes + reuse start/end (total 7 nodes)
+    # Create 3 intermediate nodes + reuse start/end (total 5 nodes)
     node_tags = [start_node]
     
     for i in range(1, NUM_SUBDIVISIONS):
-        t = i / NUM_SUBDIVISIONS  # 1/6, 2/6, 3/6, 4/6, 5/6
+        t = i / NUM_SUBDIVISIONS  # 1/4, 2/4, 3/4
         inter_x = start_x + t * (end_x - start_x)
         inter_y = start_y + t * (end_y - start_y)
         inter_z = start_z + t * (end_z - start_z)
@@ -1118,7 +1128,7 @@ def _create_subdivided_beam(
     # Track parent beam ID for logical grouping
     parent_beam_id = element_tag
     
-    # Create 6 sub-elements connecting the 7 nodes sequentially
+    # Create 4 sub-elements connecting the 5 nodes sequentially
     for i in range(NUM_SUBDIVISIONS):
         current_tag = element_tag
         
@@ -1959,31 +1969,19 @@ def build_fem_model(project: ProjectData,
                             fcu=project.materials.fcu_beam,
                         )
 
-                        target_size = 0.1 * max(sp_width_x, sp_width_y)
-                        if options.slab_elements_per_bay > 1:
-                            target_size = target_size / options.slab_elements_per_bay
-
-                        base_x = max(1, int(round(sp_width_x / target_size)))
-                        base_y = max(1, int(round(sp_width_y / target_size)))
                         beam_div = NUM_SUBDIVISIONS
                         sec_div = options.num_secondary_beams + 1 if options.num_secondary_beams > 0 else 1
-
-                        def _snap_divisions(base: int, divisor: int) -> int:
-                            if divisor <= 1:
-                                return max(1, base)
-                            snapped = int(round(base / divisor)) * divisor
-                            if snapped < divisor:
-                                snapped = divisor
-                            return snapped
-
+                        refinement = max(1, options.slab_elements_per_bay)
+                        
                         if options.secondary_beam_direction == "Y":
-                            align_x = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
-                            elements_along_x = _snap_divisions(base_x, align_x)
-                            elements_along_y = _snap_divisions(base_y, beam_div)
+                            elements_along_x = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                            elements_along_y = beam_div
                         else:
-                            align_y = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
-                            elements_along_x = _snap_divisions(base_x, beam_div)
-                            elements_along_y = _snap_divisions(base_y, align_y)
+                            elements_along_x = beam_div
+                            elements_along_y = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                        
+                        elements_along_x *= refinement
+                        elements_along_y *= refinement
 
                         mesh_result = slab_generator.generate_mesh(
                             slab=slab,
