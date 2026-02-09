@@ -76,7 +76,7 @@ from src.fem.fem_engine import (
     SurfaceLoad,
     RigidDiaphragm,
 )
-from src.fem.force_normalization import normalize_end_force as _normalize_end_force_shared
+from src.fem.force_normalization import normalize_end_force as _normalize_end_force_shared, normalize_i_end_force as _normalize_i_end_shared
 
 
 class VisualizationBackend(Enum):
@@ -88,10 +88,10 @@ class VisualizationBackend(Enum):
 
 FORCE_DISPLAY_NAMES: Dict[str, str] = {
     "N": "N (Axial)",
-    "Vy": "V-major",
-    "Vz": "V-minor",
-    "My": "M-major",
-    "Mz": "M-minor",
+    "Vy": "Vy (Major Shear)",
+    "Vz": "Vz (Minor Shear)",
+    "My": "My (Minor Moment)",
+    "Mz": "Mz (Major Moment)",
     "T": "T (Torsion)",
 }
 
@@ -325,6 +325,7 @@ class VisualizationConfig:
     section_force_font_size: int = 12
     load_pattern: Optional[int] = None
     load_case_label: Optional[str] = None
+    show_local_axes: bool = False
 
 
 def build_visualization_data_from_fem_model(model: FEMModel) -> VisualizationData:
@@ -614,9 +615,11 @@ def _display_end_force(force_i: float, force_j: float, force_type: str) -> float
 
 
 def _display_node_force(force_i: float, force_j: float, force_type: str, at_j_end: bool = False) -> float:
-    value = _display_end_force(force_i, force_j, force_type) if at_j_end else force_i
+    if at_j_end:
+        value = _display_end_force(force_i, force_j, force_type)
+    else:
+        value = _normalize_i_end_shared(force_i, force_type)
     if force_type == "N":
-        # Display compression as positive so axial accumulation increases downward.
         return -value
     return value
 
@@ -778,6 +781,68 @@ def _get_floor_elevations(model: ModelLike, tolerance: float = 0.01) -> List[flo
             _add_level(node.z)
 
     return sorted(elevations)
+
+
+def _draw_local_axes(fig: Any, model: "ModelLike", arrow_frac: float = 0.10) -> None:
+    axis_colors = {'x': 'red', 'y': 'green', 'z': 'blue'}
+    axis_labels = {'x': 'local-x', 'y': 'local-y', 'z': 'local-z'}
+    shown_legend = {'x': False, 'y': False, 'z': False}
+
+    for elem in model.elements.values():
+        if elem.element_type not in (
+            ElementType.BEAM_COLUMN, ElementType.ELASTIC_BEAM,
+            ElementType.SECONDARY_BEAM, ElementType.COUPLING_BEAM,
+        ):
+            continue
+        if len(elem.node_tags) < 2:
+            continue
+        ni = model.nodes.get(elem.node_tags[0])
+        nj = model.nodes.get(elem.node_tags[1])
+        if ni is None or nj is None:
+            continue
+
+        dx = nj.x - ni.x
+        dy = nj.y - ni.y
+        dz = nj.z - ni.z
+        length = (dx**2 + dy**2 + dz**2) ** 0.5
+        if length < 1e-9:
+            continue
+        local_x = np.array([dx, dy, dz]) / length
+
+        vecxz_raw = elem.geometry.get('vecxz') if elem.geometry else None
+        if vecxz_raw is None:
+            continue
+        vecxz = np.array(vecxz_raw, dtype=float)
+        vecxz_norm = np.linalg.norm(vecxz)
+        if vecxz_norm < 1e-9:
+            continue
+        vecxz = vecxz / vecxz_norm
+
+        local_y = np.cross(vecxz, local_x)
+        ly_norm = np.linalg.norm(local_y)
+        if ly_norm < 1e-9:
+            continue
+        local_y = local_y / ly_norm
+        local_z = np.cross(local_x, local_y)
+
+        mid = np.array([(ni.x + nj.x) / 2, (ni.y + nj.y) / 2, (ni.z + nj.z) / 2])
+        arrow_len = length * arrow_frac
+
+        for axis_key, direction in [('x', local_x), ('y', local_y), ('z', local_z)]:
+            tip = mid + direction * arrow_len
+            show = not shown_legend[axis_key]
+            fig.add_trace(go.Scatter3d(
+                x=[mid[0], tip[0]],
+                y=[mid[1], tip[1]],
+                z=[mid[2], tip[2]],
+                mode='lines',
+                line=dict(color=axis_colors[axis_key], width=3),
+                name=axis_labels[axis_key],
+                legendgroup=axis_labels[axis_key],
+                showlegend=show,
+                hoverinfo='skip',
+            ))
+            shown_legend[axis_key] = True
 
 
 def calculate_auto_scale_factor(
@@ -2580,6 +2645,15 @@ def create_plan_view(model: ModelLike,
             label_font_size=config.section_force_font_size,
         )
 
+        fig.add_annotation(
+            text="Convention: Mz = Major axis (M33), My = Minor axis (M22)<br>Positive Mz = sagging",
+            xref="paper", yref="paper",
+            x=0.01, y=0.01,
+            showarrow=False,
+            font=dict(size=9, color="gray"),
+            align="left",
+        )
+
     # Layout
     fig.update_layout(
         title=f"Plan View (Floor Z = {target_z:.2f} m)",
@@ -3199,6 +3273,15 @@ def create_elevation_view(model: ModelLike,
             label_font_size=config.section_force_font_size,
         )
 
+        fig.add_annotation(
+            text="Convention: Mz = Major axis (M33), My = Minor axis (M22)<br>Positive Mz = sagging",
+            xref="paper", yref="paper",
+            x=0.01, y=0.01,
+            showarrow=False,
+            font=dict(size=9, color="gray"),
+            align="left",
+        )
+
     # Layout
     fig.update_layout(
         title=f"Elevation View ({view_direction} Direction)",
@@ -3762,6 +3845,9 @@ def create_3d_view(model: ModelLike,
             hoverinfo='none',
         ))
 
+    if config.show_local_axes:
+        _draw_local_axes(fig, model)
+
     return fig
 
 
@@ -4006,6 +4092,12 @@ def create_opsvis_force_diagram(
         ax_returned.set_title(f"{title_base} [{unit}] (min: {min_text}, max: {max_text})")
 
         _apply_opsvis_hatch(ax_returned)
+
+        ax_returned.annotate(
+            "Convention: Mz = Major axis (M33), My = Minor axis (M22)\nPositive Mz = sagging",
+            xy=(0.01, 0.01), xycoords='figure fraction',
+            fontsize=7, color='gray', ha='left', va='bottom',
+        )
 
         if forces is not None and model is not None:
             _annotate_opsvis_end_values(

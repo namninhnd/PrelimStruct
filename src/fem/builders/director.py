@@ -152,6 +152,8 @@ class FEMModelDirector:
             height=self.beam_sizes["secondary"][1],
             section_tag=2,
         )
+        # Column section mapping uses width=b (local_z) and depth=h (local_y)
+        # so Iz=b*h^3/12 remains the major-axis stiffness (Mz convention).
         column_section = get_elastic_beam_section(
             column_concrete,
             width=self.column_width,

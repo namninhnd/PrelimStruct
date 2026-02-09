@@ -186,7 +186,7 @@ class TestColumnForcesTableExtraction:
         expected_cols = [
             "Load Case", "Column ID", "Floor", "Node", "Position",
             "X (m)", "Y (m)", "Z (m)",
-            "N (kN)", "Vy (kN)", "Vz (kN)", "My (kNm)", "Mz (kNm)", "T (kNm)"
+            "N (kN)", "Vy (kN)", "Vz (kN)", "My-minor (kNm)", "Mz-major (kNm)", "T (kNm)"
         ]
         
         for col in expected_cols:
@@ -213,7 +213,7 @@ class TestColumnForcesTableNormalization:
     def test_j_end_forces_normalized_correctly(self, mock_column_model, mock_analysis_result):
         """GIVEN column forces at j-end
         WHEN extracting forces
-        THEN Vy, Vz, My, Mz, T should be negated (consistent with beam table)"""
+        THEN Vy, Vz should be negated and My, Mz, T should remain raw"""
         from src.ui.components.column_forces_table import ColumnForcesTable
         
         table = ColumnForcesTable(
@@ -229,10 +229,8 @@ class TestColumnForcesTableNormalization:
         # Last row should be the j-end of the last sub-element (node 5)
         last_row = df.iloc[-1]
         
-        # My_j from mock is -500 N-m (= -0.5 kNm)
-        # After normalization: -(-500)/1000 = 0.5 kNm
-        assert abs(last_row["My (kNm)"] - 0.5) < 0.01, \
-            f"Expected My ~0.5 kNm after normalization, got {last_row['My (kNm)']}"
+        assert abs(last_row["My-minor (kNm)"] - (-0.5)) < 0.01, \
+            f"Expected My ~-0.5 kNm after normalization, got {last_row['My-minor (kNm)']}"
 
 
 class TestColumnForcesTableFloorMethods:

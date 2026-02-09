@@ -1,5 +1,5 @@
 {
-  "actual_sum_Fz_kN": 336.13999999998657,
+  "actual_sum_Fz_kN": 336.13999999999623,
   "expected_sum_Fz_kN": 336.14,
   "group_averages": null,
   "input_spec": {
@@ -12,29 +12,29 @@
   "load_case": "DL",
   "reactions": [
     {
-      "Fz_kN": 84.03499999999728,
+      "Fz_kN": 84.03499999999882,
       "node_tag": 1,
       "x": 0.0,
       "y": 0.0
     },
     {
-      "Fz_kN": 84.03499999999858,
+      "Fz_kN": 84.03499999999744,
       "node_tag": 2,
       "x": 0.0,
       "y": 6.0
     },
     {
-      "Fz_kN": 84.03499999999345,
+      "Fz_kN": 84.03500000000079,
       "node_tag": 3,
       "x": 6.0,
       "y": 0.0
     },
     {
-      "Fz_kN": 84.03499999999725,
+      "Fz_kN": 84.03499999999914,
       "node_tag": 4,
       "x": 6.0,
       "y": 6.0
     }
   ],
-  "relative_error_percent": 3.990910588192626e-12
+  "relative_error_percent": 1.1161021136470902e-12
 }

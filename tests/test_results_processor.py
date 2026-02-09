@@ -31,10 +31,14 @@ class TestElementForceEnvelope:
         assert envelope.element_id == 100
         assert isinstance(envelope.N_max, EnvelopeValue)
         assert isinstance(envelope.N_min, EnvelopeValue)
-        assert isinstance(envelope.V_max, EnvelopeValue)
-        assert isinstance(envelope.V_min, EnvelopeValue)
-        assert isinstance(envelope.M_max, EnvelopeValue)
-        assert isinstance(envelope.M_min, EnvelopeValue)
+        assert isinstance(envelope.Vy_max, EnvelopeValue)
+        assert isinstance(envelope.Vy_min, EnvelopeValue)
+        assert isinstance(envelope.Vz_max, EnvelopeValue)
+        assert isinstance(envelope.Vz_min, EnvelopeValue)
+        assert isinstance(envelope.Mz_max, EnvelopeValue)
+        assert isinstance(envelope.Mz_min, EnvelopeValue)
+        assert isinstance(envelope.My_max, EnvelopeValue)
+        assert isinstance(envelope.My_min, EnvelopeValue)
 
         # Check default EnvelopeValue fields
         assert envelope.N_max.max_value == 0.0
@@ -64,8 +68,8 @@ class TestElementForceEnvelope:
         assert envelope.N_max.governing_min_location == 100
 
         # Other fields should still have defaults
-        assert envelope.V_max.max_value == 0.0
-        assert envelope.M_min.max_value == 0.0
+        assert envelope.Vy_max.max_value == 0.0
+        assert envelope.Mz_min.max_value == 0.0
 
 
 class TestDisplacementEnvelope:
@@ -294,10 +298,12 @@ class TestResultsProcessor:
         assert envelope.element_id == 1
         # Axial force: max(abs(N_i), abs(N_j)) = max(100, 100) = 100
         assert envelope.N_max.max_value == 100.0
-        # Shear force: max(abs(Vy_i), abs(Vy_j), abs(Vz_i), abs(Vz_j)) = 50
-        assert envelope.V_max.max_value == 50.0
-        # Moment: max(abs(My_i), abs(My_j), abs(Mz_i), abs(Mz_j)) = 200
-        assert envelope.M_max.max_value == 200.0
+        # Shear envelopes: Vy=50, Vz=0
+        assert envelope.Vy_max.max_value == 50.0
+        assert envelope.Vz_max.max_value == 0.0
+        # Moment envelopes: My=200, Mz=0
+        assert envelope.My_max.max_value == 200.0
+        assert envelope.Mz_max.max_value == 0.0
 
     def test_element_force_envelope_2d_format(self, sample_load_case_2d):
         """Test element force envelope with 2D force format."""
@@ -310,10 +316,11 @@ class TestResultsProcessor:
         assert envelope.element_id == 2
         # No axial force in this test case (testing V_i branch)
         assert envelope.N_max.max_value == 0.0
-        # Shear force: max(abs(V_i), abs(V_j)) = 75
-        assert envelope.V_max.max_value == 75.0
-        # Moment: max(abs(M_i), abs(M_j)) = 300
-        assert envelope.M_max.max_value == 300.0
+        # 2D fallback maps V->Vy and M->Mz
+        assert envelope.Vy_max.max_value == 75.0
+        assert envelope.Vz_max.max_value == 0.0
+        assert envelope.Mz_max.max_value == 300.0
+        assert envelope.My_max.max_value == 0.0
 
     def test_element_force_envelope_max_tracking(self):
         """Test that maximum values are tracked correctly across multiple load cases."""
@@ -356,8 +363,8 @@ class TestResultsProcessor:
         envelope = processor.element_force_envelopes[1]
         # Should track maximum from lc2
         assert envelope.N_max.max_value == 200.0
-        assert envelope.V_max.max_value == 100.0
-        assert envelope.M_max.max_value == 400.0
+        assert envelope.Vy_max.max_value == 100.0
+        assert envelope.My_max.max_value == 400.0
 
     def test_element_force_envelope_governing_case(self):
         """Test that governing load case is tracked correctly."""
@@ -398,10 +405,10 @@ class TestResultsProcessor:
         envelope = processor.element_force_envelopes[1]
         # N_max governed by ULS_GRAVITY_1
         assert envelope.N_max.governing_max_case == LoadCombination.ULS_GRAVITY_1
-        # V_max governed by ULS_WIND_1
-        assert envelope.V_max.governing_max_case == LoadCombination.ULS_WIND_1
-        # M_max governed by ULS_WIND_1
-        assert envelope.M_max.governing_max_case == LoadCombination.ULS_WIND_1
+        # Vy_max governed by ULS_WIND_1
+        assert envelope.Vy_max.governing_max_case == LoadCombination.ULS_WIND_1
+        # My_max governed by ULS_WIND_1
+        assert envelope.My_max.governing_max_case == LoadCombination.ULS_WIND_1
 
     def test_displacement_envelope_update(self, sample_load_case_with_displacements):
         """Test displacement envelope updates with ux, uy, uz tracking."""
@@ -658,16 +665,16 @@ class TestResultsProcessor:
 
         # Add element force envelopes with different moments
         env1 = ElementForceEnvelope(element_id=1)
-        env1.M_max.max_value = 100.0
-        env1.M_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
+        env1.Mz_max.max_value = 100.0
+        env1.Mz_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
 
         env2 = ElementForceEnvelope(element_id=2)
-        env2.M_max.max_value = 300.0  # Highest
-        env2.M_max.governing_max_case = LoadCombination.ULS_WIND_1
+        env2.Mz_max.max_value = 300.0  # Highest
+        env2.Mz_max.governing_max_case = LoadCombination.ULS_WIND_1
 
         env3 = ElementForceEnvelope(element_id=3)
-        env3.M_max.max_value = 200.0
-        env3.M_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
+        env3.Mz_max.max_value = 200.0
+        env3.Mz_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
 
         processor.element_force_envelopes = {1: env1, 2: env2, 3: env3}
 
@@ -684,16 +691,16 @@ class TestResultsProcessor:
         processor = ResultsProcessor()
 
         env1 = ElementForceEnvelope(element_id=1)
-        env1.V_max.max_value = 150.0
-        env1.V_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
+        env1.Vy_max.max_value = 150.0
+        env1.Vy_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
 
         env2 = ElementForceEnvelope(element_id=2)
-        env2.V_max.max_value = 50.0
-        env2.V_max.governing_max_case = LoadCombination.ULS_WIND_1
+        env2.Vy_max.max_value = 50.0
+        env2.Vy_max.governing_max_case = LoadCombination.ULS_WIND_1
 
         env3 = ElementForceEnvelope(element_id=3)
-        env3.V_max.max_value = 100.0
-        env3.V_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
+        env3.Vy_max.max_value = 100.0
+        env3.Vy_max.governing_max_case = LoadCombination.ULS_GRAVITY_1
 
         processor.element_force_envelopes = {1: env1, 2: env2, 3: env3}
 
@@ -736,7 +743,7 @@ class TestResultsProcessor:
         # Create 5 elements
         for i in range(1, 6):
             env = ElementForceEnvelope(element_id=i)
-            env.M_max.max_value = float(i * 100)
+            env.Mz_max.max_value = float(i * 100)
             processor.element_force_envelopes[i] = env
 
         # Request only 2 elements
@@ -751,7 +758,7 @@ class TestResultsProcessor:
         processor = ResultsProcessor()
 
         env1 = ElementForceEnvelope(element_id=1)
-        env1.M_max.max_value = 100.0
+        env1.Mz_max.max_value = 100.0
         processor.element_force_envelopes[1] = env1
 
         # Invalid criterion should skip the element (returns empty list)
@@ -781,8 +788,10 @@ class TestResultsProcessor:
 
         # Add element force envelope
         env1 = ElementForceEnvelope(element_id=1)
-        env1.M_max.max_value = 200e6  # 200 kN-m (in N-mm)
-        env1.V_max.max_value = 150e3  # 150 kN (in N)
+        env1.Mz_max.max_value = 200e6  # 200 kN-m (in N-mm)
+        env1.My_max.max_value = 80e6   # 80 kN-m (in N-mm)
+        env1.Vy_max.max_value = 150e3  # 150 kN (in N)
+        env1.Vz_max.max_value = 40e3   # 40 kN (in N)
         env1.N_max.max_value = 500e3  # 500 kN (in N)
         processor.element_force_envelopes[1] = env1
 
@@ -803,8 +812,10 @@ class TestResultsProcessor:
 
         # Check element forces section
         assert "Total elements enveloped: 1" in summary
-        assert "Maximum moment: 200.00 kN-m" in summary
-        assert "Maximum shear: 150.00 kN" in summary
+        assert "Maximum Mz (major): 200.00 kN-m" in summary
+        assert "Maximum My (minor): 80.00 kN-m" in summary
+        assert "Maximum Vy (major shear): 150.00 kN" in summary
+        assert "Maximum Vz (minor shear): 40.00 kN" in summary
         assert "Maximum axial: 500.00 kN" in summary
 
         # Check displacement section
@@ -818,4 +829,3 @@ class TestResultsProcessor:
         assert "Maximum vertical reaction: 1000.00 kN" in summary
         assert "Minimum vertical reaction: -50.00 kN" in summary
         assert "WARNING: Uplift detected (-50.00 kN)" in summary
-

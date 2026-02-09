@@ -122,8 +122,13 @@ class ColumnBuilder:
                     if registry:
                         for i in range(NUM_SUBDIVISIONS):
                             current_tag = self.element_tag
-                            
-                            geom: Dict[str, Any] = {"local_y": (0.0, 1.0, 0.0)}
+
+                            # Column local axis convention (ETABS-compatible):
+                            # local_x = vertical column axis (bottom -> top),
+                            # local_y = global X (depth h), local_z = global Y (width b).
+                            # vecxz=(0,1,0) enforces this orientation for vertical columns.
+                            # Iz = b*h^3/12 -> Mz (major-axis), Iy = h*b^3/12 -> My (minor-axis).
+                            geom: Dict[str, Any] = {"vecxz": (0.0, 1.0, 0.0)}
                             geom["parent_column_id"] = parent_column_id
                             geom["sub_element_index"] = i
                             
@@ -140,6 +145,8 @@ class ColumnBuilder:
                             
                             self.element_tag += 1
                     else:
+                        # Same column axis convention as subdivided path:
+                        # vecxz=(0,1,0) => local_y=global X (depth h), local_z=global Y (width b).
                         self.model.add_element(
                             Element(
                                 tag=self.element_tag,
@@ -147,7 +154,7 @@ class ColumnBuilder:
                                 node_tags=[start_node, end_node],
                                 material_tag=column_material_tag,
                                 section_tag=column_section_tag,
-                                geometry={"local_y": (0.0, 1.0, 0.0)},
+                                geometry={"vecxz": (0.0, 1.0, 0.0)},
                             )
                         )
                         self.element_tag += 1

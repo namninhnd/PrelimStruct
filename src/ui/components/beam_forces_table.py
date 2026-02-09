@@ -112,9 +112,9 @@ class BeamForcesTable:
                         'N_i': n_i,
                         'Vy_i': forces.get('Vy_i', forces.get('V_i', 0)) / 1000.0,
                         'Vz_i': forces.get('Vz_i', 0) / 1000.0,
-                        'My_i': forces.get('My_i', forces.get('M_i', 0)) / 1000.0,
-                        'Mz_i': forces.get('Mz_i', 0) / 1000.0,
-                        'T_i': forces.get('T_i', 0) / 1000.0,
+                        'My_i': -forces.get('My_i', forces.get('M_i', 0)) / 1000.0,
+                        'Mz_i': -forces.get('Mz_i', 0) / 1000.0,
+                        'T_i': -forces.get('T_i', 0) / 1000.0,
                     })
             
             if sub_elements:
@@ -180,8 +180,8 @@ class BeamForcesTable:
                         'N (kN)': forces['N_i'],
                         'Vy (kN)': forces['Vy_i'],
                         'Vz (kN)': forces['Vz_i'],
-                        'My (kNm)': forces['My_i'],
-                        'Mz (kNm)': forces['Mz_i'],
+                        'My-minor (kNm)': forces['My_i'],
+                        'Mz-major (kNm)': forces['Mz_i'],
                         'T (kNm)': forces['T_i'],
                     })
         
@@ -263,15 +263,15 @@ class BeamForcesTable:
             st.info("No forces found for selection.")
             return
         
-        force_columns = ['N (kN)', 'Vy (kN)', 'Vz (kN)', 'My (kNm)', 'Mz (kNm)', 'T (kNm)']
+        force_columns = ['N (kN)', 'Vy (kN)', 'Vz (kN)', 'My-minor (kNm)', 'Mz-major (kNm)', 'T (kNm)']
         highlight_col = {
             'N': 'N (kN)',
             'Vy': 'Vy (kN)',
             'Vz': 'Vz (kN)',
-            'My': 'My (kNm)',
-            'Mz': 'Mz (kNm)',
+            'My': 'My-minor (kNm)',
+            'Mz': 'Mz-major (kNm)',
             'T': 'T (kNm)',
-        }.get(self.force_type, 'My (kNm)')
+        }.get(self.force_type, 'Mz-major (kNm)')
         
         def highlight_column(s):
             return ['background-color: #fffacd' if s.name == highlight_col else '' for _ in s]
@@ -282,8 +282,8 @@ class BeamForcesTable:
             'N (kN)': '{:.1f}',
             'Vy (kN)': '{:.1f}',
             'Vz (kN)': '{:.1f}',
-            'My (kNm)': '{:.1f}',
-            'Mz (kNm)': '{:.1f}',
+            'My-minor (kNm)': '{:.1f}',
+            'Mz-major (kNm)': '{:.1f}',
             'T (kNm)': '{:.1f}',
         })
         

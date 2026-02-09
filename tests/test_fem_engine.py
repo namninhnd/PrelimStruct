@@ -112,7 +112,7 @@ def test_build_openseespy_model_with_loads(ops_monkeypatch) -> None:
     assert ops_monkeypatch.time_series == [("Linear", 1)]
     assert ("Plain", 1, 1) in ops_monkeypatch.patterns
     assert ops_monkeypatch.loads == [(2, (0, 0, -1000, 0, 0, 0))]
-    assert ops_monkeypatch.uniform_loads[-1] == ("-ele", 1, "-type", "beamUniform", 0.0, -5.0)
+    assert ops_monkeypatch.uniform_loads[-1] == ("-ele", 1, "-type", "beamUniform", -5.0, 0.0)
 
 
 def test_uniform_load_mapping_ndm2(ops_monkeypatch) -> None:
@@ -631,11 +631,15 @@ class TestUniformLoadComponents:
         assert wz == pytest.approx(15.0)
 
     def test_uniform_load_gravity_3d(self) -> None:
-        """Test gravity load mapping in 3D."""
+        """Test gravity load mapping in 3D.
+
+        With ETABS vecxz convention, local_y is vertical for horizontal beams.
+        Gravity = load in -local_y direction = wy = -magnitude.
+        """
         load = UniformLoad(element_tag=1, load_type="Gravity", magnitude=8.0)
         wy, wz = FEMModel._get_uniform_load_components(load, ndm=3)
-        assert wy == pytest.approx(0.0)
-        assert wz == pytest.approx(-8.0)
+        assert wy == pytest.approx(-8.0)
+        assert wz == pytest.approx(0.0)
 
     def test_uniform_load_gravity_2d(self) -> None:
         """Test gravity load mapping in 2D."""
@@ -654,7 +658,7 @@ class TestUniformLoadComponents:
         wy2, wz2 = FEMModel._get_uniform_load_components(load2, ndm=3)
         wy3, wz3 = FEMModel._get_uniform_load_components(load3, ndm=3)
 
-        assert wz1 == wz2 == wz3 == pytest.approx(-5.0)
+        assert wy1 == wy2 == wy3 == pytest.approx(-5.0)
 
 
 class TestBuildWithBeamColumn(object):
@@ -785,7 +789,7 @@ class TestShellAndCouplingBeamElements:
                 node_tags=[1, 2],
                 material_tag=mat_tag,
                 section_tag=section_tag,
-                geometry={"local_y": (0.0, 1.0, 0.0)},
+                geometry={"vecxz": (0.0, 1.0, 0.0)},
             )
         )
 

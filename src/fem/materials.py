@@ -298,16 +298,16 @@ def get_elastic_beam_section(concrete: ConcreteProperties,
                              width: float,
                              height: float,
                              section_tag: int) -> dict:
-    """Generate elastic beam section properties for OpenSeesPy.
-    
-    This creates a simplified elastic section for linear static analysis.
-    
+    """Create elastic rectangular section properties for OpenSeesPy.
+
     Args:
-        concrete: ConcreteProperties object
-        width: Section width in mm
-        height: Section height (depth) in mm
-        section_tag: Unique section tag for OpenSeesPy
-    
+        concrete: ConcreteProperties object.
+        width: Section width in mm (b), perpendicular to the Mz bending plane.
+            For beams this is the horizontal width; for columns this maps to local_z.
+        height: Section depth in mm (h), in the Mz bending plane.
+            For beams this is the vertical depth; for columns this maps to local_y.
+        section_tag: Unique section tag for OpenSeesPy.
+
     Returns:
         Dictionary with section properties:
         - section_type: "ElasticBeamSection"
@@ -319,14 +319,18 @@ def get_elastic_beam_section(concrete: ConcreteProperties,
         - G: Shear modulus (Pa)
         - J: Torsional constant (m⁴)
     """
-    # Convert dimensions to meters
+    # Convert dimensions to meters.
+    # width (b): dimension perpendicular to Mz bending plane.
+    # height (h): dimension in the Mz bending plane.
     b = width / 1000  # mm to m
     h = height / 1000  # mm to m
     
     # Section properties
     A = b * h  # m²
-    Iz = b * h**3 / 12  # m⁴ (bending about z-axis)
-    Iy = h * b**3 / 12  # m⁴ (bending about y-axis)
+    # Iz is strong-axis MOI when h > b (used for Mz major-axis bending)
+    Iz = b * h**3 / 12  # m⁴ (bending about local z-axis)
+    # Iy is weak-axis MOI when h > b (used for My minor-axis bending)
+    Iy = h * b**3 / 12  # m⁴ (bending about local y-axis)
     
     # Shear modulus (G = E / (2 * (1 + nu)), assuming nu = 0.2 for concrete)
     G = concrete.E_Pa / (2 * 1.2)

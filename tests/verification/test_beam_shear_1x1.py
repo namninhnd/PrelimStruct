@@ -90,36 +90,33 @@ def _get_beam_sub_element_tags(model, parent_beam_id: int) -> List[int]:
     return [tag for _, tag in sub_elements]
 
 
-def _extract_beam_end_shear_vz(
+def _extract_beam_end_shear_vy(
     result,
     parent_beam_id: int,
     model,
     which_end: str = "start",
 ) -> float:
-    """Extract vertical shear Vz from beam end.
-    
-    For horizontal beams along X with local_y=(0,0,1):
-    - Local z = local_x cross local_y = (0,-1,0) 
-    - Vz is shear in local z direction (perpendicular to beam and vertical)
-    
-    However, for gravity load transfer, the relevant shear that opposes
-    vertical load is actually in the bending plane, which is Vy for most setups.
-    We extract both and return Vz (the larger component for edge beams).
+    """Extract gravity shear Vy from beam end (local coordinates).
+
+    With the ETABS vecxz convention (vecxz = (dy/L, -dx/L, 0)):
+    - local_y = (0, 0, 1) vertical for horizontal beams
+    - Vy = gravity (vertical) shear, Mz = major-axis bending (uses Iz)
+    - Vz = lateral (horizontal) shear, My = minor-axis bending (uses Iy)
     """
     from src.fem.force_normalization import normalize_end_force
-    
+
     sub_elem_tags = _get_beam_sub_element_tags(model, parent_beam_id)
-    
+
     if which_end == "start":
         first_forces = result.element_forces.get(sub_elem_tags[0], {})
-        vz_i = first_forces.get("Vz_i", 0.0)
-        return abs(vz_i) / 1000.0
+        vy_i = first_forces.get("Vy_i", 0.0)
+        return abs(vy_i) / 1000.0
     else:
         last_forces = result.element_forces.get(sub_elem_tags[-1], {})
-        vz_i = last_forces.get("Vz_i", 0.0)
-        vz_j = last_forces.get("Vz_j", 0.0)
-        vz_norm = normalize_end_force(vz_i, vz_j, "Vz")
-        return abs(vz_norm) / 1000.0
+        vy_i = last_forces.get("Vy_i", 0.0)
+        vy_j = last_forces.get("Vy_j", 0.0)
+        vy_norm = normalize_end_force(vy_i, vy_j, "Vy")
+        return abs(vy_norm) / 1000.0
 
 
 def _get_base_reaction_at_origin(model, result) -> float:
@@ -184,15 +181,15 @@ class TestBeamShear1x1Bay:
         parent_beam_id = _find_beam_along_x_at_y0(model, z_floor)
         assert parent_beam_id is not None
         
-        start_shear_vz = _extract_beam_end_shear_vz(result, parent_beam_id, model, "start")
-        end_shear_vz = _extract_beam_end_shear_vz(result, parent_beam_id, model, "end")
+        start_shear_vy = _extract_beam_end_shear_vy(result, parent_beam_id, model, "start")
+        end_shear_vy = _extract_beam_end_shear_vy(result, parent_beam_id, model, "end")
         
-        assert start_shear_vz > 0.1, (
-            f"SDL beam start Vz too low: {start_shear_vz:.3f} kN. "
+        assert start_shear_vy > 0.1, (
+            f"SDL beam start Vy too low: {start_shear_vy:.3f} kN. "
             "Expected non-zero shear from slab load transfer."
         )
-        assert end_shear_vz > 0.1, (
-            f"SDL beam end Vz too low: {end_shear_vz:.3f} kN. "
+        assert end_shear_vy > 0.1, (
+            f"SDL beam end Vy too low: {end_shear_vy:.3f} kN. "
             "Expected non-zero shear from slab load transfer."
         )
 
@@ -216,14 +213,14 @@ class TestBeamShear1x1Bay:
         parent_beam_id = _find_beam_along_x_at_y0(model, z_floor)
         assert parent_beam_id is not None
         
-        start_shear_vz = _extract_beam_end_shear_vz(result, parent_beam_id, model, "start")
-        end_shear_vz = _extract_beam_end_shear_vz(result, parent_beam_id, model, "end")
+        start_shear_vy = _extract_beam_end_shear_vy(result, parent_beam_id, model, "start")
+        end_shear_vy = _extract_beam_end_shear_vy(result, parent_beam_id, model, "end")
         
-        assert start_shear_vz > 0.2, (
-            f"LL beam start Vz too low: {start_shear_vz:.3f} kN"
+        assert start_shear_vy > 0.2, (
+            f"LL beam start Vy too low: {start_shear_vy:.3f} kN"
         )
-        assert end_shear_vz > 0.2, (
-            f"LL beam end Vz too low: {end_shear_vz:.3f} kN"
+        assert end_shear_vy > 0.2, (
+            f"LL beam end Vy too low: {end_shear_vy:.3f} kN"
         )
 
     def test_benchmark_1x1_beam_shear_symmetry_sdl(self) -> None:
@@ -246,8 +243,8 @@ class TestBeamShear1x1Bay:
         parent_beam_id = _find_beam_along_x_at_y0(model, z_floor)
         assert parent_beam_id is not None
         
-        start_shear = _extract_beam_end_shear_vz(result, parent_beam_id, model, "start")
-        end_shear = _extract_beam_end_shear_vz(result, parent_beam_id, model, "end")
+        start_shear = _extract_beam_end_shear_vy(result, parent_beam_id, model, "start")
+        end_shear = _extract_beam_end_shear_vy(result, parent_beam_id, model, "end")
         
         mean_shear = (start_shear + end_shear) / 2.0
         if mean_shear > 0.1:

@@ -240,8 +240,8 @@ def test_element_type_remains_elastic_beam(model_with_nodes):
         assert element.element_type == ElementType.ELASTIC_BEAM
 
 
-def test_local_y_is_vertical(model_with_nodes):
-    """Test that local_y is (0.0, 1.0, 0.0) for vertical columns."""
+def test_vecxz_for_vertical_columns(model_with_nodes):
+    """Test that vecxz is (0.0, 1.0, 0.0) for vertical columns."""
     model, grid_nodes, registry, options, project = model_with_nodes
     
     builder = ColumnBuilder(
@@ -259,8 +259,8 @@ def test_local_y_is_vertical(model_with_nodes):
     )
     
     for element in model.elements.values():
-        local_y = element.geometry.get("local_y")
-        assert local_y == (0.0, 1.0, 0.0)
+        vecxz = element.geometry.get("vecxz")
+        assert vecxz == (0.0, 1.0, 0.0)
 
 
 def test_no_uniform_loads_applied_to_columns(model_with_nodes):

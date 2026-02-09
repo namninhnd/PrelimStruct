@@ -251,16 +251,14 @@ def render_unified_fem_views(
     
     # --- 3. Prepare Visualization Config ---
     
-    # Map friendly force names to codes (structural engineering convention)
-    # Note: OpenSeesPy uses local axes where My=major bending, Mz=minor bending
-    # We label them with structural meaning for engineer-friendly display
+    # Map display labels to internal force codes (ETABS convention: Mz = major axis)
     force_type_map = {
         "None": None,
         "N (Axial)": "N",
-        "V-major (Gravity Shear)": "Vy",
-        "V-minor (Lateral Shear)": "Vz",
-        "M-major (Strong Axis)": "My",
-        "M-minor (Weak Axis)": "Mz",
+        "Vy (Major Shear)": "Vy",
+        "Vz (Minor Shear)": "Vz",
+        "Mz (Major Moment)": "Mz",
+        "My (Minor Moment)": "My",
         "T (Torsion)": "T"
     }
     selected_force = st.session_state.fem_view_force_type

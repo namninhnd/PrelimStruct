@@ -238,7 +238,7 @@ def _build_cantilever_model():
                 "Iy": Iy,
                 "Iz": Iz,
                 "J": J,
-                "local_y": (0, 1, 0),
+                "vecxz": (0, 1, 0),
                 "parent_column_id": 1,
                 "sub_element_index": i,
             }

@@ -72,20 +72,23 @@ class ElementForceEnvelope:
     
     Attributes:
         element_id: Element identifier
-        N_max: Maximum axial force envelope
-        N_min: Minimum axial force envelope
-        V_max: Maximum shear force envelope
-        V_min: Minimum shear force envelope
-        M_max: Maximum moment envelope
-        M_min: Minimum moment envelope
+        N_max/N_min: Axial force envelope
+        Vy_max/Vy_min: Major-axis shear envelope
+        Vz_max/Vz_min: Minor-axis shear envelope
+        Mz_max/Mz_min: Major-axis moment envelope (ETABS M33)
+        My_max/My_min: Minor-axis moment envelope (ETABS M22)
     """
     element_id: int
     N_max: EnvelopeValue = field(default_factory=EnvelopeValue)
     N_min: EnvelopeValue = field(default_factory=EnvelopeValue)
-    V_max: EnvelopeValue = field(default_factory=EnvelopeValue)
-    V_min: EnvelopeValue = field(default_factory=EnvelopeValue)
-    M_max: EnvelopeValue = field(default_factory=EnvelopeValue)
-    M_min: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Vy_max: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Vy_min: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Vz_max: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Vz_min: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Mz_max: EnvelopeValue = field(default_factory=EnvelopeValue)
+    Mz_min: EnvelopeValue = field(default_factory=EnvelopeValue)
+    My_max: EnvelopeValue = field(default_factory=EnvelopeValue)
+    My_min: EnvelopeValue = field(default_factory=EnvelopeValue)
 
 
 @dataclass
@@ -174,25 +177,27 @@ class ResultsProcessor:
             # For 3D beam elements
             if 'N_i' in forces:
                 N = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
-                V = max(
-                    abs(forces.get('Vy_i', 0.0)), abs(forces.get('Vy_j', 0.0)),
-                    abs(forces.get('Vz_i', 0.0)), abs(forces.get('Vz_j', 0.0))
-                )
-                M = max(
-                    abs(forces.get('My_i', 0.0)), abs(forces.get('My_j', 0.0)),
-                    abs(forces.get('Mz_i', 0.0)), abs(forces.get('Mz_j', 0.0))
-                )
+                Vy = max(abs(forces.get('Vy_i', 0.0)), abs(forces.get('Vy_j', 0.0)))
+                Vz = max(abs(forces.get('Vz_i', 0.0)), abs(forces.get('Vz_j', 0.0)))
+                Mz = max(abs(forces.get('Mz_i', 0.0)), abs(forces.get('Mz_j', 0.0)))
+                My = max(abs(forces.get('My_i', 0.0)), abs(forces.get('My_j', 0.0)))
                 N_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
-                V_signed = (forces.get('Vy_i', 0.0) + forces.get('Vy_j', 0.0)) / 2
-                M_signed = (forces.get('My_i', 0.0) + forces.get('My_j', 0.0)) / 2
+                Vy_signed = (forces.get('Vy_i', 0.0) + forces.get('Vy_j', 0.0)) / 2
+                Vz_signed = (forces.get('Vz_i', 0.0) + forces.get('Vz_j', 0.0)) / 2
+                Mz_signed = (forces.get('Mz_i', 0.0) + forces.get('Mz_j', 0.0)) / 2
+                My_signed = (forces.get('My_i', 0.0) + forces.get('My_j', 0.0)) / 2
             # For 2D beam elements
-            elif 'N_i' in forces or 'V_i' in forces:
+            elif 'V_i' in forces:
                 N = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
-                V = max(abs(forces.get('V_i', 0.0)), abs(forces.get('V_j', 0.0)))
-                M = max(abs(forces.get('M_i', 0.0)), abs(forces.get('M_j', 0.0)))
+                Vy = max(abs(forces.get('V_i', 0.0)), abs(forces.get('V_j', 0.0)))
+                Vz = 0.0
+                Mz = max(abs(forces.get('M_i', 0.0)), abs(forces.get('M_j', 0.0)))
+                My = 0.0
                 N_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
-                V_signed = (forces.get('V_i', 0.0) + forces.get('V_j', 0.0)) / 2
-                M_signed = (forces.get('M_i', 0.0) + forces.get('M_j', 0.0)) / 2
+                Vy_signed = (forces.get('V_i', 0.0) + forces.get('V_j', 0.0)) / 2
+                Vz_signed = 0.0
+                Mz_signed = (forces.get('M_i', 0.0) + forces.get('M_j', 0.0)) / 2
+                My_signed = 0.0
             else:
                 continue  # Skip if force format not recognized
             
@@ -206,25 +211,45 @@ class ResultsProcessor:
                 envelope.N_min.governing_min_case = result.combination
                 envelope.N_min.governing_min_location = elem_id
             
-            # Update shear force envelope
-            if V > envelope.V_max.max_value:
-                envelope.V_max.max_value = V
-                envelope.V_max.governing_max_case = result.combination
-                envelope.V_max.governing_max_location = elem_id
-            if V_signed < envelope.V_min.min_value or envelope.V_min.min_value == 0.0:
-                envelope.V_min.min_value = V_signed
-                envelope.V_min.governing_min_case = result.combination
-                envelope.V_min.governing_min_location = elem_id
-            
-            # Update moment envelope
-            if M > envelope.M_max.max_value:
-                envelope.M_max.max_value = M
-                envelope.M_max.governing_max_case = result.combination
-                envelope.M_max.governing_max_location = elem_id
-            if M_signed < envelope.M_min.min_value or envelope.M_min.min_value == 0.0:
-                envelope.M_min.min_value = M_signed
-                envelope.M_min.governing_min_case = result.combination
-                envelope.M_min.governing_min_location = elem_id
+            # Update major-axis shear envelope
+            if Vy > envelope.Vy_max.max_value:
+                envelope.Vy_max.max_value = Vy
+                envelope.Vy_max.governing_max_case = result.combination
+                envelope.Vy_max.governing_max_location = elem_id
+            if Vy_signed < envelope.Vy_min.min_value or envelope.Vy_min.min_value == 0.0:
+                envelope.Vy_min.min_value = Vy_signed
+                envelope.Vy_min.governing_min_case = result.combination
+                envelope.Vy_min.governing_min_location = elem_id
+
+            # Update minor-axis shear envelope
+            if Vz > envelope.Vz_max.max_value:
+                envelope.Vz_max.max_value = Vz
+                envelope.Vz_max.governing_max_case = result.combination
+                envelope.Vz_max.governing_max_location = elem_id
+            if Vz_signed < envelope.Vz_min.min_value or envelope.Vz_min.min_value == 0.0:
+                envelope.Vz_min.min_value = Vz_signed
+                envelope.Vz_min.governing_min_case = result.combination
+                envelope.Vz_min.governing_min_location = elem_id
+
+            # Update major-axis moment envelope
+            if Mz > envelope.Mz_max.max_value:
+                envelope.Mz_max.max_value = Mz
+                envelope.Mz_max.governing_max_case = result.combination
+                envelope.Mz_max.governing_max_location = elem_id
+            if Mz_signed < envelope.Mz_min.min_value or envelope.Mz_min.min_value == 0.0:
+                envelope.Mz_min.min_value = Mz_signed
+                envelope.Mz_min.governing_min_case = result.combination
+                envelope.Mz_min.governing_min_location = elem_id
+
+            # Update minor-axis moment envelope
+            if My > envelope.My_max.max_value:
+                envelope.My_max.max_value = My
+                envelope.My_max.governing_max_case = result.combination
+                envelope.My_max.governing_max_location = elem_id
+            if My_signed < envelope.My_min.min_value or envelope.My_min.min_value == 0.0:
+                envelope.My_min.min_value = My_signed
+                envelope.My_min.governing_min_case = result.combination
+                envelope.My_min.governing_min_location = elem_id
     
     def _update_displacement_envelope(self, result: LoadCaseResult) -> None:
         """Update displacement envelopes with new load case results.
@@ -407,11 +432,11 @@ class ResultsProcessor:
         
         for elem_id, envelope in self.element_force_envelopes.items():
             if criterion == "moment":
-                value = envelope.M_max.max_value
-                case = envelope.M_max.governing_max_case
+                value = envelope.Mz_max.max_value
+                case = envelope.Mz_max.governing_max_case
             elif criterion == "shear":
-                value = envelope.V_max.max_value
-                case = envelope.V_max.governing_max_case
+                value = envelope.Vy_max.max_value
+                case = envelope.Vy_max.governing_max_case
             elif criterion == "axial":
                 value = envelope.N_max.max_value
                 case = envelope.N_max.governing_max_case
@@ -441,12 +466,16 @@ class ResultsProcessor:
         lines.append(f"  Total elements enveloped: {len(self.element_force_envelopes)}")
         
         if self.element_force_envelopes:
-            max_M = max(env.M_max.max_value for env in self.element_force_envelopes.values())
-            max_V = max(env.V_max.max_value for env in self.element_force_envelopes.values())
+            max_Mz = max(env.Mz_max.max_value for env in self.element_force_envelopes.values())
+            max_My = max(env.My_max.max_value for env in self.element_force_envelopes.values())
+            max_Vy = max(env.Vy_max.max_value for env in self.element_force_envelopes.values())
+            max_Vz = max(env.Vz_max.max_value for env in self.element_force_envelopes.values())
             max_N = max(env.N_max.max_value for env in self.element_force_envelopes.values())
             
-            lines.append(f"  Maximum moment: {max_M/1e6:.2f} kN-m")
-            lines.append(f"  Maximum shear: {max_V/1e3:.2f} kN")
+            lines.append(f"  Maximum Mz (major): {max_Mz/1e6:.2f} kN-m")
+            lines.append(f"  Maximum My (minor): {max_My/1e6:.2f} kN-m")
+            lines.append(f"  Maximum Vy (major shear): {max_Vy/1e3:.2f} kN")
+            lines.append(f"  Maximum Vz (minor shear): {max_Vz/1e3:.2f} kN")
             lines.append(f"  Maximum axial: {max_N/1e3:.2f} kN")
         
         # Displacements

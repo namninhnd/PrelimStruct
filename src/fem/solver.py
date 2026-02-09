@@ -206,33 +206,41 @@ class FEMSolver:
             try:
                 # Get element forces (returns different values for different element types)
                 forces = ops.eleForce(elem_tag)
-                
+
                 # Debug: Log first few elements to verify force values
                 if extracted_count < 5:
                     _logger.debug(f"Element {elem_tag}: forces={forces[:6] if len(forces) >= 6 else forces}")
-                
+
                 # Check if all forces are essentially zero
                 if all(abs(f) < 1e-10 for f in forces):
                     zero_force_count += 1
-                
-                # For beam-column elements in 3D, forces are typically:
-                # [Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, Fx_j, Fy_j, Fz_j, Mx_j, My_j, Mz_j]
-                # where i is node 1, j is node 2
-                
+
+                # For 3D beam-column elements (12 components):
+                # eleForce returns GLOBAL coordinates [Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, ...]
+                # eleResponse 'localForce' returns LOCAL coordinates [N_i, Vy_i, Vz_i, T_i, My_i, Mz_i, ...]
+                # We need LOCAL forces so that Vy=gravity shear, Mz=major-axis moment (ETABS convention).
+
                 if len(forces) == 12:  # 3D beam element
+                    try:
+                        local_forces = ops.eleResponse(elem_tag, 'localForce')
+                        if local_forces and len(local_forces) == 12:
+                            forces = local_forces
+                    except Exception:
+                        pass  # Fall back to eleForce (global) if localForce unavailable
+
                     result.element_forces[elem_tag] = {
                         'N_i': forces[0],      # Axial force at i
-                        'Vy_i': forces[1],     # Shear Y at i
-                        'Vz_i': forces[2],     # Shear Z at i
+                        'Vy_i': forces[1],     # Shear in local y at i
+                        'Vz_i': forces[2],     # Shear in local z at i
                         'T_i': forces[3],      # Torque at i
-                        'My_i': forces[4],     # Moment Y at i
-                        'Mz_i': forces[5],     # Moment Z at i
+                        'My_i': forces[4],     # Moment about local y at i
+                        'Mz_i': forces[5],     # Moment about local z at i (major-axis)
                         'N_j': forces[6],      # Axial force at j
-                        'Vy_j': forces[7],     # Shear Y at j
-                        'Vz_j': forces[8],     # Shear Z at j
+                        'Vy_j': forces[7],     # Shear in local y at j
+                        'Vz_j': forces[8],     # Shear in local z at j
                         'T_j': forces[9],      # Torque at j
-                        'My_j': forces[10],    # Moment Y at j
-                        'Mz_j': forces[11],    # Moment Z at j
+                        'My_j': forces[10],    # Moment about local y at j
+                        'Mz_j': forces[11],    # Moment about local z at j (major-axis)
                     }
                     extracted_count += 1
                 elif len(forces) == 6:  # 2D beam element

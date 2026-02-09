@@ -811,10 +811,14 @@ def _extract_beam_sizes(project: ProjectData) -> Dict[str, Tuple[float, float]]:
 
 
 def _extract_column_dims(project: ProjectData) -> Tuple[float, float]:
-    """Get column dimensions (width, depth) in mm.
-    
-    Prioritizes explicit width/depth over dimension field.
-    Falls back to dimension only if width/depth are not set.
+    """Get column dimensions as (width=b, depth=h) in mm.
+
+    Mapping convention for section creation:
+    - width (b) maps to local_z direction
+    - depth (h) maps to local_y direction
+
+    Prioritizes explicit width/depth over legacy `dimension`.
+    Falls back to `dimension` only if explicit width/depth are not set.
     """
     width = MIN_COLUMN_SIZE
     depth = MIN_COLUMN_SIZE
@@ -1128,12 +1132,20 @@ def _create_subdivided_beam(
     # Track parent beam ID for logical grouping
     parent_beam_id = element_tag
     
+    dx = end_x - start_x
+    dy = end_y - start_y
+    length_xy = math.hypot(dx, dy)
+    if length_xy > 1e-10:
+        vecxz_val = (dy / length_xy, -dx / length_xy, 0.0)
+    else:
+        vecxz_val = (0.0, 0.0, 1.0)
+
     # Create 4 sub-elements connecting the 5 nodes sequentially
     for i in range(NUM_SUBDIVISIONS):
         current_tag = element_tag
         
         geom = {
-            "local_y": (0.0, 0.0, 1.0),
+            "vecxz": vecxz_val,
             "parent_beam_id": parent_beam_id,
             "sub_element_index": i,
         }
@@ -1287,8 +1299,13 @@ def build_fem_model(project: ProjectData,
 
                 parent_column_id = element_tag
                 for i in range(NUM_SUBDIVISIONS):
+                    # Column local axis convention (ETABS-compatible):
+                    # local_x = vertical column axis (bottom -> top),
+                    # local_y = global X (depth h), local_z = global Y (width b).
+                    # vecxz=(0,1,0) enforces this orientation for vertical columns.
+                    # Iz = b*h^3/12 -> Mz (major-axis), Iy = h*b^3/12 -> My (minor-axis).
                     geom = {
-                        "local_y": (0.0, 1.0, 0.0),
+                        "vecxz": (0.0, 1.0, 0.0),
                         "parent_column_id": parent_column_id,
                         "sub_element_index": i,
                     }
@@ -1837,6 +1854,14 @@ def build_fem_model(project: ProjectData,
                         
                         # Track parent coupling beam ID for logical grouping
                         parent_coupling_beam_id = coupling_element_tag
+
+                        cb_dx = end_x - start_x
+                        cb_dy = end_y - start_y
+                        cb_length_xy = math.hypot(cb_dx, cb_dy)
+                        if cb_length_xy > 1e-10:
+                            cb_vecxz = (cb_dy / cb_length_xy, -cb_dx / cb_length_xy, 0.0)
+                        else:
+                            cb_vecxz = (0.0, 0.0, 1.0)
                         
                         # Create 6 sub-elements connecting the 7 nodes
                         for i in range(NUM_SUBDIVISIONS):
@@ -1850,7 +1875,7 @@ def build_fem_model(project: ProjectData,
                                     geometry={
                                         "parent_coupling_beam_id": parent_coupling_beam_id,
                                         "sub_element_index": i,
-                                        "local_y": (0.0, 0.0, 1.0),
+                                        "vecxz": cb_vecxz,
                                     },
                                 )
                             )

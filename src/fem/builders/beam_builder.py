@@ -163,7 +163,17 @@ class BeamBuilder:
         parent_beam_id = self.element_tag
         
         # Default geometry
-        geom_base = geometry_override if geometry_override else {"local_y": (0.0, 0.0, 1.0)}
+        if geometry_override:
+            geom_base = geometry_override
+        else:
+            dx = end_x - start_x
+            dy = end_y - start_y
+            length_xy = math.hypot(dx, dy)
+            if length_xy > 1e-10:
+                vecxz = (dy / length_xy, -dx / length_xy, 0.0)
+            else:
+                vecxz = (0.0, 0.0, 1.0)
+            geom_base = {"vecxz": vecxz}
         
         # Create 4 sub-elements connecting the 5 nodes sequentially
         for i in range(NUM_SUBDIVISIONS):
@@ -565,6 +575,14 @@ class BeamBuilder:
                 # Store original element_tag, use coupling beam range, then restore
                 original_element_tag = self.element_tag
                 self.element_tag = coupling_element_tag
+
+                cb_dx = end_x - start_x
+                cb_dy = end_y - start_y
+                cb_length_xy = math.hypot(cb_dx, cb_dy)
+                if cb_length_xy > 1e-10:
+                    cb_vecxz = (cb_dy / cb_length_xy, -cb_dx / cb_length_xy, 0.0)
+                else:
+                    cb_vecxz = (0.0, 0.0, 1.0)
                 
                 parent_beam_id = self._create_beam_element(
                     start_node=start_node,
@@ -572,7 +590,7 @@ class BeamBuilder:
                     section_tag=self.coupling_section_tag,
                     load_pattern=self.options.dl_load_pattern,
                     section_dims=(coupling_beam_template.width, coupling_beam_template.depth),
-                    geometry_override={"local_y": (0.0, 0.0, 1.0), "coupling_beam": True},
+                    geometry_override={"vecxz": cb_vecxz, "coupling_beam": True},
                 )
                 
                 # Restore element_tag and increment coupling beam base

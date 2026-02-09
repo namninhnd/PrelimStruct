@@ -319,10 +319,9 @@ class FEMModel:
         load_type = uniform_load.load_type.lower()
 
         if load_type == "gravity":
-            if ndm == 2:
-                wy = -uniform_load.magnitude
-            else:
-                wz = -uniform_load.magnitude
+            # Gravity = force in -local_y direction.
+            # With ETABS vecxz convention, local_y is vertical for horizontal beams.
+            wy = -uniform_load.magnitude
         elif load_type == "y":
             wy = uniform_load.magnitude
         elif load_type == "z":
@@ -421,10 +420,10 @@ class FEMModel:
 
                 section = self.sections[elem.section_tag]
                 geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
 
                 if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
                     ops.element(
                         'elasticBeamColumn',
                         elem.tag,
@@ -458,10 +457,10 @@ class FEMModel:
 
                 section = self.sections[elem.section_tag]
                 geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
 
                 if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
                     ops.element(
                         'elasticBeamColumn',
                         elem.tag,
@@ -498,10 +497,10 @@ class FEMModel:
 
                 section = self.sections[elem.section_tag]
                 geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vector_y = elem.geometry.get('local_y', (0.0, 0.0, 1.0))
+                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
 
                 if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vector_y)
+                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
                     ops.element(
                         'elasticBeamColumn',
                         elem.tag,
