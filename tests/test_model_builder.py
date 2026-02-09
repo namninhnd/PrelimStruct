@@ -38,14 +38,27 @@ def test_create_floor_rigid_diaphragms_skips_base_and_picks_master() -> None:
     model = FEMModel()
     _make_simple_3d_frame_nodes(model)
 
-    masters = create_floor_rigid_diaphragms(model, base_elevation=0.0, tolerance=1e-6)
+    masters = create_floor_rigid_diaphragms(
+        model,
+        base_elevation=0.0,
+        tolerance=1e-6,
+        story_height=3.0,
+    )
 
-    # Two levels above base, each should get a diaphragm with lowest tag as master
-    assert masters[3.0] == 5
-    assert masters[6.0] == 9
+    assert masters[3.0] == 90001
+    assert masters[6.0] == 90002
     assert len(model.diaphragms) == 2
-    assert model.diaphragms[0].slave_nodes == [6]
-    assert model.diaphragms[1].slave_nodes == [10]
+    assert set(model.diaphragms[0].slave_nodes) == {5, 6}
+    assert set(model.diaphragms[1].slave_nodes) == {9, 10}
+
+    l1_master = model.nodes[masters[3.0]]
+    l2_master = model.nodes[masters[6.0]]
+    assert l1_master.x == pytest.approx(2.0)
+    assert l1_master.y == pytest.approx(0.0)
+    assert l1_master.z == pytest.approx(3.0)
+    assert l2_master.x == pytest.approx(2.0)
+    assert l2_master.y == pytest.approx(0.0)
+    assert l2_master.z == pytest.approx(6.0)
 
 
 def test_apply_lateral_loads_to_diaphragms_adds_loads_on_masters() -> None:
@@ -158,7 +171,8 @@ def test_build_fem_model_basic_frame_counts() -> None:
     )
     beams_per_floor = (project.geometry.num_bays_x + 1) + (project.geometry.num_bays_y + 1)
     beam_intermediate = project.geometry.floors * beams_per_floor * (NUM_SUBDIVISIONS - 1)
-    expected_nodes = base_grid_nodes + column_intermediate + beam_intermediate
+    expected_master_nodes = project.geometry.floors
+    expected_nodes = base_grid_nodes + column_intermediate + beam_intermediate + expected_master_nodes
 
     base_columns = (project.geometry.num_bays_x + 1) * (project.geometry.num_bays_y + 1) * project.geometry.floors
     base_beams = project.geometry.floors * beams_per_floor

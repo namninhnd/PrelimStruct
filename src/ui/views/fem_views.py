@@ -10,9 +10,10 @@ import streamlit as st
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 
-from src.core.data_models import ProjectData
+from src.core.data_models import ProjectData, WindResult
 from src.fem.model_builder import build_fem_model, ModelBuilderOptions
 from src.fem.fem_engine import FEMModel
+from src.fem.wind_calculator import calculate_hk_wind
 from src.fem.visualization import (
     create_plan_view,
     create_elevation_view,
@@ -45,6 +46,7 @@ def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
     lat = project.lateral
     mat = project.materials
     cg = lat.core_geometry
+    wind = project.wind_result
     
     key_parts = [
         f"floors:{geo.floors}",
@@ -70,6 +72,9 @@ def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
         f"col_w:{project.column_result.width if project.column_result else 0}",
         f"col_d:{project.column_result.depth if project.column_result else 0}",
         f"wind:{options.apply_wind_loads}",
+        f"wind_base:{wind.base_shear if wind else 0.0}",
+        f"wind_base_x:{wind.base_shear_x if wind else 0.0}",
+        f"wind_base_y:{wind.base_shear_y if wind else 0.0}",
         f"slabs:{options.include_slabs}",
         f"sec_dir:{options.secondary_beam_direction}",
         f"sec_num:{options.num_secondary_beams}",
@@ -219,10 +224,106 @@ def render_unified_fem_views(
     omit_columns_map = st.session_state.get("omit_columns", {})
     suggested_omit = [col for col, omit in omit_columns_map.items() if omit]
     
-    # Wind toggle (triggers rebuild) - only enable if wind_result exists
-    # V3.5: Default to False since WindEngine was removed
-    has_wind_result = project.wind_result is not None
-    include_wind = st.session_state.get("fem_include_wind", False) and has_wind_result
+    width_x = project.lateral.building_width
+    if width_x <= 0.0:
+        width_x = project.geometry.bay_x * project.geometry.num_bays_x
+
+    width_y = project.lateral.building_depth
+    if width_y <= 0.0:
+        width_y = project.geometry.bay_y * project.geometry.num_bays_y
+
+    existing_wind = project.wind_result
+    default_vx = 0.0
+    default_vy = 0.0
+    default_reference_pressure = 3.0
+    if existing_wind is not None:
+        if existing_wind.base_shear_x > 0.0 or existing_wind.base_shear_y > 0.0:
+            default_vx = existing_wind.base_shear_x
+            default_vy = existing_wind.base_shear_y
+        else:
+            default_vx = existing_wind.base_shear
+            default_vy = existing_wind.base_shear
+        if existing_wind.reference_pressure > 0.0:
+            default_reference_pressure = existing_wind.reference_pressure
+
+    with st.expander("Wind Loads", expanded=False):
+        wind_input_mode = st.radio(
+            "Input Mode",
+            options=["Manual", "HK Code Calculator"],
+            key="fem_wind_input_mode",
+            horizontal=True,
+        )
+
+        if wind_input_mode == "Manual":
+            base_shear_x = st.number_input(
+                "Base Shear Vx (kN)",
+                min_value=0.0,
+                value=float(default_vx),
+                step=10.0,
+                key="fem_wind_base_shear_x",
+            )
+            base_shear_y = st.number_input(
+                "Base Shear Vy (kN)",
+                min_value=0.0,
+                value=float(default_vy),
+                step=10.0,
+                key="fem_wind_base_shear_y",
+            )
+            reference_pressure = st.number_input(
+                "Reference Pressure q0 (kPa)",
+                min_value=0.0,
+                value=float(default_reference_pressure),
+                step=0.1,
+                key="fem_wind_reference_pressure_manual",
+            )
+
+            if base_shear_x > 0.0 or base_shear_y > 0.0:
+                project.wind_result = WindResult(
+                    base_shear=max(base_shear_x, base_shear_y),
+                    base_shear_x=base_shear_x,
+                    base_shear_y=base_shear_y,
+                    reference_pressure=reference_pressure,
+                    lateral_system="CORE_WALL",
+                )
+            else:
+                project.wind_result = None
+        else:
+            reference_pressure = st.number_input(
+                "Reference Pressure q0 (kPa)",
+                min_value=0.0,
+                value=3.0,
+                step=0.1,
+                key="fem_wind_reference_pressure_calc",
+            )
+            force_coefficient = st.number_input(
+                "Force Coefficient Cf",
+                min_value=0.0,
+                value=1.3,
+                step=0.1,
+                key="fem_wind_force_coefficient",
+            )
+
+            calculated_wind = calculate_hk_wind(
+                total_height=project.geometry.floors * project.geometry.story_height,
+                building_width_x=width_x,
+                building_width_y=width_y,
+                terrain=project.lateral.terrain,
+                reference_pressure=reference_pressure,
+                force_coefficient=force_coefficient,
+            )
+            project.wind_result = calculated_wind
+            st.info(
+                f"Vx = {calculated_wind.base_shear_x:.1f} kN, "
+                f"Vy = {calculated_wind.base_shear_y:.1f} kN"
+            )
+
+    has_wind_result = project.wind_result is not None and (
+        project.wind_result.base_shear > 0.0
+        or project.wind_result.base_shear_x > 0.0
+        or project.wind_result.base_shear_y > 0.0
+    )
+    include_wind = has_wind_result
+    st.session_state["fem_include_wind"] = include_wind
     
     slab_thickness_m = 0.15
     if project.slab_result and project.slab_result.thickness > 0:

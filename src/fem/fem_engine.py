@@ -581,13 +581,11 @@ class FEMModel:
                     force_per_node
                 ))
 
-        # Apply rigid diaphragms (planar constraints) for lateral patterns only
-        apply_diaphragms = False
-        if self.diaphragms:
-            if active_pattern is None:
-                apply_diaphragms = True
-            else:
-                apply_diaphragms = active_pattern in {4, 5, 6, 7}
+        # Apply rigid diaphragms for all load patterns.
+        # Centroid master nodes (90000+) have free in-plane DOFs (Ux, Uy, Rz)
+        # that are only constrained via rigidDiaphragm.  Skipping the constraint
+        # for gravity patterns would leave those DOFs orphaned → singular matrix.
+        apply_diaphragms = bool(self.diaphragms)
 
         if apply_diaphragms:
             if ndm < 3:

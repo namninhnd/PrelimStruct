@@ -115,6 +115,11 @@ class FEMModelDirector:
         logger.info("FEM model construction complete")
         return self.model
 
+    def _require_registry(self) -> NodeRegistry:
+        if self.registry is None:
+            raise RuntimeError("Node registry has not been initialized")
+        return self.registry
+
     def _setup_materials(self) -> None:
         """Setup materials and sections."""
         beam_concrete = ConcreteProperties(fcu=self.project.materials.fcu_beam)
@@ -171,10 +176,11 @@ class FEMModelDirector:
         Returns:
             Dictionary mapping (ix, iy, level) to node tag
         """
+        registry = self._require_registry()
         node_builder = NodeGridBuilder(
             model=self.model,
             project=self.project,
-            registry=self.registry,
+            registry=registry,
         )
         return node_builder.create_grid_nodes()
 
@@ -199,6 +205,8 @@ class FEMModelDirector:
             # Use user-approved omission list
             omit_column_ids = set(self.options.suggested_omit_columns)
         
+        registry = self._require_registry()
+
         column_builder = ColumnBuilder(
             model=self.model,
             project=self.project,
@@ -211,7 +219,7 @@ class FEMModelDirector:
             column_material_tag=self.column_material_tag,
             column_section_tag=3,
             omit_column_ids=omit_column_ids,
-            registry=self.registry,
+            registry=registry,
         )
 
     def _build_beams(self, initial_element_tag: int) -> int:
@@ -241,10 +249,12 @@ class FEMModelDirector:
                 (x + offset_x * 1000.0, y + offset_y * 1000.0) for x, y in outline
             ]
         
+        registry = self._require_registry()
+
         beam_builder = BeamBuilder(
             model=self.model,
             project=self.project,
-            registry=self.registry,
+            registry=registry,
             options=self.options,
             initial_element_tag=initial_element_tag,
         )
@@ -284,17 +294,19 @@ class FEMModelDirector:
         )
         
         # Create wall elements
+        registry = self._require_registry()
+
         core_builder.create_core_walls(
             offset_x=offset_x,
             offset_y=offset_y,
-            registry_nodes_by_floor=self.registry.nodes_by_floor,
+            registry_nodes_by_floor=registry.nodes_by_floor,
         )
         
         # Create coupling beams using BeamBuilder
         beam_builder = BeamBuilder(
             model=self.model,
             project=self.project,
-            registry=self.registry,
+            registry=registry,
             options=self.options,
             initial_element_tag=1,  # Tag not used for coupling beams
         )
@@ -343,9 +355,11 @@ class FEMModelDirector:
             )
         
         # Create slabs
+        registry = self._require_registry()
+
         slab_element_tags = slab_builder.create_slabs(
             existing_nodes=existing_nodes,
-            registry_nodes_by_floor=self.registry.nodes_by_floor,
+            registry_nodes_by_floor=registry.nodes_by_floor,
             beam_material_tag=self.beam_material_tag,
             core_internal_opening=core_internal_opening,
         )
@@ -355,17 +369,20 @@ class FEMModelDirector:
 
     def _apply_loads(self) -> None:
         """Apply loads to the model."""
+        master_by_level: Dict[float, int] = {}
+
         # Apply rigid diaphragms
         if self.options.apply_rigid_diaphragms:
             floor_elevations = [
                 level * self.project.geometry.story_height
                 for level in range(1, self.project.geometry.floors + 1)
             ]
-            create_floor_rigid_diaphragms(
+            master_by_level = create_floor_rigid_diaphragms(
                 self.model,
                 base_elevation=0.0,
                 tolerance=self.options.tolerance,
                 floor_elevations=floor_elevations,
+                story_height=self.project.geometry.story_height,
             )
         
         # Apply wind loads
@@ -379,19 +396,61 @@ class FEMModelDirector:
                     UserWarning
                 )
             else:
-                floor_shears = _compute_floor_shears(
-                    wind_result,
+                if wind_result.base_shear_x > 0.0 or wind_result.base_shear_y > 0.0:
+                    base_shear_x = wind_result.base_shear_x
+                    base_shear_y = wind_result.base_shear_y
+                else:
+                    base_shear_x = wind_result.base_shear
+                    base_shear_y = wind_result.base_shear
+
+                floor_shears_x = _compute_floor_shears(
+                    base_shear_x,
                     self.project.geometry.story_height,
                     self.project.geometry.floors
                 )
-                
-                if floor_shears:
+
+                floor_shears_y = _compute_floor_shears(
+                    base_shear_y,
+                    self.project.geometry.story_height,
+                    self.project.geometry.floors
+                )
+
+                if floor_shears_x:
                     apply_lateral_loads_to_diaphragms(
                         self.model,
-                        floor_shears=floor_shears,
-                        direction=self.options.lateral_load_direction,
-                        load_pattern=self.options.wind_load_pattern,
+                        floor_shears=floor_shears_x,
+                        direction="X",
+                        load_pattern=self.options.wx_plus_pattern,
                         tolerance=self.options.tolerance,
+                        master_lookup=master_by_level if master_by_level else None,
+                    )
+
+                    apply_lateral_loads_to_diaphragms(
+                        self.model,
+                        floor_shears={k: -v for k, v in floor_shears_x.items()},
+                        direction="X",
+                        load_pattern=self.options.wx_minus_pattern,
+                        tolerance=self.options.tolerance,
+                        master_lookup=master_by_level if master_by_level else None,
+                    )
+
+                if floor_shears_y:
+                    apply_lateral_loads_to_diaphragms(
+                        self.model,
+                        floor_shears=floor_shears_y,
+                        direction="Y",
+                        load_pattern=self.options.wy_plus_pattern,
+                        tolerance=self.options.tolerance,
+                        master_lookup=master_by_level if master_by_level else None,
+                    )
+
+                    apply_lateral_loads_to_diaphragms(
+                        self.model,
+                        floor_shears={k: -v for k, v in floor_shears_y.items()},
+                        direction="Y",
+                        load_pattern=self.options.wy_minus_pattern,
+                        tolerance=self.options.tolerance,
+                        master_lookup=master_by_level if master_by_level else None,
                     )
 
 

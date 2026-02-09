@@ -721,7 +721,9 @@ class CoreWallResult(DesignResult):
 @dataclass
 class WindResult:
     """Wind load calculation results"""
-    base_shear: float = 0.0         # kN
+    base_shear: float = 0.0          # kN (legacy aggregate for backward compatibility)
+    base_shear_x: float = 0.0        # kN (wind in X direction)
+    base_shear_y: float = 0.0        # kN (wind in Y direction)
     overturning_moment: float = 0.0  # kNm
     reference_pressure: float = 0.0  # kPa
     drift_mm: float = 0.0            # mm (lateral drift at top)

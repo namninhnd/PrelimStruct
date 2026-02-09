@@ -16,7 +16,7 @@ Reference: https://opensees.berkeley.edu/wiki/index.php?title=Getting_Started_wi
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 import logging
 import math
 
@@ -28,7 +28,6 @@ from src.core.data_models import (
     CoreWallConfig,
     CoreWallGeometry,
     CoreWallSectionProperties,
-    WindResult,
 )
 
 from src.fem.beam_trimmer import BeamConnectionType
@@ -74,13 +73,16 @@ def _group_nodes_by_elevation(model: FEMModel, tolerance: float = 1e-6) -> Dict[
 def create_floor_rigid_diaphragms(model: FEMModel,
                                   base_elevation: float = 0.0,
                                   tolerance: float = 1e-6,
-                                  floor_elevations: Optional[List[float]] = None) -> Dict[float, int]:
+                                  floor_elevations: Optional[List[float]] = None,
+                                  story_height: float = 3.0) -> Dict[float, int]:
     """Automatically create rigid diaphragms for each floor level (except base).
 
     Args:
         model: FEMModel with nodes already created
         base_elevation: Elevation to exclude (typically ground/foundation)
         tolerance: Elevation tolerance (m) for grouping
+        floor_elevations: Optional explicit floor levels to evaluate
+        story_height: Story height used to derive deterministic master node tags
 
     Returns:
         Mapping of floor elevation to diaphragm master node tag
@@ -107,8 +109,19 @@ def create_floor_rigid_diaphragms(model: FEMModel,
         if len(node_tags) < 2:
             continue  # no diaphragm needed for a single node
 
-        master = min(node_tags)
-        slaves = [tag for tag in node_tags if tag != master]
+        xs = [model.nodes[tag].x for tag in node_tags]
+        ys = [model.nodes[tag].y for tag in node_tags]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+
+        floor_level = int(round(level / story_height)) if story_height > 0 else int(round(level))
+        master = 90000 + floor_level
+        if master in model.nodes:
+            while master in model.nodes:
+                master += 1000
+
+        model.add_node(Node(tag=master, x=cx, y=cy, z=level, restraints=[0, 0, 1, 1, 1, 0]))
+        slaves = list(node_tags)
         model.add_rigid_diaphragm(RigidDiaphragm(master_node=master, slave_nodes=slaves))
         master_by_level[level] = master
 
@@ -841,7 +854,7 @@ def _extract_column_dims(project: ProjectData) -> Tuple[float, float]:
     return width, depth
 
 
-def _compute_floor_shears(wind_result: WindResult,
+def _compute_floor_shears(base_shear_kn: float,
                           story_height: float,
                           floors: int) -> Dict[float, float]:
     """Distribute base shear to floors using a triangular profile."""
@@ -849,7 +862,7 @@ def _compute_floor_shears(wind_result: WindResult,
         return {}
     heights = [story_height * level for level in range(1, floors + 1)]
     height_sum = sum(heights) if heights else 1.0
-    base_shear_n = wind_result.base_shear * 1000.0
+    base_shear_n = base_shear_kn * 1000.0
     return {
         heights[idx]: base_shear_n * (heights[idx] / height_sum)
         for idx in range(len(heights))
@@ -1246,7 +1259,7 @@ def build_fem_model(project: ProjectData,
 
     # Prepare column omission logic
     core_polygon_m: Optional[List[Tuple[float, float]]] = None
-    omit_column_ids: set = set()
+    omit_column_ids: Set[str] = set()
     
     if options.omit_columns_near_core and options.include_core_wall and project.lateral.core_geometry:
         # Extract core outline and convert to meters for proximity detection
@@ -2068,6 +2081,7 @@ def build_fem_model(project: ProjectData,
             base_elevation=0.0,
             tolerance=options.tolerance,
             floor_elevations=floor_elevations,
+            story_height=geometry.story_height,
         )
 
     if options.apply_wind_loads:
@@ -2080,51 +2094,60 @@ def build_fem_model(project: ProjectData,
                 UserWarning
             )
         else:
-            floor_shears = _compute_floor_shears(wind_result, geometry.story_height, geometry.floors)
-            if floor_shears:
+            if wind_result.base_shear_x > 0.0 or wind_result.base_shear_y > 0.0:
+                base_shear_x = wind_result.base_shear_x
+                base_shear_y = wind_result.base_shear_y
+            else:
+                base_shear_x = wind_result.base_shear
+                base_shear_y = wind_result.base_shear
+            floor_shears_x = _compute_floor_shears(base_shear_x, geometry.story_height, geometry.floors)
+            floor_shears_y = _compute_floor_shears(base_shear_y, geometry.story_height, geometry.floors)
+
+            if floor_shears_x:
                 # Wind +X (pattern 4)
                 apply_lateral_loads_to_diaphragms(
                     model,
-                    floor_shears=floor_shears,
+                    floor_shears=floor_shears_x,
                     direction="X",
                     load_pattern=options.wx_plus_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wx+ loads to {len(floor_shears)} floors (pattern {options.wx_plus_pattern})")
+                logger.info(f"Applied Wx+ loads to {len(floor_shears_x)} floors (pattern {options.wx_plus_pattern})")
                 
                 # Wind -X (pattern 5) - negative shears
                 apply_lateral_loads_to_diaphragms(
                     model,
-                    floor_shears={k: -v for k, v in floor_shears.items()},
+                    floor_shears={k: -v for k, v in floor_shears_x.items()},
                     direction="X",
                     load_pattern=options.wx_minus_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wx- loads to {len(floor_shears)} floors (pattern {options.wx_minus_pattern})")
-                
+                logger.info(f"Applied Wx- loads to {len(floor_shears_x)} floors (pattern {options.wx_minus_pattern})")
+
+            if floor_shears_y:
                 # Wind +Y (pattern 6)
                 apply_lateral_loads_to_diaphragms(
                     model,
-                    floor_shears=floor_shears,
+                    floor_shears=floor_shears_y,
                     direction="Y",
                     load_pattern=options.wy_plus_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wy+ loads to {len(floor_shears)} floors (pattern {options.wy_plus_pattern})")
+                logger.info(f"Applied Wy+ loads to {len(floor_shears_y)} floors (pattern {options.wy_plus_pattern})")
                 
                 # Wind -Y (pattern 7) - negative shears
                 apply_lateral_loads_to_diaphragms(
                     model,
-                    floor_shears={k: -v for k, v in floor_shears.items()},
+                    floor_shears={k: -v for k, v in floor_shears_y.items()},
                     direction="Y",
                     load_pattern=options.wy_minus_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wy- loads to {len(floor_shears)} floors (pattern {options.wy_minus_pattern})")
+                logger.info(f"Applied Wy- loads to {len(floor_shears_y)} floors (pattern {options.wy_minus_pattern})")
 
     # Phase 3: Analysis Preparation (OpenSees BuildingTcl pattern)
     # Validate model before returning
