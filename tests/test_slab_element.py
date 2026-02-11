@@ -6,6 +6,7 @@ Tests for SlabPanel, SlabMeshGenerator, SlabOpening, and ShellMITC4 element crea
 
 import pytest
 import math
+import logging
 
 from src.fem.slab_element import (
     SlabPanel,
@@ -112,14 +113,15 @@ class TestSlabQuad:
 
     def test_slab_quad_wrong_node_count(self):
         """Test that wrong node count raises ValueError."""
+        quad = object.__new__(SlabQuad)
+        quad.tag = 100
+        quad.__dict__["node_tags"] = (1, 2, 3)
+        quad.section_tag = 10
+        quad.slab_id = "S1"
+        quad.floor_level = 1
+
         with pytest.raises(ValueError, match="exactly 4 node tags"):
-            SlabQuad(
-                tag=100,
-                node_tags=(1, 2, 3),  # Only 3 nodes
-                section_tag=10,
-                slab_id="S1",
-                floor_level=1,
-            )
+            quad.__post_init__()
 
 
 class TestSlabMeshGenerator:
@@ -265,6 +267,47 @@ class TestSlabMeshGenerator:
         
         # No new nodes should be created since all corners exist
         assert len(result.nodes) == 0
+
+    def test_high_aspect_ratio_warning_summarized_once(self, caplog: pytest.LogCaptureFixture):
+        """High-AR panel warnings are emitted once via explicit flush."""
+        slab_1 = SlabPanel(
+            slab_id="S1",
+            origin=(0.0, 0.0),
+            width_x=12.0,
+            width_y=1.0,
+            thickness=0.15,
+            elevation=3.0,
+        )
+        slab_2 = SlabPanel(
+            slab_id="S2",
+            origin=(0.0, 2.0),
+            width_x=12.0,
+            width_y=1.0,
+            thickness=0.15,
+            elevation=3.0,
+        )
+        generator = SlabMeshGenerator(base_node_tag=1000, base_element_tag=5000)
+
+        with caplog.at_level(logging.WARNING, logger="src.fem.slab_element"):
+            generator.generate_mesh(slab=slab_1, floor_level=1, section_tag=1, elements_along_x=1, elements_along_y=1)
+            generator.generate_mesh(slab=slab_2, floor_level=1, section_tag=1, elements_along_x=1, elements_along_y=1)
+
+            pre_flush = [
+                rec.message
+                for rec in caplog.records
+                if "Slab mesh aspect ratio warning:" in rec.message
+            ]
+            assert len(pre_flush) == 0
+
+            generator.flush_high_aspect_ratio_warnings(max_aspect_ratio=5.0)
+
+        post_flush = [
+            rec.message
+            for rec in caplog.records
+            if "Slab mesh aspect ratio warning:" in rec.message
+        ]
+        assert len(post_flush) == 1
+        assert "2 panels exceed max 5.00" in post_flush[0]
 
 
 class TestCreateSlabPanelsFromBays:

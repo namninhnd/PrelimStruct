@@ -37,6 +37,36 @@ def simple_1bay_project():
     return project
 
 
+def _max_shell_aspect_ratio(model) -> float:
+    """Return maximum edge-length aspect ratio over slab shell elements."""
+    max_aspect_ratio = 0.0
+
+    for elem in model.elements.values():
+        if elem.element_type != ElementType.SHELL_MITC4:
+            continue
+
+        n1 = model.nodes[elem.node_tags[0]]
+        n2 = model.nodes[elem.node_tags[1]]
+        n3 = model.nodes[elem.node_tags[2]]
+        n4 = model.nodes[elem.node_tags[3]]
+
+        edge_lengths = [
+            ((n2.x - n1.x) ** 2 + (n2.y - n1.y) ** 2 + (n2.z - n1.z) ** 2) ** 0.5,
+            ((n3.x - n2.x) ** 2 + (n3.y - n2.y) ** 2 + (n3.z - n2.z) ** 2) ** 0.5,
+            ((n4.x - n3.x) ** 2 + (n4.y - n3.y) ** 2 + (n4.z - n3.z) ** 2) ** 0.5,
+            ((n1.x - n4.x) ** 2 + (n1.y - n4.y) ** 2 + (n1.z - n4.z) ** 2) ** 0.5,
+        ]
+        min_edge = min(edge_lengths)
+        if min_edge <= 0.0:
+            continue
+
+        aspect_ratio = max(edge_lengths) / min_edge
+        if aspect_ratio > max_aspect_ratio:
+            max_aspect_ratio = aspect_ratio
+
+    return max_aspect_ratio
+
+
 class TestSlabMeshDivisionsMultipleOfBeamDiv:
     """Test that slab mesh divisions are multiples of NUM_SUBDIVISIONS."""
 
@@ -114,6 +144,66 @@ class TestSlabMeshDivisionsMultipleOfBeamDiv:
         expected_elem_count = (NUM_SUBDIVISIONS * 2) * (NUM_SUBDIVISIONS * 2)
         assert len(slab_elements) == expected_elem_count, \
             f"Expected {expected_elem_count} slab elements (8x8 grid with 2x refinement), got {len(slab_elements)}"
+
+    def test_secondary_y_direction_mesh_aspect_ratio_within_limit(self):
+        """Y-direction secondary beams should keep slab shell AR within limit."""
+        project = ProjectData()
+        project.geometry = GeometryInput(
+            bay_x=9.0,
+            bay_y=6.0,
+            floors=1,
+            story_height=4.0,
+            num_bays_x=1,
+            num_bays_y=1,
+        )
+        project.lateral = LateralInput(
+            building_width=9.0,
+            building_depth=6.0,
+            core_wall_config=None,
+        )
+
+        options = ModelBuilderOptions(
+            include_slabs=True,
+            num_secondary_beams=3,
+            secondary_beam_direction="Y",
+            slab_elements_per_bay=1,
+            include_core_wall=False,
+            trim_beams_at_core=False,
+            apply_gravity_loads=False,
+        )
+
+        model = build_fem_model(project, options)
+        assert _max_shell_aspect_ratio(model) <= 5.0
+
+    def test_secondary_x_direction_mesh_aspect_ratio_within_limit(self):
+        """X-direction secondary beams should keep slab shell AR within limit."""
+        project = ProjectData()
+        project.geometry = GeometryInput(
+            bay_x=6.0,
+            bay_y=18.0,
+            floors=1,
+            story_height=4.0,
+            num_bays_x=1,
+            num_bays_y=1,
+        )
+        project.lateral = LateralInput(
+            building_width=6.0,
+            building_depth=18.0,
+            core_wall_config=None,
+        )
+
+        options = ModelBuilderOptions(
+            include_slabs=True,
+            num_secondary_beams=1,
+            secondary_beam_direction="X",
+            slab_elements_per_bay=1,
+            include_core_wall=False,
+            trim_beams_at_core=False,
+            apply_gravity_loads=False,
+        )
+
+        model = build_fem_model(project, options)
+        assert _max_shell_aspect_ratio(model) <= 5.0
 
 
 class TestSlabMeshReusesBeamIntermediateNodes:

@@ -14,6 +14,9 @@ from src.core.data_models import ProjectData, WindResult
 from src.fem.model_builder import build_fem_model, ModelBuilderOptions
 from src.fem.fem_engine import FEMModel
 from src.fem.wind_calculator import calculate_hk_wind
+from src.fem.load_combinations import LoadCombinationLibrary
+from src.fem.combination_processor import combine_results, get_applicable_combinations
+from src.fem.wind_case_synthesizer import with_synthesized_w1_w24_cases
 from src.fem.visualization import (
     create_plan_view,
     create_elevation_view,
@@ -119,6 +122,7 @@ def _clear_analysis_state() -> None:
     keys_to_clear = [
         "fem_preview_analysis_result",
         "fem_analysis_results_dict",  # Multi-load-case results dict
+        "fem_combined_results_cache",  # Cached combination AnalysisResult objects
         "fem_analysis_status", 
         "fem_analysis_message",
     ]
@@ -169,6 +173,19 @@ def _format_floor_label(z: float, floor_levels: List[float], story_height: float
     return format_floor_label_from_elevation(z, floor_levels)
 
 
+def _get_selected_canonical_combinations(selected_names: set[str]) -> List[Any]:
+    all_combinations = LoadCombinationLibrary.get_all_combinations()
+    return [comb for comb in all_combinations if comb.name in selected_names]
+
+
+def _build_combined_cache_key(
+    combination_name: str,
+    results_dict: Dict[str, Any],
+) -> Tuple[str, Tuple[Tuple[str, int], ...]]:
+    signature = tuple(sorted((case_name, id(result)) for case_name, result in results_dict.items()))
+    return combination_name, signature
+
+
 def render_unified_fem_views(
     project: ProjectData,
     analysis_result: Any = None,
@@ -206,6 +223,7 @@ def render_unified_fem_views(
         "fem_view_use_opsvis": False,
         "fem_view_opsvis_label_mode": "Max abs",
         "fem_view_opsvis_label_stride": 1,
+        "fem_view_result_mode": "Load Case",
         "fem_active_tab": "Plan View",  # Track active tab for force rendering optimization
     }
     
@@ -395,37 +413,46 @@ def render_unified_fem_views(
     displaced_nodes = None
     reactions = None
     
-    # --- Load Case Selection: Update analysis_result from results_dict BEFORE has_results check ---
-    # This ensures the selected load case is used throughout the entire function
+    # --- Result Selection: initialize from solved load cases before has_results check ---
     results_dict = st.session_state.get("fem_analysis_results_dict", {})
+    all_load_cases = [
+        "DL",
+        "SDL",
+        "LL",
+        "Wx",
+        "Wy",
+        "Wtz",
+        *[f"W{i}" for i in range(1, 25)],
+    ]
+    available_load_cases = [lc for lc in all_load_cases if lc in results_dict] if results_dict else ["DL", "SDL", "LL"]
+    result_mode = st.session_state.get("fem_view_result_mode", "Load Case")
+    selected_load_case = st.session_state.get("fem_view_load_case")
+    selected_combination_name = st.session_state.get("fem_view_load_combination")
+    current_result_label = selected_load_case
+
     if results_dict:
-        # Get selected load case from session state (defaults to "DL")
-        selected_load_case = st.session_state.get("fem_view_load_case", "DL")
+        if available_load_cases and selected_load_case not in available_load_cases:
+            st.session_state["fem_view_load_case"] = available_load_cases[0]
+            selected_load_case = available_load_cases[0]
+
         if selected_load_case in results_dict:
             analysis_result = results_dict[selected_load_case]
+            current_result_label = selected_load_case
+
+        if analysis_result is None or not getattr(analysis_result, "success", False):
+            for load_case in available_load_cases:
+                candidate = results_dict.get(load_case)
+                if candidate is not None and getattr(candidate, "success", False):
+                    st.session_state["fem_view_load_case"] = load_case
+                    selected_load_case = load_case
+                    analysis_result = candidate
+                    current_result_label = load_case
+                    break
     
     # Check for analysis results
     has_results = analysis_result is not None and getattr(analysis_result, "success", False)
     
-    # In unified view, we handle overlays via config logic or explicit passing
-    # Previously show_overlay was a toggle, now we have specific toggles
-    
-    if has_results:
-        # If show_deformed is on, pass displacements
-        if st.session_state.fem_view_show_deformed:
-            displaced_nodes = _analysis_result_to_displacements(analysis_result)
-        
-        # If show_reactions is on, pass reactions
-        if st.session_state.fem_view_show_reactions:
-            reactions = getattr(analysis_result, "node_reactions", None)
-
-    # Utilization Map
     util_map = {}
-    if st.session_state.fem_view_color_mode == "Utilization":
-        if not has_results:
-            st.info("Run FEM Analysis to see element utilization")
-        elif hasattr(analysis_result, "element_utilization"):
-             util_map = analysis_result.element_utilization
 
     # Debug prints removed to prevent console spam and UI lag
 
@@ -449,9 +476,11 @@ def render_unified_fem_views(
                 
                 run_load_cases = ["DL", "SDL", "LL"]
                 if include_wind:
-                    run_load_cases.extend(["Wx+", "Wx-", "Wy+", "Wy-"])
+                    run_load_cases.extend(["Wx", "Wy", "Wtz"])
 
                 results_dict = analyze_model(model, load_cases=run_load_cases)
+                if include_wind:
+                    results_dict = with_synthesized_w1_w24_cases(results_dict)
                 progress_bar.progress(0.8)
                 
                 status_text.text("Analysis complete!")
@@ -500,37 +529,92 @@ def render_unified_fem_views(
         else:
             st.caption("Run analysis to lock inputs")
     
-    all_load_cases = ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
-    available_load_cases = [lc for lc in all_load_cases if lc in results_dict] if results_dict else ["DL", "SDL", "LL"]
-    
-    selected_load_case = None
     if has_results:
-        current_case = st.session_state.get("fem_view_load_case")
-        if available_load_cases and current_case not in available_load_cases:
-            st.session_state["fem_view_load_case"] = available_load_cases[0]
-
-        selected_load_case = st.selectbox(
-            "Load Case",
-            options=available_load_cases,
-            key="fem_view_load_case",
-            help="Select load case to display in force diagrams"
+        result_mode = st.radio(
+            "View Mode",
+            options=["Load Case", "Load Combination"],
+            key="fem_view_result_mode",
+            horizontal=True,
         )
-        
-        results_dict = st.session_state.get("fem_analysis_results_dict", {})
-        if selected_load_case in results_dict:
-            analysis_result = results_dict[selected_load_case]
+
+        if result_mode == "Load Case":
+            selected_load_case = st.selectbox(
+                "Load Case",
+                options=available_load_cases,
+                key="fem_view_load_case",
+                help="Select load case to display in force diagrams",
+            )
+            if selected_load_case in results_dict:
+                analysis_result = results_dict[selected_load_case]
+                current_result_label = selected_load_case
+        else:
+            selected_names = st.session_state.get("selected_combinations", set())
+            selected_combinations = _get_selected_canonical_combinations(selected_names)
+            applicable_combinations = get_applicable_combinations(
+                selected_combinations,
+                available_load_cases,
+            )
+
+            if applicable_combinations:
+                combination_by_name = {comb.name: comb for comb in applicable_combinations}
+                combination_names = list(combination_by_name.keys())
+
+                if selected_combination_name not in combination_names:
+                    st.session_state["fem_view_load_combination"] = combination_names[0]
+
+                selected_combination_name = st.selectbox(
+                    "Load Combination",
+                    options=combination_names,
+                    key="fem_view_load_combination",
+                    help="Select factored load combination to display",
+                )
+
+                combined_cache = st.session_state.setdefault("fem_combined_results_cache", {})
+                cache_key = _build_combined_cache_key(selected_combination_name, results_dict)
+                if cache_key not in combined_cache:
+                    combined_cache[cache_key] = combine_results(
+                        results_dict,
+                        combination_by_name[selected_combination_name],
+                    )
+
+                analysis_result = combined_cache[cache_key]
+                current_result_label = selected_combination_name
+            else:
+                st.info(
+                    "No selected canonical combinations are applicable to the solved load cases. "
+                    "Check sidebar combination selection."
+                )
+
+    # Recompute final result flags/data after load case/combination selection
+    has_results = analysis_result is not None and getattr(analysis_result, "success", False)
+
+    if has_results:
+        if st.session_state.fem_view_show_deformed:
+            displaced_nodes = _analysis_result_to_displacements(analysis_result)
+
+        if st.session_state.fem_view_show_reactions:
+            reactions = getattr(analysis_result, "node_reactions", None)
+
+    if st.session_state.fem_view_color_mode == "Utilization":
+        if not has_results:
+            st.info("Run FEM Analysis to see element utilization")
+        elif hasattr(analysis_result, "element_utilization"):
+            util_map = analysis_result.element_utilization
 
     load_pattern_map = {
         "DL": options.dl_load_pattern,
         "SDL": options.sdl_load_pattern,
         "LL": options.ll_load_pattern,
-        "Wx+": options.wx_plus_pattern,
-        "Wx-": options.wx_minus_pattern,
-        "Wy+": options.wy_plus_pattern,
-        "Wy-": options.wy_minus_pattern,
+        "Wx": options.wx_pattern,
+        "Wy": options.wy_pattern,
+        "Wtz": options.wtz_pattern,
     }
-    active_load_case = selected_load_case if has_results else None
-    active_load_pattern = load_pattern_map.get(active_load_case) if active_load_case else None
+    active_load_case = current_result_label if has_results else None
+    active_load_pattern = (
+        load_pattern_map.get(active_load_case)
+        if active_load_case and result_mode == "Load Case"
+        else None
+    )
     
     analysis_status = st.session_state.get("fem_analysis_status", None)
     analysis_message = st.session_state.get("fem_analysis_message", "")
@@ -785,7 +869,7 @@ def render_unified_fem_views(
         )
         active_fig = fig_3d
 
-    if use_opsvis and force_code and has_results:
+    if use_opsvis and force_code and has_results and result_mode == "Load Case":
         st.divider()
         st.markdown("### opsvis Force Diagram")
         st.caption("Rebuilds the OpenSees model for the selected load case.")
@@ -841,6 +925,8 @@ def render_unified_fem_views(
             if "_opsvis_last_error" in st.session_state:
                 del st.session_state["_opsvis_last_error"]
             st.pyplot(opsvis_fig, clear_figure=True)
+    elif use_opsvis and force_code and has_results and result_mode == "Load Combination":
+        st.info("opsvis force diagram is available only in Load Case mode.")
 
     # --- 5. Display Options Panel (MOVED BELOW) ---
     st.divider()
@@ -939,7 +1025,9 @@ def render_unified_fem_views(
         st.divider()
         with st.expander("Reaction Forces Table", expanded=False):
             results_dict_for_table = st.session_state.get("fem_analysis_results_dict", {})
-            if results_dict_for_table:
+            if result_mode == "Load Combination" and selected_combination_name:
+                reaction_table = ReactionTable({selected_combination_name: analysis_result})
+            elif results_dict_for_table:
                 reaction_table = ReactionTable(results_dict_for_table)
             else:
                 reaction_table = ReactionTable(analysis_result)
@@ -948,7 +1036,7 @@ def render_unified_fem_views(
     # --- 6b. Beam Forces Table ---
     if has_results:
         with st.expander("Beam Section Forces", expanded=False):
-            current_load_case = st.session_state.get("fem_view_load_case", "DL")
+            current_load_case = current_result_label if current_result_label else "DL"
             beam_forces_table = BeamForcesTable(
                 model=model,
                 analysis_result=analysis_result,
@@ -962,7 +1050,7 @@ def render_unified_fem_views(
     # --- 6c. Column Forces Table ---
     if has_results:
         with st.expander("Column Section Forces", expanded=False):
-            current_load_case = st.session_state.get("fem_view_load_case", "DL")
+            current_load_case = current_result_label if current_result_label else "DL"
             column_forces_table = ColumnForcesTable(
                 model=model,
                 analysis_result=analysis_result,

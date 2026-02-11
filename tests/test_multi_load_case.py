@@ -83,7 +83,7 @@ def test_analyze_model_multiple_load_cases(ops_monkeypatch) -> None:
         assert lc_name in result.message
 
 
-def test_analyze_model_all_seven_load_cases(ops_monkeypatch) -> None:
+def test_analyze_model_all_component_load_cases(ops_monkeypatch) -> None:
     reset_material_tags()
     model = create_simple_frame_model(
         bay_width=4.0,
@@ -96,7 +96,7 @@ def test_analyze_model_all_seven_load_cases(ops_monkeypatch) -> None:
         column_width=400,
         column_height=400,
     )
-    for pattern_id in range(1, 8):
+    for pattern_id in (1, 2, 3, 4, 6, 8):
         model.add_load(
             Load(node_tag=4, load_values=[0, 0, -1000 * pattern_id, 0, 0, 0], load_pattern=pattern_id)
         )
@@ -110,10 +110,10 @@ def test_analyze_model_all_seven_load_cases(ops_monkeypatch) -> None:
     ops_monkeypatch._reaction_data = {1: [0, 0, 1000, 0, 0, 0], 2: [0, 0, 1000, 0, 0, 0]}
     ops_monkeypatch.element_forces = {1: [0.0] * 12, 2: [0.0] * 12, 3: [0.0] * 12}
     
-    all_load_cases = ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
+    all_load_cases = ["DL", "SDL", "LL", "Wx", "Wy", "Wtz"]
     results = analyze_model(model, load_cases=all_load_cases)
     
-    assert len(results) == 7
+    assert len(results) == 6
     for lc in all_load_cases:
         assert lc in results
         assert results[lc].success
@@ -123,10 +123,9 @@ def test_load_case_pattern_map() -> None:
     assert LOAD_CASE_PATTERN_MAP["DL"] == 1
     assert LOAD_CASE_PATTERN_MAP["SDL"] == 2
     assert LOAD_CASE_PATTERN_MAP["LL"] == 3
-    assert LOAD_CASE_PATTERN_MAP["Wx+"] == 4
-    assert LOAD_CASE_PATTERN_MAP["Wx-"] == 5
-    assert LOAD_CASE_PATTERN_MAP["Wy+"] == 6
-    assert LOAD_CASE_PATTERN_MAP["Wy-"] == 7
+    assert LOAD_CASE_PATTERN_MAP["Wx"] == 4
+    assert LOAD_CASE_PATTERN_MAP["Wy"] == 6
+    assert LOAD_CASE_PATTERN_MAP["Wtz"] == 8
     assert LOAD_CASE_PATTERN_MAP["combined"] == 0
 
 

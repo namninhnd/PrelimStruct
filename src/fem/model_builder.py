@@ -213,10 +213,9 @@ class ModelBuilderOptions:
     dl_load_pattern: int = 1      # Dead load (self-weight: slab + beam)
     sdl_load_pattern: int = 2     # Superimposed dead load (finishes, services)
     ll_load_pattern: int = 3      # Live load
-    wx_plus_pattern: int = 4      # Wind +X direction
-    wx_minus_pattern: int = 5     # Wind -X direction
-    wy_plus_pattern: int = 6      # Wind +Y direction
-    wy_minus_pattern: int = 7     # Wind -Y direction
+    wx_pattern: int = 4           # Wind component WX1 (X direction)
+    wy_pattern: int = 6           # Wind component WX2 (Y direction)
+    wtz_pattern: int = 8          # Wind torsion component WTZ
     tolerance: float = 1e-6
     edge_clearance_m: float = 0.5
     slab_thickness: float = 0.15
@@ -867,6 +866,52 @@ def _compute_floor_shears(base_shear_kn: float,
         heights[idx]: base_shear_n * (heights[idx] / height_sum)
         for idx in range(len(heights))
     }
+
+
+def _compute_wtz_torsional_moments(
+    floor_shears_x: Dict[float, float],
+    floor_shears_y: Dict[float, float],
+    building_width: float,
+    building_depth: float,
+) -> Tuple[Dict[float, float], str]:
+    """Compute Option B torsional moments for the Wtz component case.
+
+    Option B formulas:
+    - eccentricity_x = 0.05 * building_depth
+    - eccentricity_y = 0.05 * building_width
+    - Mz_floor = floor_shear * eccentricity
+
+    The Wtz component case is represented by a single torsional-moment set.
+    Basis selection is deterministic: X-basis if X shears govern in magnitude,
+    otherwise Y-basis.
+
+    Returns:
+        (torsional_moments_by_level, basis_label)
+    """
+    if not floor_shears_x and not floor_shears_y:
+        return {}, "NONE"
+
+    eccentricity_x = 0.05 * building_depth
+    eccentricity_y = 0.05 * building_width
+
+    sum_abs_x = sum(abs(v) for v in floor_shears_x.values())
+    sum_abs_y = sum(abs(v) for v in floor_shears_y.values())
+
+    use_x_basis = bool(floor_shears_x) and (not floor_shears_y or sum_abs_x >= sum_abs_y)
+    if use_x_basis:
+        source_shears = floor_shears_x
+        eccentricity = eccentricity_x
+        basis = "X"
+    else:
+        source_shears = floor_shears_y
+        eccentricity = eccentricity_y
+        basis = "Y"
+
+    torsional_moments = {
+        level: shear * eccentricity
+        for level, shear in source_shears.items()
+    }
+    return torsional_moments, basis
 
 
 def _extract_wall_panels(
@@ -1964,26 +2009,26 @@ def build_fem_model(project: ProjectData,
                     # Logic: If secondary beams exist, they split the bay into (N+1) strips
                     if options.num_secondary_beams > 0:
                         if options.secondary_beam_direction == "Y":
-                            # Beams run Y-dir, split Y-dimension to run strips along X
-                            num_strips = options.num_secondary_beams + 1
-                            strip_width = geometry.bay_y / num_strips
-                            
-                            for k in range(num_strips):
-                                sub_panels.append({
-                                    "suffix": f"_{k}",
-                                    "origin": (base_origin_x, base_origin_y + k * strip_width),
-                                    "dims": (geometry.bay_x, strip_width)
-                                })
-                        else:
-                            # Beams run X-dir, split X-dimension to run strips along Y
+                            # Beams run along Y at fixed X locations, so slabs split in X.
                             num_strips = options.num_secondary_beams + 1
                             strip_width = geometry.bay_x / num_strips
-                            
+
                             for k in range(num_strips):
                                 sub_panels.append({
                                     "suffix": f"_{k}",
                                     "origin": (base_origin_x + k * strip_width, base_origin_y),
                                     "dims": (strip_width, geometry.bay_y)
+                                })
+                        else:
+                            # Beams run along X at fixed Y locations, so slabs split in Y.
+                            num_strips = options.num_secondary_beams + 1
+                            strip_width = geometry.bay_y / num_strips
+
+                            for k in range(num_strips):
+                                sub_panels.append({
+                                    "suffix": f"_{k}",
+                                    "origin": (base_origin_x, base_origin_y + k * strip_width),
+                                    "dims": (geometry.bay_x, strip_width)
                                 })
                     else:
                         # No secondary beams, single panel per bay
@@ -2010,13 +2055,15 @@ def build_fem_model(project: ProjectData,
                         beam_div = NUM_SUBDIVISIONS
                         sec_div = options.num_secondary_beams + 1 if options.num_secondary_beams > 0 else 1
                         refinement = max(1, options.slab_elements_per_bay)
-                        
+                        split_axis_global_div = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                        split_axis_div_per_strip = max(1, split_axis_global_div // sec_div)
+
                         if options.secondary_beam_direction == "Y":
-                            elements_along_x = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                            elements_along_x = split_axis_div_per_strip
                             elements_along_y = beam_div
                         else:
                             elements_along_x = beam_div
-                            elements_along_y = math.lcm(beam_div, sec_div) if sec_div > 1 else beam_div
+                            elements_along_y = split_axis_div_per_strip
                         
                         elements_along_x *= refinement
                         elements_along_y *= refinement
@@ -2057,6 +2104,9 @@ def build_fem_model(project: ProjectData,
                             slab_element_tags.append(elem.tag)
                     
         
+        # Emit one summarized slab mesh warning (if any high-AR panels were generated)
+        slab_generator.flush_high_aspect_ratio_warnings(max_aspect_ratio=5.0)
+
         # Apply surface loads to all slab elements
         if options.apply_gravity_loads and slab_element_tags:
             _apply_slab_surface_loads(
@@ -2103,51 +2153,56 @@ def build_fem_model(project: ProjectData,
             floor_shears_x = _compute_floor_shears(base_shear_x, geometry.story_height, geometry.floors)
             floor_shears_y = _compute_floor_shears(base_shear_y, geometry.story_height, geometry.floors)
 
+            building_width = project.lateral.building_width
+            if building_width <= 0.0:
+                building_width = geometry.bay_x * geometry.num_bays_x
+
+            building_depth = project.lateral.building_depth
+            if building_depth <= 0.0:
+                building_depth = geometry.bay_y * geometry.num_bays_y
+
             if floor_shears_x:
-                # Wind +X (pattern 4)
                 apply_lateral_loads_to_diaphragms(
                     model,
                     floor_shears=floor_shears_x,
                     direction="X",
-                    load_pattern=options.wx_plus_pattern,
+                    load_pattern=options.wx_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wx+ loads to {len(floor_shears_x)} floors (pattern {options.wx_plus_pattern})")
-                
-                # Wind -X (pattern 5) - negative shears
-                apply_lateral_loads_to_diaphragms(
-                    model,
-                    floor_shears={k: -v for k, v in floor_shears_x.items()},
-                    direction="X",
-                    load_pattern=options.wx_minus_pattern,
-                    tolerance=options.tolerance,
-                    master_lookup=master_by_level if master_by_level else None,
-                )
-                logger.info(f"Applied Wx- loads to {len(floor_shears_x)} floors (pattern {options.wx_minus_pattern})")
+                logger.info(f"Applied Wx loads to {len(floor_shears_x)} floors (pattern {options.wx_pattern})")
 
             if floor_shears_y:
-                # Wind +Y (pattern 6)
                 apply_lateral_loads_to_diaphragms(
                     model,
                     floor_shears=floor_shears_y,
                     direction="Y",
-                    load_pattern=options.wy_plus_pattern,
+                    load_pattern=options.wy_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
                 )
-                logger.info(f"Applied Wy+ loads to {len(floor_shears_y)} floors (pattern {options.wy_plus_pattern})")
-                
-                # Wind -Y (pattern 7) - negative shears
+                logger.info(f"Applied Wy loads to {len(floor_shears_y)} floors (pattern {options.wy_pattern})")
+
+            torsional_moments, basis = _compute_wtz_torsional_moments(
+                floor_shears_x=floor_shears_x,
+                floor_shears_y=floor_shears_y,
+                building_width=building_width,
+                building_depth=building_depth,
+            )
+            if torsional_moments:
                 apply_lateral_loads_to_diaphragms(
                     model,
-                    floor_shears={k: -v for k, v in floor_shears_y.items()},
-                    direction="Y",
-                    load_pattern=options.wy_minus_pattern,
+                    floor_shears={},
+                    direction="X",
+                    load_pattern=options.wtz_pattern,
                     tolerance=options.tolerance,
                     master_lookup=master_by_level if master_by_level else None,
+                    torsional_moments=torsional_moments,
                 )
-                logger.info(f"Applied Wy- loads to {len(floor_shears_y)} floors (pattern {options.wy_minus_pattern})")
+                logger.info(
+                    f"Applied Wtz torsional moments to {len(torsional_moments)} floors "
+                    f"(pattern {options.wtz_pattern}, basis {basis})"
+                )
 
     # Phase 3: Analysis Preparation (OpenSees BuildingTcl pattern)
     # Validate model before returning

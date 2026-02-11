@@ -17,6 +17,8 @@ from src.fem.model_builder import (
     create_floor_rigid_diaphragms,
     build_fem_model,
     ModelBuilderOptions,
+    _compute_floor_shears,
+    _compute_wtz_torsional_moments,
     NUM_SUBDIVISIONS,
     trim_beam_segment_against_polygon,
 )
@@ -187,19 +189,50 @@ def test_build_fem_model_basic_frame_counts() -> None:
 
 def test_build_fem_model_wind_loads_apply_to_diaphragms() -> None:
     project = _make_project(floors=3)
-    project.wind_result = WindResult(base_shear=1200.0, overturning_moment=0.0)
+    project.wind_result = WindResult(base_shear_x=1200.0, base_shear_y=600.0, overturning_moment=0.0)
 
     model = build_fem_model(
         project,
         ModelBuilderOptions(include_core_wall=False, apply_gravity_loads=False, apply_wind_loads=True),
     )
 
-    # Now applies 4 directions (±X, ±Y) × 3 floors = 12 loads
-    assert len(model.loads) == project.geometry.floors * 4
-    # Check that loads are distributed across patterns 4-7 (wind patterns)
-    wind_patterns = {4, 5, 6, 7}
+    assert len(model.loads) == project.geometry.floors * 3
+    wind_patterns = {4, 6, 8}
     load_patterns = {load.load_pattern for load in model.loads}
     assert load_patterns == wind_patterns
+
+    eccentricity_x = 0.05 * project.lateral.building_depth
+    wx_fx_by_node = {
+        load.node_tag: load.load_values[0]
+        for load in model.loads
+        if load.load_pattern == 4
+    }
+    wtz_mz_by_node = {
+        load.node_tag: load.load_values[5]
+        for load in model.loads
+        if load.load_pattern == 8
+    }
+
+    assert wx_fx_by_node.keys() == wtz_mz_by_node.keys()
+    for node_tag, wx_force in wx_fx_by_node.items():
+        assert wtz_mz_by_node[node_tag] == pytest.approx(wx_force * eccentricity_x)
+
+
+def test_compute_wtz_torsional_moments_option_b_formulas() -> None:
+    floor_shears_x = _compute_floor_shears(base_shear_kn=1000.0, story_height=3.0, floors=3)
+    floor_shears_y = _compute_floor_shears(base_shear_kn=400.0, story_height=3.0, floors=3)
+
+    moments, basis = _compute_wtz_torsional_moments(
+        floor_shears_x=floor_shears_x,
+        floor_shears_y=floor_shears_y,
+        building_width=20.0,
+        building_depth=30.0,
+    )
+
+    assert basis == "X"
+    eccentricity_x = 0.05 * 30.0
+    for level, shear in floor_shears_x.items():
+        assert moments[level] == pytest.approx(shear * eccentricity_x)
 
 
 def test_trim_beam_segment_splits_across_core() -> None:
@@ -466,10 +499,9 @@ class TestModelBuilderOptions:
         assert options.dl_load_pattern == 1
         assert options.sdl_load_pattern == 2
         assert options.ll_load_pattern == 3
-        assert options.wx_plus_pattern == 4
-        assert options.wx_minus_pattern == 5
-        assert options.wy_plus_pattern == 6
-        assert options.wy_minus_pattern == 7
+        assert options.wx_pattern == 4
+        assert options.wy_pattern == 6
+        assert options.wtz_pattern == 8
 
     def test_custom_options(self) -> None:
         """Test custom ModelBuilderOptions values."""

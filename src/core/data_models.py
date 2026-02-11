@@ -45,44 +45,41 @@ class CoreWallConfig(Enum):
 
 
 class WindLoadCase(Enum):
-    """HK Code 2019 Wind Load Cases (24 Cases).
-    
-    Format: W{Case}_{Angle}_{Eccentricity}
-    Angles: 0, 45, 90, 135, 180, 225, 270, 315
-    Eccentricity: C (Center), P (Positive), N (Negative)
+    """HK Wind Effects 2019 canonical wind load cases (24 total).
+
+    Semantics:
+    - 3 dominance groups (WX1-dominant, WX2-dominant, WTZ-dominant)
+    - 8 sign permutations per group
     """
-    # 0 Degree (X-Direction)
-    W01_000_C = "W1"
-    W02_000_P = "W2"
-    W03_000_N = "W3"
-    # 45 Degree
-    W04_045_C = "W4"
-    W05_045_P = "W5"
-    W06_045_N = "W6"
-    # 90 Degree (Y-Direction)
-    W07_090_C = "W7"
-    W08_090_P = "W8"
-    W09_090_N = "W9"
-    # 135 Degree
-    W10_135_C = "W10"
-    W11_135_P = "W11"
-    W12_135_N = "W12"
-    # 180 Degree (-X Direction)
-    W13_180_C = "W13"
-    W14_180_P = "W14"
-    W15_180_N = "W15"
-    # 225 Degree
-    W16_225_C = "W16"
-    W17_225_P = "W17"
-    W18_225_N = "W18"
-    # 270 Degree (-Y Direction)
-    W19_270_C = "W19"
-    W20_270_P = "W20"
-    W21_270_N = "W21"
-    # 315 Degree
-    W22_315_C = "W22"
-    W23_315_P = "W23"
-    W24_315_N = "W24"
+    # Group 1: WX1 dominant
+    W1 = "W1"
+    W2 = "W2"
+    W3 = "W3"
+    W4 = "W4"
+    W5 = "W5"
+    W6 = "W6"
+    W7 = "W7"
+    W8 = "W8"
+
+    # Group 2: WX2 dominant
+    W9 = "W9"
+    W10 = "W10"
+    W11 = "W11"
+    W12 = "W12"
+    W13 = "W13"
+    W14 = "W14"
+    W15 = "W15"
+    W16 = "W16"
+
+    # Group 3: WTZ dominant
+    W17 = "W17"
+    W18 = "W18"
+    W19 = "W19"
+    W20 = "W20"
+    W21 = "W21"
+    W22 = "W22"
+    W23 = "W23"
+    W24 = "W24"
 
 
 class SeismicLoadCase(Enum):
@@ -341,6 +338,8 @@ class EnvelopeValue:
         min_value: Minimum value across all load combinations
         governing_max_case: Load combination that governs the maximum value
         governing_min_case: Load combination that governs the minimum value
+        governing_max_case_name: Load combination name that governs the maximum value
+        governing_min_case_name: Load combination name that governs the minimum value
         governing_max_location: Node/element tag where max occurs (for post-processing)
         governing_min_location: Node/element tag where min occurs (for post-processing)
     """
@@ -348,6 +347,8 @@ class EnvelopeValue:
     min_value: float = 0.0
     governing_max_case: Optional[LoadCombination] = None
     governing_min_case: Optional[LoadCombination] = None
+    governing_max_case_name: Optional[str] = None
+    governing_min_case_name: Optional[str] = None
     governing_max_location: Optional[int] = None
     governing_min_location: Optional[int] = None
 

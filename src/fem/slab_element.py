@@ -156,6 +156,7 @@ class SlabMeshGenerator:
         """
         self._node_tag = base_node_tag
         self._element_tag = base_element_tag
+        self._high_aspect_ratio_panels: List[Tuple[str, float]] = []
     
     def _get_next_node_tag(self) -> int:
         tag = self._node_tag
@@ -166,6 +167,27 @@ class SlabMeshGenerator:
         tag = self._element_tag
         self._element_tag += 1
         return tag
+
+    def flush_high_aspect_ratio_warnings(self, max_aspect_ratio: float = 5.0) -> None:
+        """Log a single summarized warning for high-AR slab panels."""
+        if not self._high_aspect_ratio_panels:
+            return
+
+        worst_id, worst_ar = max(self._high_aspect_ratio_panels, key=lambda item: item[1])
+        sample_items = self._high_aspect_ratio_panels[:5]
+        sample_text = ", ".join(f"{slab_id}:{aspect_ratio:.2f}" for slab_id, aspect_ratio in sample_items)
+        if len(self._high_aspect_ratio_panels) > len(sample_items):
+            sample_text += ", ..."
+
+        logger.warning(
+            "Slab mesh aspect ratio warning: %d panels exceed max %.2f. Worst=%s(%.2f). Samples: %s",
+            len(self._high_aspect_ratio_panels),
+            max_aspect_ratio,
+            worst_id,
+            worst_ar,
+            sample_text,
+        )
+        self._high_aspect_ratio_panels.clear()
     
     def generate_mesh(
         self,
@@ -301,9 +323,7 @@ class SlabMeshGenerator:
         # Check mesh quality (aspect ratio)
         aspect_ratio = max(dx, dy) / min(dx, dy) if min(dx, dy) > 0 else float('inf')
         if aspect_ratio > 5:
-            logger.warning(
-                f"Slab mesh '{slab.slab_id}' has high aspect ratio {aspect_ratio:.2f} > 5"
-            )
+            self._high_aspect_ratio_panels.append((slab.slab_id, aspect_ratio))
         
         logger.info(
             f"Generated slab mesh '{slab.slab_id}': "

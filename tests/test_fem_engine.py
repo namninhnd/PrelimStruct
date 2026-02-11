@@ -1,4 +1,5 @@
 import pytest
+import logging
 
 from src.fem.fem_engine import (
     Element,
@@ -592,6 +593,37 @@ class TestModelValidation:
         is_valid, errors = model.validate_model()
         assert is_valid is True
         assert len(errors) == 0
+
+    def test_validate_model_logs_shell_aspect_ratio_warning_once(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Shell aspect-ratio warning should be summarized in a single log entry."""
+        model = FEMModel()
+        model.add_node(Node(tag=1, x=0.0, y=0.0, z=0.0, restraints=[1, 1, 1, 1, 1, 1]))
+        model.add_node(Node(tag=2, x=6.0, y=0.0, z=0.0))
+        model.add_node(Node(tag=3, x=6.0, y=1.0, z=0.0))
+        model.add_node(Node(tag=4, x=0.0, y=1.0, z=0.0))
+        model.add_node(Node(tag=5, x=12.0, y=0.0, z=0.0))
+        model.add_node(Node(tag=6, x=12.0, y=1.0, z=0.0))
+        model.add_material(1, {"material_type": "ElasticIsotropic"})
+        model.add_element(
+            Element(tag=100, element_type=ElementType.SHELL_MITC4,
+                    node_tags=[1, 2, 3, 4], material_tag=1)
+        )
+        model.add_element(
+            Element(tag=101, element_type=ElementType.SHELL_MITC4,
+                    node_tags=[2, 5, 6, 3], material_tag=1)
+        )
+
+        with caplog.at_level(logging.WARNING, logger="src.fem.fem_engine"):
+            is_valid, errors = model.validate_model()
+
+        assert is_valid is True
+        assert len(errors) == 0
+
+        summary_logs = [
+            rec.message for rec in caplog.records if "Shell mesh aspect ratio warning:" in rec.message
+        ]
+        assert len(summary_logs) == 1
+        assert "2 elements exceed max 5.00" in summary_logs[0]
 
     def test_validate_diaphragm_missing_nodes(self) -> None:
         """Test validation detects diaphragm with missing nodes."""

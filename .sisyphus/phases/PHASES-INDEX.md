@@ -41,6 +41,9 @@ Phase 0 (rename)
 | **5** | `phase-5-visualization-tables.md` | Fix labels, headers, add axis arrows | Mz labeled "Major", tables annotated |
 | **6** | `phase-6-integration-tests.md` | Rewrite tests, full suite green | ALL tests pass, zero xfails |
 | **7** | (Post-phase fix) | Fix `eleForce` (global) -> `localForce` (local) + gravity `wz`->`wy` | 167 passed, 0 failed |
+| **11** | `phase-11-canonical-w1-w24-wind-pipeline.md` | Draft canonical wind pipeline: synthesize `W1...W24` from component cases (`Wx1/Wx2/Wtz`) and remove simplified combo path | Canonical `LC_Wi_*` flow works without simplified fallback |
+| **11A** | `phase-11a-secondary-beam-direction-aspect-ratio.md` | Align slab sub-panel split axis with secondary beam direction semantics | Direction-switch AR warnings resolved; targeted AR regressions added |
+| **11B** | `phase-11b-canonical-w1-w24-execution-log.md` | Execution log template with gate-by-gate checklist, evidence ledger, risk log, and rollback plan for canonical W1-W24 implementation | All gates complete with recorded evidence and green targeted tests |
 
 ### Phase 7: Post-Phase Fix (2026-02-08)
 

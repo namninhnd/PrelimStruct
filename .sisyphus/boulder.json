@@ -1,9 +1,10 @@
 {
-  "active_plan": "C:\\Users\\daokh\\Desktop\\PrelimStruct v3-5\\.sisyphus\\plans\\fem-handcalc-verification.md",
-  "started_at": "2026-02-06T03:53:53.213Z",
+  "active_plan": "C:\\Users\\daokh\\Desktop\\PrelimStruct v3-5\\.sisyphus\\phases\\phase-11b-canonical-w1-w24-execution-log.md",
+  "started_at": "2026-02-10T15:34:30.836Z",
   "session_ids": [
-    "ses_3ceea46ddffe2q03B46o1DtOb8",
-    "ses_3ce7b52a5ffe4HaiZmP0RqauHG"
+    "ses_3b558e9c9ffetyUIKzM96iqKMc",
+    "ses_3b7a31060ffe988HTCRUsGkQ0n",
+    "ses_3b4f9ca23ffeefe6Xlcfyg72zv"
   ],
-  "plan_name": "fem-handcalc-verification"
+  "plan_name": "phase-11-canonical-w1-w24-wind-pipeline"
 }

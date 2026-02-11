@@ -42,7 +42,8 @@ def test_slab_subdivision_y_direction():
     beam_div = NUM_SUBDIVISIONS
     sec_div = 1 + 1
     refinement = 2
-    elements_along_x = math.lcm(beam_div, sec_div) * refinement
+    split_axis_global_div = math.lcm(beam_div, sec_div)
+    elements_along_x = (split_axis_global_div // sec_div) * refinement
     elements_along_y = beam_div * refinement
     num_strips = sec_div
     expected_elements = num_strips * elements_along_x * elements_along_y
@@ -85,8 +86,9 @@ def test_slab_subdivision_x_direction():
     beam_div = NUM_SUBDIVISIONS
     sec_div = 2 + 1
     refinement = 3
+    split_axis_global_div = math.lcm(beam_div, sec_div)
     elements_along_x = beam_div * refinement
-    elements_along_y = math.lcm(beam_div, sec_div) * refinement
+    elements_along_y = (split_axis_global_div // sec_div) * refinement
     num_strips = sec_div
     expected_elements = num_strips * elements_along_x * elements_along_y
     

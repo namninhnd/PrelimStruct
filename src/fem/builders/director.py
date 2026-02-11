@@ -39,6 +39,7 @@ from src.fem.model_builder import (
     _get_core_wall_outline,
     _get_core_opening_for_slab,
     _compute_floor_shears,
+    _compute_wtz_torsional_moments,
     create_floor_rigid_diaphragms,
     apply_lateral_loads_to_diaphragms,
 )
@@ -415,21 +416,20 @@ class FEMModelDirector:
                     self.project.geometry.floors
                 )
 
+                building_width = self.project.lateral.building_width
+                if building_width <= 0.0:
+                    building_width = self.project.geometry.bay_x * self.project.geometry.num_bays_x
+
+                building_depth = self.project.lateral.building_depth
+                if building_depth <= 0.0:
+                    building_depth = self.project.geometry.bay_y * self.project.geometry.num_bays_y
+
                 if floor_shears_x:
                     apply_lateral_loads_to_diaphragms(
                         self.model,
                         floor_shears=floor_shears_x,
                         direction="X",
-                        load_pattern=self.options.wx_plus_pattern,
-                        tolerance=self.options.tolerance,
-                        master_lookup=master_by_level if master_by_level else None,
-                    )
-
-                    apply_lateral_loads_to_diaphragms(
-                        self.model,
-                        floor_shears={k: -v for k, v in floor_shears_x.items()},
-                        direction="X",
-                        load_pattern=self.options.wx_minus_pattern,
+                        load_pattern=self.options.wx_pattern,
                         tolerance=self.options.tolerance,
                         master_lookup=master_by_level if master_by_level else None,
                     )
@@ -439,18 +439,26 @@ class FEMModelDirector:
                         self.model,
                         floor_shears=floor_shears_y,
                         direction="Y",
-                        load_pattern=self.options.wy_plus_pattern,
+                        load_pattern=self.options.wy_pattern,
                         tolerance=self.options.tolerance,
                         master_lookup=master_by_level if master_by_level else None,
                     )
 
+                torsional_moments, _ = _compute_wtz_torsional_moments(
+                    floor_shears_x=floor_shears_x,
+                    floor_shears_y=floor_shears_y,
+                    building_width=building_width,
+                    building_depth=building_depth,
+                )
+                if torsional_moments:
                     apply_lateral_loads_to_diaphragms(
                         self.model,
-                        floor_shears={k: -v for k, v in floor_shears_y.items()},
-                        direction="Y",
-                        load_pattern=self.options.wy_minus_pattern,
+                        floor_shears={},
+                        direction="X",
+                        load_pattern=self.options.wtz_pattern,
                         tolerance=self.options.tolerance,
                         master_lookup=master_by_level if master_by_level else None,
+                        torsional_moments=torsional_moments,
                     )
 
 

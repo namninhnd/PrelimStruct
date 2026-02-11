@@ -330,7 +330,7 @@ def analyze_model(
         load_pattern: Load pattern to analyze (for backward compatibility)
         load_cases: List of load case names to analyze. 
                    If None or ["combined"], returns single result with "combined" key.
-                   Supported: ["DL", "SDL", "LL", "Wx+", "Wx-", "Wy+", "Wy-"]
+                   Supported: ["DL", "SDL", "LL", "Wx", "Wy", "Wtz"]
     
     Returns:
         Dict of {load_case_name: AnalysisResult}
@@ -380,10 +380,9 @@ LOAD_CASE_PATTERN_MAP: Dict[str, int] = {
     "DL": 1,      # Dead Load
     "SDL": 2,     # Superimposed Dead Load
     "LL": 3,      # Live Load
-    "Wx+": 4,     # Wind +X
-    "Wx-": 5,     # Wind -X
-    "Wy+": 6,     # Wind +Y
-    "Wy-": 7,     # Wind -Y
+    "Wx": 4,      # Wind component WX1 (X-direction)
+    "Wy": 6,      # Wind component WX2 (Y-direction)
+    "Wtz": 8,     # Wind torsion component WTZ
     "combined": 0,  # All loads combined (special case)
 }
 
@@ -399,7 +398,7 @@ def _run_single_load_case(
     Args:
         model: FEMModel instance
         solver: FEMSolver instance
-        load_case: Load case name (e.g., "DL", "Wx+", "combined")
+        load_case: Load case name (e.g., "DL", "Wx", "combined")
         default_pattern: Default load pattern for "combined" case
     
     Returns:

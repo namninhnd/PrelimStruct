@@ -75,6 +75,7 @@ class ElementForceEnvelope:
         N_max/N_min: Axial force envelope
         Vy_max/Vy_min: Major-axis shear envelope
         Vz_max/Vz_min: Minor-axis shear envelope
+        T_max/T_min: Torsion envelope
         Mz_max/Mz_min: Major-axis moment envelope (ETABS M33)
         My_max/My_min: Minor-axis moment envelope (ETABS M22)
     """
@@ -85,6 +86,8 @@ class ElementForceEnvelope:
     Vy_min: EnvelopeValue = field(default_factory=EnvelopeValue)
     Vz_max: EnvelopeValue = field(default_factory=EnvelopeValue)
     Vz_min: EnvelopeValue = field(default_factory=EnvelopeValue)
+    T_max: EnvelopeValue = field(default_factory=EnvelopeValue)
+    T_min: EnvelopeValue = field(default_factory=EnvelopeValue)
     Mz_max: EnvelopeValue = field(default_factory=EnvelopeValue)
     Mz_min: EnvelopeValue = field(default_factory=EnvelopeValue)
     My_max: EnvelopeValue = field(default_factory=EnvelopeValue)
@@ -176,78 +179,78 @@ class ResultsProcessor:
             # Extract forces (handle both 2D and 3D elements)
             # For 3D beam elements
             if 'N_i' in forces:
-                N = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
-                Vy = max(abs(forces.get('Vy_i', 0.0)), abs(forces.get('Vy_j', 0.0)))
-                Vz = max(abs(forces.get('Vz_i', 0.0)), abs(forces.get('Vz_j', 0.0)))
-                Mz = max(abs(forces.get('Mz_i', 0.0)), abs(forces.get('Mz_j', 0.0)))
-                My = max(abs(forces.get('My_i', 0.0)), abs(forces.get('My_j', 0.0)))
-                N_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
-                Vy_signed = (forces.get('Vy_i', 0.0) + forces.get('Vy_j', 0.0)) / 2
-                Vz_signed = (forces.get('Vz_i', 0.0) + forces.get('Vz_j', 0.0)) / 2
-                Mz_signed = (forces.get('Mz_i', 0.0) + forces.get('Mz_j', 0.0)) / 2
-                My_signed = (forces.get('My_i', 0.0) + forces.get('My_j', 0.0)) / 2
+                n_val = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
+                vy_val = max(abs(forces.get('Vy_i', 0.0)), abs(forces.get('Vy_j', 0.0)))
+                vz_val = max(abs(forces.get('Vz_i', 0.0)), abs(forces.get('Vz_j', 0.0)))
+                mz_val = max(abs(forces.get('Mz_i', 0.0)), abs(forces.get('Mz_j', 0.0)))
+                my_val = max(abs(forces.get('My_i', 0.0)), abs(forces.get('My_j', 0.0)))
+                n_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
+                vy_signed = (forces.get('Vy_i', 0.0) + forces.get('Vy_j', 0.0)) / 2
+                vz_signed = (forces.get('Vz_i', 0.0) + forces.get('Vz_j', 0.0)) / 2
+                mz_signed = (forces.get('Mz_i', 0.0) + forces.get('Mz_j', 0.0)) / 2
+                my_signed = (forces.get('My_i', 0.0) + forces.get('My_j', 0.0)) / 2
             # For 2D beam elements
             elif 'V_i' in forces:
-                N = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
-                Vy = max(abs(forces.get('V_i', 0.0)), abs(forces.get('V_j', 0.0)))
-                Vz = 0.0
-                Mz = max(abs(forces.get('M_i', 0.0)), abs(forces.get('M_j', 0.0)))
-                My = 0.0
-                N_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
-                Vy_signed = (forces.get('V_i', 0.0) + forces.get('V_j', 0.0)) / 2
-                Vz_signed = 0.0
-                Mz_signed = (forces.get('M_i', 0.0) + forces.get('M_j', 0.0)) / 2
-                My_signed = 0.0
+                n_val = max(abs(forces.get('N_i', 0.0)), abs(forces.get('N_j', 0.0)))
+                vy_val = max(abs(forces.get('V_i', 0.0)), abs(forces.get('V_j', 0.0)))
+                vz_val = 0.0
+                mz_val = max(abs(forces.get('M_i', 0.0)), abs(forces.get('M_j', 0.0)))
+                my_val = 0.0
+                n_signed = (forces.get('N_i', 0.0) + forces.get('N_j', 0.0)) / 2
+                vy_signed = (forces.get('V_i', 0.0) + forces.get('V_j', 0.0)) / 2
+                vz_signed = 0.0
+                mz_signed = (forces.get('M_i', 0.0) + forces.get('M_j', 0.0)) / 2
+                my_signed = 0.0
             else:
                 continue  # Skip if force format not recognized
             
             # Update axial force envelope
-            if N > envelope.N_max.max_value:
-                envelope.N_max.max_value = N
+            if n_val > envelope.N_max.max_value:
+                envelope.N_max.max_value = n_val
                 envelope.N_max.governing_max_case = result.combination
                 envelope.N_max.governing_max_location = elem_id
-            if N_signed < envelope.N_min.min_value or envelope.N_min.min_value == 0.0:
-                envelope.N_min.min_value = N_signed
+            if n_signed < envelope.N_min.min_value or envelope.N_min.min_value == 0.0:
+                envelope.N_min.min_value = n_signed
                 envelope.N_min.governing_min_case = result.combination
                 envelope.N_min.governing_min_location = elem_id
             
             # Update major-axis shear envelope
-            if Vy > envelope.Vy_max.max_value:
-                envelope.Vy_max.max_value = Vy
+            if vy_val > envelope.Vy_max.max_value:
+                envelope.Vy_max.max_value = vy_val
                 envelope.Vy_max.governing_max_case = result.combination
                 envelope.Vy_max.governing_max_location = elem_id
-            if Vy_signed < envelope.Vy_min.min_value or envelope.Vy_min.min_value == 0.0:
-                envelope.Vy_min.min_value = Vy_signed
+            if vy_signed < envelope.Vy_min.min_value or envelope.Vy_min.min_value == 0.0:
+                envelope.Vy_min.min_value = vy_signed
                 envelope.Vy_min.governing_min_case = result.combination
                 envelope.Vy_min.governing_min_location = elem_id
 
             # Update minor-axis shear envelope
-            if Vz > envelope.Vz_max.max_value:
-                envelope.Vz_max.max_value = Vz
+            if vz_val > envelope.Vz_max.max_value:
+                envelope.Vz_max.max_value = vz_val
                 envelope.Vz_max.governing_max_case = result.combination
                 envelope.Vz_max.governing_max_location = elem_id
-            if Vz_signed < envelope.Vz_min.min_value or envelope.Vz_min.min_value == 0.0:
-                envelope.Vz_min.min_value = Vz_signed
+            if vz_signed < envelope.Vz_min.min_value or envelope.Vz_min.min_value == 0.0:
+                envelope.Vz_min.min_value = vz_signed
                 envelope.Vz_min.governing_min_case = result.combination
                 envelope.Vz_min.governing_min_location = elem_id
 
             # Update major-axis moment envelope
-            if Mz > envelope.Mz_max.max_value:
-                envelope.Mz_max.max_value = Mz
+            if mz_val > envelope.Mz_max.max_value:
+                envelope.Mz_max.max_value = mz_val
                 envelope.Mz_max.governing_max_case = result.combination
                 envelope.Mz_max.governing_max_location = elem_id
-            if Mz_signed < envelope.Mz_min.min_value or envelope.Mz_min.min_value == 0.0:
-                envelope.Mz_min.min_value = Mz_signed
+            if mz_signed < envelope.Mz_min.min_value or envelope.Mz_min.min_value == 0.0:
+                envelope.Mz_min.min_value = mz_signed
                 envelope.Mz_min.governing_min_case = result.combination
                 envelope.Mz_min.governing_min_location = elem_id
 
             # Update minor-axis moment envelope
-            if My > envelope.My_max.max_value:
-                envelope.My_max.max_value = My
+            if my_val > envelope.My_max.max_value:
+                envelope.My_max.max_value = my_val
                 envelope.My_max.governing_max_case = result.combination
                 envelope.My_max.governing_max_location = elem_id
-            if My_signed < envelope.My_min.min_value or envelope.My_min.min_value == 0.0:
-                envelope.My_min.min_value = My_signed
+            if my_signed < envelope.My_min.min_value or envelope.My_min.min_value == 0.0:
+                envelope.My_min.min_value = my_signed
                 envelope.My_min.governing_min_case = result.combination
                 envelope.My_min.governing_min_location = elem_id
     

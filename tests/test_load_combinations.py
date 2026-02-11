@@ -64,6 +64,20 @@ class TestLoadCombinationDefinitions:
         assert lc_w1_min.name == "LC_W1_MIN"
         assert lc_w1_min.get_factor(LoadComponentType.DL) == 1.0
         assert lc_w1_min.get_factor(LoadComponentType.W1) == 1.4
+
+    def test_canonical_wind_combinations(self):
+        """Test canonical wind combinations with W1-W12 cases."""
+        combs = LoadCombinationLibrary.get_uls_wind_combinations()
+
+        assert len(combs) == 48
+
+        lc_w1_max = next(c for c in combs if c.name == "LC_W1_MAX")
+        assert lc_w1_max.get_factor(LoadComponentType.DL) == 1.4
+        assert lc_w1_max.get_factor(LoadComponentType.W1) == 1.4
+
+        lc_w2_min = next(c for c in combs if c.name == "LC_W2_MIN")
+        assert lc_w2_min.get_factor(LoadComponentType.DL) == 1.0
+        assert lc_w2_min.get_factor(LoadComponentType.W2) == 1.4
     
     def test_uls_seismic_combinations(self):
         """Test ULS seismic combination definitions per Eurocode 8."""
@@ -109,6 +123,13 @@ class TestLoadCombinationDefinitions:
         all_combs = LoadCombinationLibrary.get_all_combinations()
         
         # Should have: 2 gravity + 48 wind + 6 seismic + 1 accidental + 3 SLS = 60 total
+        assert len(all_combs) == 60
+
+    def test_get_all_combinations_count(self):
+        """Test retrieving all canonical combinations."""
+        all_combs = LoadCombinationLibrary.get_all_combinations()
+
+        # 2 gravity + 48 wind + 6 seismic + 1 accidental + 3 SLS = 60
         assert len(all_combs) == 60
     
     def test_combination_equation_generation(self):
@@ -287,6 +308,7 @@ class TestLoadCombinationManager:
         
         # Get a valid combination
         lc1 = manager.get_combination_by_name("LC1")
+        assert lc1 is not None
         is_valid, errors = manager.validate_combination(lc1)
         
         assert is_valid

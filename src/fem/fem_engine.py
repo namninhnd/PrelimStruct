@@ -771,6 +771,7 @@ class FEMModel:
         
         # Mesh quality checks for shell elements (warn only)
         max_aspect_ratio = 5.0
+        high_aspect_ratio_shells: List[Tuple[int, float]] = []
         for elem in self.elements.values():
             if elem.element_type == ElementType.SHELL_MITC4:
                 if len(elem.node_tags) != 4:
@@ -793,12 +794,22 @@ class FEMModel:
                 if min_edge > 0:
                     aspect_ratio = max_edge / min_edge
                     if aspect_ratio > max_aspect_ratio:
-                        _logger.warning(
-                            "Shell element %s has excessive aspect ratio %.2f (max %.2f)",
-                            elem.tag,
-                            aspect_ratio,
-                            max_aspect_ratio,
-                        )
+                        high_aspect_ratio_shells.append((elem.tag, aspect_ratio))
+
+        if high_aspect_ratio_shells:
+            worst_tag, worst_ar = max(high_aspect_ratio_shells, key=lambda item: item[1])
+            sample_items = high_aspect_ratio_shells[:5]
+            sample_text = ", ".join(f"{tag}:{ar:.2f}" for tag, ar in sample_items)
+            if len(high_aspect_ratio_shells) > len(sample_items):
+                sample_text += ", ..."
+            _logger.warning(
+                "Shell mesh aspect ratio warning: %d elements exceed max %.2f. Worst=%s(%.2f). Samples: %s",
+                len(high_aspect_ratio_shells),
+                max_aspect_ratio,
+                worst_tag,
+                worst_ar,
+                sample_text,
+            )
         
         return (len(errors) == 0, errors)
 

@@ -21,37 +21,39 @@ class LoadComponentType(Enum):
     DL = "DL"                        # Self-weight (Dead Load)
     SDL = "SDL"                      # Superimposed Dead Load
     LL = "LL"                        # Live Load
+
+    # Canonical wind component cases (bridge: WX1->Wx, WX2->Wy, WTZ->Wtz)
+    WX = "Wx"
+    WY = "Wy"
+    WTZ = "Wtz"
     
-    # HK Code 2019 Wind Cases (24 directions/eccentricities)
-    # 0 deg
-    W1 = "W1"   # 0 deg, Center
-    W2 = "W2"   # 0 deg, +Ecc
-    W3 = "W3"   # 0 deg, -Ecc
-    # 45 deg
+    # HK Code 2019 Wind Cases (3 dominance groups x 8 sign permutations)
+    # Group 1: WX1 dominant
+    W1 = "W1"
+    W2 = "W2"
+    W3 = "W3"
     W4 = "W4"
     W5 = "W5"
     W6 = "W6"
-    # 90 deg
     W7 = "W7"
     W8 = "W8"
+
+    # Group 2: WX2 dominant
     W9 = "W9"
-    # 135 deg
     W10 = "W10"
     W11 = "W11"
     W12 = "W12"
-    # 180 deg
     W13 = "W13"
     W14 = "W14"
     W15 = "W15"
-    # 225 deg
     W16 = "W16"
+
+    # Group 3: WTZ dominant
     W17 = "W17"
     W18 = "W18"
-    # 270 deg
     W19 = "W19"
     W20 = "W20"
     W21 = "W21"
-    # 315 deg
     W22 = "W22"
     W23 = "W23"
     W24 = "W24"
@@ -166,7 +168,12 @@ class LoadCombinationDefinition:
         for comp in [LoadComponentType.DL, LoadComponentType.SDL, LoadComponentType.LL]:
             if comp in self.load_factors and self.load_factors[comp] != 0:
                 terms.append(format_term(self.load_factors[comp], comp.value))
-        
+
+        # Canonical wind components
+        for comp in [LoadComponentType.WX, LoadComponentType.WY, LoadComponentType.WTZ]:
+            if comp in self.load_factors and self.load_factors[comp] != 0:
+                terms.append(format_term(self.load_factors[comp], comp.value))
+
         # Wind
         for i in range(1, 25):
             w_comp = getattr(LoadComponentType, f"W{i}")
@@ -274,7 +281,7 @@ class LoadCombinationLibrary:
             ))
             
         return combinations
-    
+
     @staticmethod
     def get_uls_seismic_combinations() -> List[LoadCombinationDefinition]:
         """Get ULS seismic load combinations per Eurocode 8.
