@@ -29,7 +29,7 @@ STATE_DEFAULTS = {
     
     # FEM Preview Display Toggles
     "fem_preview_show_nodes": False,  # Show nodes in FEM preview
-    "fem_preview_show_supports": True,  # Show supports in FEM preview
+    "fem_preview_show_supports": False,  # Show supports in FEM preview
     "fem_preview_show_loads": True,  # Show loads in FEM preview
     "fem_preview_show_labels": False,  # Show labels in FEM preview
     "fem_preview_show_slabs": True,  # Show slab elements in FEM preview

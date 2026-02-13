@@ -34,7 +34,7 @@ def test_3d_view_with_utilization_deflection_reactions() -> None:
         1: [1200.0, 0.0, 5000.0, 0.0, 0.0, 0.0],
         2: [800.0, 0.0, 4500.0, 0.0, 0.0, 0.0],
     }
-    config = VisualizationConfig(show_supports=True)
+    config = VisualizationConfig(show_supports=True, show_deformed=True, show_reactions=True)
 
     fig = create_3d_view(
         model,
@@ -196,7 +196,7 @@ def test_3d_view_exaggeration_factor() -> None:
     """Test that 3D view respects displacement exaggeration factor."""
     model = _build_3d_model()
     displaced = {3: (0.01, 0.0, -0.005), 4: (0.015, 0.0, -0.01)}
-    config = VisualizationConfig(exaggeration=50.0)
+    config = VisualizationConfig(show_deformed=True, exaggeration=50.0)
 
     fig = create_3d_view(model, config=config, displaced_nodes=displaced)
 

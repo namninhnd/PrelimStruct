@@ -15,6 +15,8 @@ def test_hk_wind_symmetric_building() -> None:
 
     assert result.base_shear_x == pytest.approx(result.base_shear_y)
     assert result.base_shear == pytest.approx(result.base_shear_x)
+    assert result.reference_pressure == pytest.approx(3.0)
+    assert result.design_pressure == pytest.approx(3.0 * 0.72)
 
 
 def test_hk_wind_rectangular_building() -> None:

@@ -23,6 +23,20 @@ def _build_elevation_model() -> FEMModel:
                               node_tags=[2, 4], material_tag=1))
     model.add_element(Element(tag=3, element_type=ElementType.ELASTIC_BEAM,
                               node_tags=[3, 4], material_tag=1))
+
+    model.add_node(Node(tag=10, x=1.0, y=0.0, z=0.0))
+    model.add_node(Node(tag=11, x=1.0, y=0.0, z=3.0))
+    model.add_node(Node(tag=12, x=1.4, y=0.0, z=3.0))
+    model.add_node(Node(tag=13, x=1.4, y=0.0, z=0.0))
+    model.add_element(
+        Element(
+            tag=20,
+            element_type=ElementType.SHELL_MITC4,
+            node_tags=[10, 11, 12, 13],
+            material_tag=1,
+            section_tag=4,
+        )
+    )
     return model
 
 
@@ -34,7 +48,7 @@ def test_elevation_view_with_deflection_and_reactions() -> None:
         1: [1200.0, 0.0, 5000.0, 0.0, 0.0, 0.0],
         2: [800.0, 0.0, 4500.0, 0.0, 0.0, 0.0],
     }
-    config = VisualizationConfig(show_supports=True)
+    config = VisualizationConfig(show_supports=True, show_deformed=True, show_reactions=True)
 
     fig = create_elevation_view(
         model,
@@ -180,3 +194,27 @@ def test_elevation_view_coupling_beams() -> None:
 
     trace_names = [trace.name for trace in fig.data]
     assert "Coupling Beams" in trace_names
+
+
+def test_elevation_view_shows_core_walls_for_standard_and_custom_gridlines() -> None:
+    model = _build_elevation_model()
+    config = VisualizationConfig(show_walls=True)
+
+    fig_standard = create_elevation_view(model, config=config, view_direction="X", gridline_coord=0.0)
+    fig_custom = create_elevation_view(model, config=config, view_direction="X", gridline_coord=0.2)
+
+    standard_names = [trace.name for trace in fig_standard.data]
+    custom_names = [trace.name for trace in fig_custom.data]
+
+    assert "Core Walls" in standard_names
+    assert "Core Walls" in custom_names
+
+
+def test_elevation_view_hides_core_walls_when_toggle_off() -> None:
+    model = _build_elevation_model()
+    config = VisualizationConfig(show_walls=False)
+
+    fig = create_elevation_view(model, config=config, view_direction="X", gridline_coord=0.0)
+
+    trace_names = [trace.name for trace in fig.data]
+    assert "Core Walls" not in trace_names

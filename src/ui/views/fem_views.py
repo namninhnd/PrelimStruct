@@ -10,10 +10,9 @@ import streamlit as st
 import logging
 from typing import Optional, Dict, Any, List, Tuple
 
-from src.core.data_models import ProjectData, WindResult
+from src.core.data_models import ProjectData
 from src.fem.model_builder import build_fem_model, ModelBuilderOptions
 from src.fem.fem_engine import FEMModel
-from src.fem.wind_calculator import calculate_hk_wind
 from src.fem.load_combinations import LoadCombinationLibrary
 from src.fem.combination_processor import combine_results, get_applicable_combinations
 from src.fem.wind_case_synthesizer import with_synthesized_w1_w24_cases
@@ -34,6 +33,11 @@ from src.ui.floor_labels import (
     format_floor_label_from_elevation,
     format_floor_label_from_floor_number,
 )
+from src.ui.wind_details import (
+    build_wind_details_dataframe,
+    build_wind_details_summary,
+    has_complete_floor_wind_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,7 @@ logger = logging.getLogger(__name__)
 CACHE_KEY_MODEL = "fem_model_cache"
 CACHE_KEY_HASH = "fem_model_hash"
 KEY_VIEW_MODE = "fem_view_mode_tabs"
+MODEL_CACHE_SCHEMA_VERSION = "2026-02-13-slab-node-filter"
 
 
 def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
@@ -52,6 +57,7 @@ def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
     wind = project.wind_result
     
     key_parts = [
+        f"schema:{MODEL_CACHE_SCHEMA_VERSION}",
         f"floors:{geo.floors}",
         f"story_height:{geo.story_height}",
         f"bays_x:{geo.num_bays_x}",
@@ -206,12 +212,16 @@ def render_unified_fem_views(
     default_view_settings = {
         "fem_view_show_nodes": False,
         "fem_view_show_slabs": True,
-        "fem_view_show_supports": True,
+        "fem_view_show_supports": False,
         "fem_view_show_mesh": True,
         "fem_view_show_loads": True,
         "fem_view_show_ghost": True,
         "fem_view_show_labels": False,
         "fem_view_show_diaphragms": False,
+        "fem_view_show_diaphragm_master": False,
+        "fem_view_show_beams": True,
+        "fem_view_show_columns": True,
+        "fem_view_show_walls": True,
         "fem_view_color_mode": "Element Type",
         "fem_view_show_deformed": False,
         "fem_view_show_reactions": False,
@@ -242,104 +252,58 @@ def render_unified_fem_views(
     omit_columns_map = st.session_state.get("omit_columns", {})
     suggested_omit = [col for col, omit in omit_columns_map.items() if omit]
     
-    width_x = project.lateral.building_width
-    if width_x <= 0.0:
-        width_x = project.geometry.bay_x * project.geometry.num_bays_x
-
-    width_y = project.lateral.building_depth
-    if width_y <= 0.0:
-        width_y = project.geometry.bay_y * project.geometry.num_bays_y
-
-    existing_wind = project.wind_result
-    default_vx = 0.0
-    default_vy = 0.0
-    default_reference_pressure = 3.0
-    if existing_wind is not None:
-        if existing_wind.base_shear_x > 0.0 or existing_wind.base_shear_y > 0.0:
-            default_vx = existing_wind.base_shear_x
-            default_vy = existing_wind.base_shear_y
-        else:
-            default_vx = existing_wind.base_shear
-            default_vy = existing_wind.base_shear
-        if existing_wind.reference_pressure > 0.0:
-            default_reference_pressure = existing_wind.reference_pressure
-
-    with st.expander("Wind Loads", expanded=False):
-        wind_input_mode = st.radio(
-            "Input Mode",
-            options=["Manual", "HK Code Calculator"],
-            key="fem_wind_input_mode",
-            horizontal=True,
-        )
-
-        if wind_input_mode == "Manual":
-            base_shear_x = st.number_input(
-                "Base Shear Vx (kN)",
-                min_value=0.0,
-                value=float(default_vx),
-                step=10.0,
-                key="fem_wind_base_shear_x",
-            )
-            base_shear_y = st.number_input(
-                "Base Shear Vy (kN)",
-                min_value=0.0,
-                value=float(default_vy),
-                step=10.0,
-                key="fem_wind_base_shear_y",
-            )
-            reference_pressure = st.number_input(
-                "Reference Pressure q0 (kPa)",
-                min_value=0.0,
-                value=float(default_reference_pressure),
-                step=0.1,
-                key="fem_wind_reference_pressure_manual",
-            )
-
-            if base_shear_x > 0.0 or base_shear_y > 0.0:
-                project.wind_result = WindResult(
-                    base_shear=max(base_shear_x, base_shear_y),
-                    base_shear_x=base_shear_x,
-                    base_shear_y=base_shear_y,
-                    reference_pressure=reference_pressure,
-                    lateral_system="CORE_WALL",
-                )
-            else:
-                project.wind_result = None
-        else:
-            reference_pressure = st.number_input(
-                "Reference Pressure q0 (kPa)",
-                min_value=0.0,
-                value=3.0,
-                step=0.1,
-                key="fem_wind_reference_pressure_calc",
-            )
-            force_coefficient = st.number_input(
-                "Force Coefficient Cf",
-                min_value=0.0,
-                value=1.3,
-                step=0.1,
-                key="fem_wind_force_coefficient",
-            )
-
-            calculated_wind = calculate_hk_wind(
-                total_height=project.geometry.floors * project.geometry.story_height,
-                building_width_x=width_x,
-                building_width_y=width_y,
-                terrain=project.lateral.terrain,
-                reference_pressure=reference_pressure,
-                force_coefficient=force_coefficient,
-            )
-            project.wind_result = calculated_wind
-            st.info(
-                f"Vx = {calculated_wind.base_shear_x:.1f} kN, "
-                f"Vy = {calculated_wind.base_shear_y:.1f} kN"
-            )
-
     has_wind_result = project.wind_result is not None and (
         project.wind_result.base_shear > 0.0
         or project.wind_result.base_shear_x > 0.0
         or project.wind_result.base_shear_y > 0.0
     )
+
+    with st.expander("Wind Loads (Read-only)", expanded=False):
+        wind_result = project.wind_result
+        if has_wind_result and wind_result is not None:
+            st.write(
+                f"Base Shear Vx: {wind_result.base_shear_x:.1f} kN"
+            )
+            st.write(
+                f"Base Shear Vy: {wind_result.base_shear_y:.1f} kN"
+            )
+            st.write(
+                f"Reference Pressure q0: {wind_result.reference_pressure:.2f} kPa"
+            )
+            st.write(
+                f"Design Pressure: {wind_result.design_pressure:.2f} kPa"
+            )
+
+            st.markdown("**Calculation Traceability**")
+            st.caption(wind_result.code_reference)
+
+            if has_complete_floor_wind_data(wind_result):
+                df = build_wind_details_dataframe(wind_result)
+                summary = build_wind_details_summary(wind_result)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.caption(
+                    (
+                        f"Floors: {int(summary['total_floors'])} | "
+                        f"Sum Wx: {summary['sum_wx']:.1f} kN | "
+                        f"Sum Wy: {summary['sum_wy']:.1f} kN | "
+                        f"Sz: {summary['terrain_factor']:.2f} | "
+                        f"Cf: {summary['force_coefficient']:.2f}"
+                    )
+                )
+            elif any(
+                (
+                    wind_result.floor_elevations,
+                    wind_result.floor_wind_x,
+                    wind_result.floor_wind_y,
+                    wind_result.floor_torsion_z,
+                )
+            ):
+                st.warning("Per-floor wind load arrays are inconsistent. Recalculate wind loads.")
+            else:
+                st.info("Per-floor wind loads not available (legacy calculation without floor count).")
+        else:
+            st.caption("No wind loads configured in Lateral System.")
+
     include_wind = has_wind_result
     st.session_state["fem_include_wind"] = include_wind
     
@@ -383,9 +347,13 @@ def render_unified_fem_views(
     selected_force = st.session_state.fem_view_force_type
     force_code = force_type_map.get(selected_force)
 
-    force_scale = st.session_state.fem_view_force_scale
+    scale_factor = float(st.session_state.fem_view_force_scale)
     if st.session_state.fem_view_force_auto_scale:
         force_scale = -1.0
+        deformed_exaggeration = 10.0
+    else:
+        force_scale = scale_factor
+        deformed_exaggeration = max(0.1, scale_factor * 10.0)
 
     use_opsvis = bool(st.session_state.fem_view_use_opsvis)
     
@@ -400,10 +368,15 @@ def render_unified_fem_views(
         show_slab_mesh_grid=st.session_state.fem_view_show_mesh,
         show_ghost_columns=st.session_state.fem_view_show_ghost,
         show_diaphragms=st.session_state.fem_view_show_diaphragms,
+        show_diaphragm_master=st.session_state.fem_view_show_diaphragm_master,
+        show_beams=st.session_state.fem_view_show_beams,
+        show_columns=st.session_state.fem_view_show_columns,
+        show_walls=st.session_state.fem_view_show_walls,
         grid_spacing=st.session_state.fem_view_grid_spacing,
         colorscale="RdYlGn_r",
         show_deformed=st.session_state.fem_view_show_deformed,
         show_reactions=st.session_state.fem_view_show_reactions,
+        exaggeration=deformed_exaggeration,
         section_force_type=force_code,
         section_force_scale=force_scale,
         section_force_font_size=st.session_state.fem_view_force_font_size,
@@ -522,12 +495,14 @@ def render_unified_fem_views(
                 st.rerun()
     
     with col_run3:
-        if is_locked:
-            if st.button("🔓 Unlock to Modify", key="fem_view_unlock", type="secondary"):
-                _unlock_inputs()
-                st.rerun()
-        else:
-            st.caption("Run analysis to lock inputs")
+        if st.button(
+            "🔓 Unlock to Modify",
+            key="fem_view_unlock",
+            type="secondary",
+            disabled=not is_locked,
+        ):
+            _unlock_inputs()
+            st.rerun()
     
     if has_results:
         result_mode = st.radio(
@@ -723,10 +698,15 @@ def render_unified_fem_views(
             show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
             show_ghost_columns=viz_config.show_ghost_columns,
             show_diaphragms=viz_config.show_diaphragms,
+            show_diaphragm_master=viz_config.show_diaphragm_master,
+            show_beams=viz_config.show_beams,
+            show_columns=viz_config.show_columns,
+            show_walls=viz_config.show_walls,
             grid_spacing=viz_config.grid_spacing,
             colorscale=viz_config.colorscale,
             show_deformed=viz_config.show_deformed,
             show_reactions=viz_config.show_reactions,
+            exaggeration=viz_config.exaggeration,
             section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
             section_force_font_size=viz_config.section_force_font_size,
@@ -739,6 +719,8 @@ def render_unified_fem_views(
             config=plan_config,
             floor_elevation=selected_z,
             utilization=util_map,
+            displaced_nodes=displaced_nodes,
+            reactions=reactions,
             analysis_result=analysis_result
         )
         st.plotly_chart(
@@ -802,10 +784,14 @@ def render_unified_fem_views(
             show_slabs=viz_config.show_slabs,
             show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
             show_ghost_columns=viz_config.show_ghost_columns,
+            show_beams=viz_config.show_beams,
+            show_columns=viz_config.show_columns,
+            show_walls=viz_config.show_walls,
             grid_spacing=viz_config.grid_spacing,
             colorscale=viz_config.colorscale,
             show_deformed=viz_config.show_deformed,
             show_reactions=viz_config.show_reactions,
+            exaggeration=viz_config.exaggeration,
             section_force_type=force_code if (force_code and has_results) else None,
             section_force_scale=viz_config.section_force_scale,
             section_force_font_size=viz_config.section_force_font_size,
@@ -847,10 +833,14 @@ def render_unified_fem_views(
             show_slabs=viz_config.show_slabs,
             show_slab_mesh_grid=viz_config.show_slab_mesh_grid,
             show_ghost_columns=viz_config.show_ghost_columns,
+            show_beams=viz_config.show_beams,
+            show_columns=viz_config.show_columns,
+            show_walls=viz_config.show_walls,
             grid_spacing=viz_config.grid_spacing,
             colorscale=viz_config.colorscale,
             show_deformed=viz_config.show_deformed,
             show_reactions=viz_config.show_reactions,
+            exaggeration=viz_config.exaggeration,
             section_force_type=None,
             section_force_scale=viz_config.section_force_scale,
         )
@@ -931,21 +921,28 @@ def render_unified_fem_views(
     # --- 5. Display Options Panel (MOVED BELOW) ---
     st.divider()
     with st.expander("Display Options", expanded=False):
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.checkbox("Show nodes", key="fem_view_show_nodes")
-            st.checkbox("Show slabs", key="fem_view_show_slabs")
-            st.checkbox("Show Deformed Shape", key="fem_view_show_deformed")
+            st.checkbox("Label", key="fem_view_show_labels")
+            st.checkbox("Nodes", key="fem_view_show_nodes")
+            st.checkbox("Load", key="fem_view_show_loads")
+            st.checkbox("Support", key="fem_view_show_supports")
+            st.checkbox("Diaphragm", key="fem_view_show_diaphragms")
+            st.checkbox("Diaphragm Master", key="fem_view_show_diaphragm_master")
         with col2:
-            st.checkbox("Show supports", key="fem_view_show_supports")
-            st.checkbox("Show mesh", key="fem_view_show_mesh")
-            st.checkbox("Show diaphragms", key="fem_view_show_diaphragms")
-            st.checkbox("Show Reactions (Base)", key="fem_view_show_reactions")
+            st.checkbox("Beam", key="fem_view_show_beams")
+            st.checkbox("Column", key="fem_view_show_columns")
+            st.checkbox("Omitted Column", key="fem_view_show_ghost")
+            st.checkbox("Slab", key="fem_view_show_slabs")
+            st.checkbox("Mesh", key="fem_view_show_mesh")
+            st.checkbox("Wall", key="fem_view_show_walls")
         with col3:
-            st.checkbox("Show loads", key="fem_view_show_loads")
-            st.checkbox("Show ghost cols", key="fem_view_show_ghost")
-            st.checkbox("Show labels", key="fem_view_show_labels")
-        with col4:
+            st.checkbox("Reaction (Base)", key="fem_view_show_reactions")
+            st.checkbox("Deformed Shape", key="fem_view_show_deformed")
+
+        st.divider()
+        force_col, style_col = st.columns(2)
+        with force_col:
             st.write("**Section Forces:**")
             st.radio(
                 "Force Type",
@@ -975,23 +972,24 @@ def render_unified_fem_views(
                         step=1,
                         key="fem_view_opsvis_label_stride",
                     )
-            
-            if st.session_state.fem_view_force_type != "None":
+
+            if st.session_state.fem_view_force_type != "None" or st.session_state.fem_view_show_deformed:
                 use_auto = st.checkbox(
                     "Auto Scale",
                     value=True,
                     key="fem_view_force_auto_scale",
-                    help="Automatically calculate optimal scale based on building dimensions"
+                    help="Shared scaling for section-force diagrams and deformed-shape exaggeration"
                 )
 
-                st.slider(
-                    "Label Font Size",
-                    min_value=6,
-                    max_value=24,
-                    step=1,
-                    key="fem_view_force_font_size",
-                    help="Font size for force diagram labels (Plotly and opsvis)"
-                )
+                if st.session_state.fem_view_force_type != "None":
+                    st.slider(
+                        "Label Font Size",
+                        min_value=6,
+                        max_value=24,
+                        step=1,
+                        key="fem_view_force_font_size",
+                        help="Font size for force diagram labels (Plotly and opsvis)"
+                    )
                 
                 if not use_auto:
                     st.slider(
@@ -1001,18 +999,18 @@ def render_unified_fem_views(
                         value=0.5,
                         step=0.01,
                         key="fem_view_force_scale",
-                        help="Manual scale factor for force diagram size"
+                        help="Shared manual scale for section-force diagrams and deformed-shape exaggeration"
                     )
-
-        st.slider(
-            "Grid spacing (m)",
-            min_value=0.5,
-            max_value=10.0,
-            step=0.5,
-            key="fem_view_grid_spacing",
-            help="Controls plot grid interval for plan and elevation views"
-        )
-            
+        with style_col:
+            st.slider(
+                "Grid spacing (m)",
+                min_value=0.5,
+                max_value=10.0,
+                step=0.5,
+                key="fem_view_grid_spacing",
+                help="Controls plot grid interval for plan and elevation views"
+            )
+             
         st.divider()
         st.selectbox(
             "Color Scheme",

@@ -6,9 +6,12 @@ matching the project reference `windloadcombo.csv` and Phase 11 Section 5.5.
 
 from __future__ import annotations
 
+import logging
 from typing import Dict, Iterable, List, Mapping, Tuple
 
 from src.fem.solver import AnalysisResult
+
+logger = logging.getLogger(__name__)
 
 
 COMPONENT_CASE_KEYS: Tuple[str, str, str] = ("Wx", "Wy", "Wtz")
@@ -76,9 +79,27 @@ def synthesize_w1_w24_cases(
 def with_synthesized_w1_w24_cases(
     results_dict: Mapping[str, AnalysisResult],
 ) -> Dict[str, AnalysisResult]:
-    """Return a results map extended with synthesized W1-W24 cases."""
+    """Return a results map extended with synthesized W1-W24 cases.
+
+    If component wind cases are missing or unsuccessful, logs a warning
+    and returns the original results without W1-W24 synthesis.
+    """
     merged_results = dict(results_dict)
-    merged_results.update(synthesize_w1_w24_cases(merged_results))
+    try:
+        merged_results.update(synthesize_w1_w24_cases(merged_results))
+    except ValueError as exc:
+        failed_details = []
+        for key in COMPONENT_CASE_KEYS:
+            r = results_dict.get(key)
+            if r is None:
+                failed_details.append(f"{key}: missing")
+            elif not r.success:
+                failed_details.append(f"{key}: failed ({r.message})")
+        logger.warning(
+            "W1-W24 synthesis skipped: %s. Component status: %s",
+            exc,
+            "; ".join(failed_details) if failed_details else "unknown",
+        )
     return merged_results
 
 

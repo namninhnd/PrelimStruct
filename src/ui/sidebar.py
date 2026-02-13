@@ -12,9 +12,11 @@ from src.core.data_models import (
     TerrainCategory,
     CoreWallConfig,
     CoreWallGeometry,
+    CoreLocationPreset,
+    TubeOpeningPlacement,
     ExposureClass,
     LoadCombination,
-    PRESETS,
+    WindResult,
 )
 from src.core.load_tables import LIVE_LOAD_TABLE
 from src.fem.load_combinations import (
@@ -22,6 +24,7 @@ from src.fem.load_combinations import (
     LoadCombinationCategory,
 )
 from src.fem.model_builder import get_column_omission_suggestions
+from src.fem.wind_calculator import calculate_hk_wind
 from src.ui.theme import GEMINI_TOKENS
 
 
@@ -35,12 +38,13 @@ def render_sidebar(project: ProjectData) -> Dict[str, Any]:
         Dictionary of all user inputs from sidebar controls
     """
     inputs: Dict[str, Any] = {}
+    inputs_locked = _is_inputs_locked()
     
     with st.sidebar:
         st.header("Project Settings")
-        
-        # Quick presets
-        inputs.update(_render_preset_selector())
+
+        if inputs_locked:
+            st.warning("🔒 **Inputs locked** - Analysis results active. Click 'Unlock to Modify' in FEM section to change inputs.")
         
         # Geometry inputs
         inputs.update(_render_geometry_inputs(project))
@@ -55,7 +59,7 @@ def render_sidebar(project: ProjectData) -> Dict[str, Any]:
         inputs.update(_render_beam_config())
         
         # Lateral system
-        inputs.update(_render_lateral_system(project))
+        inputs.update(_render_lateral_system(project, inputs_locked))
         
         # Column omission
         inputs.update(_render_column_omission(project))
@@ -69,33 +73,8 @@ def render_sidebar(project: ProjectData) -> Dict[str, Any]:
     return inputs
 
 
-def _render_preset_selector() -> Dict[str, Any]:
-    """Render quick preset selector.
-    
-    Returns:
-        Dict with 'selected_preset' key (str: preset key or 'custom')
-    """
-    st.markdown("##### Quick Presets")
-    
-    preset_options = ["Custom"] + [PRESETS[k]["name"] for k in PRESETS.keys()]
-    preset_keys = ["custom"] + list(PRESETS.keys())
-    
-    selected_preset_name = st.selectbox(
-        "Building Type",
-        options=preset_options,
-        help="Select a preset to auto-fill typical values"
-    )
-    selected_preset = preset_keys[preset_options.index(selected_preset_name)]
-    
-    if selected_preset != "custom" and st.button("Apply Preset"):
-        preset = PRESETS[selected_preset]
-        st.session_state.project.loads = preset["loads"]
-        st.session_state.project.materials = preset["materials"]
-        st.rerun()
-    
-    st.divider()
-    
-    return {"selected_preset": selected_preset}
+def _is_inputs_locked() -> bool:
+    return st.session_state.get("fem_inputs_locked", False)
 
 
 def _render_geometry_inputs(project: ProjectData) -> Dict[str, Any]:
@@ -331,7 +310,7 @@ def _render_beam_config() -> Dict[str, Any]:
     }
 
 
-def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
+def _render_lateral_system(project: ProjectData, inputs_locked: bool) -> Dict[str, Any]:
     """Render lateral system and core wall configuration.
     
     Returns:
@@ -355,19 +334,118 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
     selected_terrain_label = st.selectbox(
         "Terrain Category",
         options=list(terrain_options.values()),
-        index=terrain_index
+        index=terrain_index,
+        disabled=inputs_locked,
     )
     selected_terrain = list(terrain_options.keys())[
         list(terrain_options.values()).index(selected_terrain_label)
     ]
+
+    width_x = project.geometry.bay_x * project.geometry.num_bays_x
+    width_y = project.geometry.bay_y * project.geometry.num_bays_y
+    existing_wind = project.wind_result
+    default_vx = 0.0
+    default_vy = 0.0
+    default_reference_pressure = 3.0
+    default_force_coefficient = 1.3
+    if existing_wind is not None:
+        if existing_wind.base_shear_x > 0.0 or existing_wind.base_shear_y > 0.0:
+            default_vx = existing_wind.base_shear_x
+            default_vy = existing_wind.base_shear_y
+        else:
+            default_vx = existing_wind.base_shear
+            default_vy = existing_wind.base_shear
+        if existing_wind.reference_pressure > 0.0:
+            default_reference_pressure = existing_wind.reference_pressure
+
+    wind_input_mode = st.radio(
+        "Wind Input Mode",
+        options=["Manual", "HK Code Calculator"],
+        key="sidebar_module_wind_input_mode",
+        horizontal=True,
+        disabled=inputs_locked,
+    )
+
+    if wind_input_mode == "Manual":
+        base_shear_x = st.number_input(
+            "Base Shear Vx (kN)",
+            min_value=0.0,
+            value=float(default_vx),
+            step=10.0,
+            key="sidebar_module_wind_base_shear_x",
+            disabled=inputs_locked,
+        )
+        base_shear_y = st.number_input(
+            "Base Shear Vy (kN)",
+            min_value=0.0,
+            value=float(default_vy),
+            step=10.0,
+            key="sidebar_module_wind_base_shear_y",
+            disabled=inputs_locked,
+        )
+        reference_pressure = st.number_input(
+            "Reference Pressure q0 (kPa)",
+            min_value=0.0,
+            value=float(default_reference_pressure),
+            step=0.1,
+            key="sidebar_module_wind_reference_pressure_manual",
+            disabled=inputs_locked,
+        )
+
+        if base_shear_x > 0.0 or base_shear_y > 0.0:
+            project_wind_result = WindResult(
+                base_shear=max(base_shear_x, base_shear_y),
+                base_shear_x=base_shear_x,
+                base_shear_y=base_shear_y,
+                reference_pressure=reference_pressure,
+                lateral_system="CORE_WALL",
+            )
+        else:
+            project_wind_result = None
+    else:
+        reference_pressure = st.number_input(
+            "Reference Pressure q0 (kPa)",
+            min_value=0.0,
+            value=float(default_reference_pressure),
+            step=0.1,
+            key="sidebar_module_wind_reference_pressure_calc",
+            disabled=inputs_locked,
+        )
+        force_coefficient = st.number_input(
+            "Force Coefficient Cf",
+            min_value=0.0,
+            value=float(default_force_coefficient),
+            step=0.1,
+            key="sidebar_module_wind_force_coefficient",
+            disabled=inputs_locked,
+        )
+
+        project_wind_result = calculate_hk_wind(
+            total_height=project.geometry.floors * project.geometry.story_height,
+            building_width_x=width_x,
+            building_width_y=width_y,
+            terrain=selected_terrain,
+            reference_pressure=reference_pressure,
+            force_coefficient=force_coefficient,
+            num_floors=project.geometry.floors,
+            story_height=project.geometry.story_height,
+        )
+        st.info(
+            f"Vx = {project_wind_result.base_shear_x:.1f} kN, "
+            f"Vy = {project_wind_result.base_shear_y:.1f} kN"
+        )
+
+    project.wind_result = project_wind_result
     
     has_core = st.checkbox(
         "Core Wall System",
-        value=project.lateral.core_wall_config is not None
+        value=project.lateral.core_wall_config is not None,
+        disabled=inputs_locked,
     )
     
     # Initialize defaults
-    selected_core_location = "Center"
+    selected_core_location = CoreLocationPreset.CENTER
+    selected_opening_placement = TubeOpeningPlacement.TOP_BOT
     custom_x: Optional[float] = None
     custom_y: Optional[float] = None
     selected_core_wall_config: Optional[CoreWallConfig] = None
@@ -383,10 +461,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
         # Core wall configuration dropdown
         config_options = {
             CoreWallConfig.I_SECTION: "I-Section (2 Walls Blended)",
-            CoreWallConfig.TWO_C_FACING: "Two C-Walls Facing",
-            CoreWallConfig.TWO_C_BACK_TO_BACK: "Two C-Walls Back-to-Back",
-            CoreWallConfig.TUBE_CENTER_OPENING: "Tube with Center Opening",
-            CoreWallConfig.TUBE_SIDE_OPENING: "Tube with Side Opening"
+            CoreWallConfig.TUBE_WITH_OPENINGS: "Tube with Openings",
         }
         
         # Get current config or default to I_SECTION
@@ -395,7 +470,8 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
             "Core Wall Configuration",
             options=list(config_options.values()),
             index=list(config_options.keys()).index(current_config),
-            help="Select the core wall configuration type for FEM modeling"
+            help="Select the core wall configuration type for FEM modeling",
+            disabled=inputs_locked,
         )
         selected_core_wall_config = list(config_options.keys())[
             list(config_options.values()).index(selected_config_label)
@@ -407,52 +483,38 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
             min_value=200, 
             max_value=1000, 
             value=500,
-            help="Core wall thickness in millimeters (typical: 500mm)"
+            help="Core wall thickness in millimeters (typical: 500mm)",
+            disabled=inputs_locked,
         )
         
         # Dimension inputs depend on configuration type
-        if selected_core_wall_config in [
-            CoreWallConfig.I_SECTION, 
-            CoreWallConfig.TWO_C_FACING, 
-            CoreWallConfig.TWO_C_BACK_TO_BACK
-        ]:
-            st.caption("I-Section / C-Wall Dimensions")
+        if selected_core_wall_config == CoreWallConfig.I_SECTION:
+            st.caption("I-Section Dimensions")
             col1, col2 = st.columns(2)
             with col1:
                 flange_width = st.number_input(
                     "Flange Width (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0,
-                    help="Width of horizontal flange"
+                    value=3.0,
+                    help="Width of horizontal flange",
+                    disabled=inputs_locked,
                 )
             with col2:
                 web_length = st.number_input(
                     "Web Length (m)", 
                     min_value=2.0, 
                     max_value=20.0, 
-                    value=8.0,
-                    help="Length of vertical web"
-                )
-            
-            # For C-walls, add opening width
-            if selected_core_wall_config in [
-                CoreWallConfig.TWO_C_FACING, 
-                CoreWallConfig.TWO_C_BACK_TO_BACK
-            ]:
-                opening_width = st.number_input(
-                    "Opening Width (m)", 
-                    min_value=1.0, 
-                    max_value=10.0, 
                     value=3.0,
-                    help="Width of opening between/within C-walls"
+                    help="Length of vertical web",
+                    disabled=inputs_locked,
                 )
             
             # Set length from dimensions
             length_x = flange_width
             length_y = web_length
             
-        else:  # TUBE configurations
+        else:  # TUBE_WITH_OPENINGS
             st.caption("Tube Dimensions")
             col1, col2 = st.columns(2)
             with col1:
@@ -460,105 +522,79 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
                     "Length X (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0,
-                    help="Outer dimension in X direction"
+                    value=3.0,
+                    help="Outer dimension in X direction",
+                    disabled=inputs_locked,
                 )
             with col2:
                 length_y = st.number_input(
                     "Length Y (m)", 
                     min_value=2.0, 
                     max_value=15.0, 
-                    value=6.0,
-                    help="Outer dimension in Y direction"
+                    value=3.0,
+                    help="Outer dimension in Y direction",
+                    disabled=inputs_locked,
                 )
             
-            st.caption("Opening Dimensions")
-            col1, col2 = st.columns(2)
-            with col1:
-                opening_width = st.number_input(
-                    "Opening Width (m)", 
-                    min_value=0.5, 
-                    max_value=5.0, 
-                    value=2.0,
-                    help="Width of opening"
-                )
-            with col2:
-                opening_height = st.number_input(
-                    "Opening Height (m)", 
-                    min_value=0.5, 
-                    max_value=5.0, 
-                    value=2.0,
-                    help="Height of opening"
-                )
-        
-        # Core Position UI
-        st.caption("Core Position")
-        core_loc_type = st.radio(
-            "Position Type",
-            options=["Center", "Custom"],
-            index=0,
-            horizontal=True,
-            help="Place core at building center or define specific coordinates."
-        )
-        
-        if core_loc_type == "Custom":
-            # Get building dimensions from session state
-            bay_x = st.session_state.project.geometry.bay_x
-            bay_y = st.session_state.project.geometry.bay_y
-            num_bays_x = st.session_state.project.geometry.num_bays_x
-            num_bays_y = st.session_state.project.geometry.num_bays_y
-            b_width = bay_x * num_bays_x
-            b_depth = bay_y * num_bays_y
-            
-            st.caption(f"Building: {b_width:.1f}m x {b_depth:.1f}m")
-            st.info(
-                "**Coordinate System:** Origin (0, 0) is at the bottom-left corner. "
-                "X-axis runs left-to-right, Y-axis runs bottom-to-top."
+            placement_labels = {
+                TubeOpeningPlacement.TOP_BOT: "Top-Bot",
+                TubeOpeningPlacement.NONE: "None",
+            }
+            selected_placement_label = st.selectbox(
+                "Opening Placement",
+                options=list(placement_labels.values()),
+                index=0,
+                help="Choose where tube core openings are placed.",
+                disabled=inputs_locked,
+                key="sidebar_module_opening_placement",
             )
-            
-            l_col, r_col = st.columns(2)
-            
-            # Calculate safe min/max
-            core_dim_x = length_x if length_x else 6.0
-            core_dim_y = length_y if length_y else 6.0
-            half_core_x = core_dim_x / 2.0
-            half_core_y = core_dim_y / 2.0
-            min_x = max(0.0, half_core_x)
-            max_x = max(min_x + 0.1, b_width - half_core_x)
-            min_y = max(0.0, half_core_y)
-            max_y = max(min_y + 0.1, b_depth - half_core_y)
-            
-            with l_col:
-                custom_x = st.number_input(
-                    "Center X (m)",
-                    min_value=0.0,
-                    max_value=float(b_width),
-                    value=float(b_width / 2),
-                    help=f"X-coordinate of core centroid (valid: {min_x:.1f}m - {max_x:.1f}m)"
-                )
-            with r_col:
-                custom_y = st.number_input(
-                    "Center Y (m)",
-                    min_value=0.0,
-                    max_value=float(b_depth),
-                    value=float(b_depth / 2),
-                    help=f"Y-coordinate of core centroid (valid: {min_y:.1f}m - {max_y:.1f}m)"
-                )
-            
-            # Validation warnings
-            if custom_x < min_x or custom_x > max_x:
-                st.warning(f"Core may extend outside building in X direction. "
-                          f"Recommended: {min_x:.1f}m - {max_x:.1f}m")
-            if custom_y < min_y or custom_y > max_y:
-                st.warning(f"Core may extend outside building in Y direction. "
-                          f"Recommended: {min_y:.1f}m - {max_y:.1f}m")
-            
-            selected_core_location = "Custom"
-        else:
-            selected_core_location = "Center"
+            selected_opening_placement = list(placement_labels.keys())[
+                list(placement_labels.values()).index(selected_placement_label)
+            ]
+
+            st.caption("Opening Dimension")
+            opening_size = st.number_input(
+                "Opening Size (m)",
+                min_value=0.5,
+                max_value=5.0,
+                value=1.0,
+                help="Single opening dimension used for top and bottom openings.",
+                disabled=inputs_locked or selected_opening_placement == TubeOpeningPlacement.NONE,
+            )
+            opening_width = (
+                None
+                if selected_opening_placement == TubeOpeningPlacement.NONE
+                else opening_size
+            )
+            opening_height = None
+        
+        # Core Location Preset
+        st.caption("Core Position")
+        preset_labels = {
+            CoreLocationPreset.CENTER: "Center",
+            CoreLocationPreset.NORTH: "North",
+            CoreLocationPreset.SOUTH: "South",
+            CoreLocationPreset.EAST: "East",
+            CoreLocationPreset.WEST: "West",
+            CoreLocationPreset.NORTHEAST: "Northeast",
+            CoreLocationPreset.NORTHWEST: "Northwest",
+            CoreLocationPreset.SOUTHEAST: "Southeast",
+            CoreLocationPreset.SOUTHWEST: "Southwest",
+        }
+        selected_preset_label = st.selectbox(
+            "Location Preset",
+            options=list(preset_labels.values()),
+            index=0,
+            help="Select core wall placement in floor plan. All presets enforce bounding-box clearance.",
+            disabled=inputs_locked,
+        )
+        selected_core_location = list(preset_labels.keys())[
+            list(preset_labels.values()).index(selected_preset_label)
+        ]
     
     return {
         "selected_terrain": selected_terrain,
+        "wind_input_mode": wind_input_mode,
         "has_core": has_core,
         "selected_core_wall_config": selected_core_wall_config,
         "wall_thickness": wall_thickness,
@@ -568,6 +604,7 @@ def _render_lateral_system(project: ProjectData) -> Dict[str, Any]:
         "length_y": length_y,
         "opening_width": opening_width,
         "opening_height": opening_height,
+        "selected_opening_placement": selected_opening_placement,
         "selected_core_location": selected_core_location,
         "custom_x": custom_x,
         "custom_y": custom_y,

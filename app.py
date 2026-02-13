@@ -17,7 +17,8 @@ from src.core.data_models import (
     SlabDesignInput, BeamDesignInput, ReinforcementInput,
     ExposureClass, TerrainCategory,
     CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties,
-    ColumnPosition, LoadCombination, PRESETS,
+    CoreLocationPreset, TubeOpeningPlacement,
+    ColumnPosition, LoadCombination, WindResult,
     SlabResult, BeamResult, ColumnResult,
 )
 from src.core.constants import CARBON_FACTORS, CONCRETE_DENSITY
@@ -31,12 +32,13 @@ from src.core.load_tables import LIVE_LOAD_TABLE
 
 # Import FEM modules
 from src.fem.core_wall_geometry import (
-    ISectionCoreWall, TwoCFacingCoreWall, TwoCBackToBackCoreWall,
-    TubeCenterOpeningCoreWall, TubeSideOpeningCoreWall,
+    ISectionCoreWall,
+    TubeWithOpeningsCoreWall,
 )
 from src.fem.coupling_beam import CouplingBeamGenerator
 from src.fem.beam_trimmer import BeamTrimmer, BeamGeometry, BeamConnectionType
 from src.fem.fem_engine import FEMModel
+from src.fem.wind_calculator import calculate_hk_wind
 from src.fem.model_builder import (
     build_fem_model, 
     ModelBuilderOptions, 
@@ -51,6 +53,11 @@ from src.fem.load_combinations import (
     LoadCombinationDefinition,
 )
 from src.ui.components.core_wall_selector import render_core_wall_selector
+from src.ui.wind_details import (
+    build_wind_details_dataframe,
+    build_wind_details_summary,
+    has_complete_floor_wind_data,
+)
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -381,17 +388,8 @@ def calculate_core_wall_properties(geometry: CoreWallGeometry) -> Optional[CoreW
         if geometry.config == CoreWallConfig.I_SECTION:
             core_wall = ISectionCoreWall(geometry)
             return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TWO_C_FACING:
-            core_wall = TwoCFacingCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-            core_wall = TwoCBackToBackCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-            core_wall = TubeCenterOpeningCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-            core_wall = TubeSideOpeningCoreWall(geometry)
+        elif geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            core_wall = TubeWithOpeningsCoreWall(geometry)
             return core_wall.calculate_section_properties()
         else:
             return None
@@ -413,17 +411,8 @@ def get_core_wall_outline(geometry: CoreWallGeometry) -> Optional[list]:
         if geometry.config == CoreWallConfig.I_SECTION:
             core_wall = ISectionCoreWall(geometry)
             return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TWO_C_FACING:
-            core_wall = TwoCFacingCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-            core_wall = TwoCBackToBackCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-            core_wall = TubeCenterOpeningCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-            core_wall = TubeSideOpeningCoreWall(geometry)
+        elif geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            core_wall = TubeWithOpeningsCoreWall(geometry)
             return core_wall.get_outline_coordinates()
         else:
             return None
@@ -1105,26 +1094,6 @@ def main():
         if inputs_locked:
             st.warning("🔒 **Inputs locked** - Analysis results active. Click 'Unlock to Modify' in FEM section to change inputs.")
 
-        # Quick Scheme Presets
-        st.markdown("##### Quick Presets")
-        preset_options = ["Custom"] + [PRESETS[k]["name"] for k in PRESETS.keys()]
-        preset_keys = ["custom"] + list(PRESETS.keys())
-
-        selected_preset_name = st.selectbox(
-            "Building Type",
-            options=preset_options,
-            help="Select a preset to auto-fill typical values"
-        )
-        selected_preset = preset_keys[preset_options.index(selected_preset_name)]
-
-        if selected_preset != "custom" and st.button("Apply Preset"):
-            preset = PRESETS[selected_preset]
-            st.session_state.project.loads = preset["loads"]
-            st.session_state.project.materials = preset["materials"]
-            st.rerun()
-
-        st.divider()
-
         # Geometry Inputs
         st.markdown("##### Geometry")
         col1, col2 = st.columns(2)
@@ -1301,252 +1270,237 @@ def main():
         selected_terrain_label = st.selectbox(
             "Terrain Category",
             options=list(terrain_options.values()),
-            index=terrain_index
+            index=terrain_index,
+            disabled=inputs_locked,
         )
         selected_terrain = list(terrain_options.keys())[list(terrain_options.values()).index(selected_terrain_label)]
 
+        width_x = bay_x * num_bays_x
+        width_y = bay_y * num_bays_y
+        existing_wind = st.session_state.project.wind_result
+        default_vx = 0.0
+        default_vy = 0.0
+        default_reference_pressure = 3.0
+        default_force_coefficient = 1.3
+        if existing_wind is not None:
+            if existing_wind.base_shear_x > 0.0 or existing_wind.base_shear_y > 0.0:
+                default_vx = existing_wind.base_shear_x
+                default_vy = existing_wind.base_shear_y
+            else:
+                default_vx = existing_wind.base_shear
+                default_vy = existing_wind.base_shear
+            if existing_wind.reference_pressure > 0.0:
+                default_reference_pressure = existing_wind.reference_pressure
+
+        wind_input_mode = st.radio(
+            "Wind Input Mode",
+            options=["Manual", "HK Code Calculator"],
+            key="sidebar_wind_input_mode",
+            horizontal=True,
+            disabled=inputs_locked,
+        )
+
+        if wind_input_mode == "Manual":
+            base_shear_x = st.number_input(
+                "Base Shear Vx (kN)",
+                min_value=0.0,
+                value=float(default_vx),
+                step=10.0,
+                key="sidebar_wind_base_shear_x",
+                disabled=inputs_locked,
+            )
+            base_shear_y = st.number_input(
+                "Base Shear Vy (kN)",
+                min_value=0.0,
+                value=float(default_vy),
+                step=10.0,
+                key="sidebar_wind_base_shear_y",
+                disabled=inputs_locked,
+            )
+            reference_pressure = st.number_input(
+                "Reference Pressure q0 (kPa)",
+                min_value=0.0,
+                value=float(default_reference_pressure),
+                step=0.1,
+                key="sidebar_wind_reference_pressure_manual",
+                disabled=inputs_locked,
+            )
+
+            if base_shear_x > 0.0 or base_shear_y > 0.0:
+                project_wind_result = WindResult(
+                    base_shear=max(base_shear_x, base_shear_y),
+                    base_shear_x=base_shear_x,
+                    base_shear_y=base_shear_y,
+                    reference_pressure=reference_pressure,
+                    lateral_system="CORE_WALL",
+                )
+            else:
+                project_wind_result = None
+        else:
+            reference_pressure = st.number_input(
+                "Reference Pressure q0 (kPa)",
+                min_value=0.0,
+                value=float(default_reference_pressure),
+                step=0.1,
+                key="sidebar_wind_reference_pressure_calc",
+                disabled=inputs_locked,
+            )
+            force_coefficient = st.number_input(
+                "Force Coefficient Cf",
+                min_value=0.0,
+                value=float(default_force_coefficient),
+                step=0.1,
+                key="sidebar_wind_force_coefficient",
+                disabled=inputs_locked,
+            )
+
+            project_wind_result = calculate_hk_wind(
+                total_height=floors * story_height,
+                building_width_x=width_x,
+                building_width_y=width_y,
+                terrain=selected_terrain,
+                reference_pressure=reference_pressure,
+                force_coefficient=force_coefficient,
+                num_floors=floors,
+                story_height=story_height,
+            )
+            st.info(
+                f"Vx = {project_wind_result.base_shear_x:.1f} kN, "
+                f"Vy = {project_wind_result.base_shear_y:.1f} kN"
+            )
+
         has_core = st.checkbox("Core Wall System",
-                              value=st.session_state.project.lateral.core_wall_config is not None)
+                              value=st.session_state.project.lateral.core_wall_config is not None,
+                              disabled=inputs_locked)
 
         # Initialize core wall location variables with defaults
-        selected_core_location = "Center"
+        selected_core_location = CoreLocationPreset.CENTER
+        selected_opening_placement = TubeOpeningPlacement.TOP_BOT
         custom_x = None
         custom_y = None
 
         if has_core:
             # Get current config or default to I_SECTION
             current_config = st.session_state.project.lateral.core_wall_config or CoreWallConfig.I_SECTION
-            
-            # Visual Core Wall Selector
-            selected_core_wall_config = render_core_wall_selector(current_config)
+
+            if inputs_locked:
+                selected_core_wall_config = current_config
+                st.caption(f"Core wall configuration locked: {current_config.value}")
+            else:
+                selected_core_wall_config = render_core_wall_selector(current_config)
             
             # Wall thickness input
             wall_thickness = st.number_input(
                 "Wall Thickness (mm)",
                 min_value=200, max_value=1000, value=500, step=50,
-                help="Core wall thickness in millimeters (typical: 500mm)"
+                help="Core wall thickness in millimeters (typical: 500mm)",
+                disabled=inputs_locked,
             )
 
             # Dimension inputs depend on configuration type
-            if selected_core_wall_config in [CoreWallConfig.I_SECTION, CoreWallConfig.TWO_C_FACING, CoreWallConfig.TWO_C_BACK_TO_BACK]:
-                st.caption("I-Section / C-Wall Dimensions")
+            if selected_core_wall_config == CoreWallConfig.I_SECTION:
+                st.caption("I-Section Dimensions")
                 col1, col2 = st.columns(2)
                 with col1:
                     flange_width = st.number_input(
-                        "Flange Width (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
-                        help="Width of horizontal flange"
+                        "Flange Width (m)", min_value=2.0, max_value=15.0, value=3.0, step=0.5,
+                        help="Width of horizontal flange",
+                        disabled=inputs_locked,
                     )
                 with col2:
                     web_length = st.number_input(
-                        "Web Length (m)", min_value=2.0, max_value=20.0, value=8.0, step=0.5,
-                        help="Length of vertical web"
+                        "Web Length (m)", min_value=2.0, max_value=20.0, value=3.0, step=0.5,
+                        help="Length of vertical web",
+                        disabled=inputs_locked,
                     )
 
-                # For C-walls, add opening width
-                if selected_core_wall_config in [CoreWallConfig.TWO_C_FACING, CoreWallConfig.TWO_C_BACK_TO_BACK]:
-                    opening_width = st.number_input(
-                        "Opening Width (m)", min_value=1.0, max_value=10.0, value=3.0, step=0.5,
-                        help="Width of opening between/within C-walls"
-                    )
-                else:
-                    opening_width = None
-
-                # Set core_x and core_y from dimensions
+                opening_width = None
                 core_x = flange_width
                 core_y = web_length
                 length_x = flange_width
                 length_y = web_length
                 opening_height = None
 
-                # Core Position UI (Task 17.2)
-                st.caption("Core Position")
-                col_loc1, col_loc2 = st.columns(2)
-                with col_loc1:
-                    core_loc_type = st.radio(
-                        "Position Type",
-                        options=["Center", "Custom"],
-                        index=0,
-                        horizontal=True,
-                        help="Place core at building center or define specific coordinates. "
-                             "Coordinate system: Origin (0,0) at bottom-left corner of building, "
-                             "X increases to the right, Y increases upward.",
-                        key="i_section_position_type"
-                    )
-                
-                custom_x = None
-                custom_y = None
-                
-                if core_loc_type == "Custom":
-                    b_width = bay_x * num_bays_x
-                    b_depth = bay_y * num_bays_y
-                    
-                    with col_loc2:
-                        st.caption(f"Building: {b_width:.1f}m x {b_depth:.1f}m")
-                    
-                    # Coordinate system tooltip
-                    st.info(
-                        "**Coordinate System:** Origin (0, 0) is at the bottom-left corner. "
-                        "X-axis runs left-to-right, Y-axis runs bottom-to-top."
-                    )
-                        
-                    l_col, r_col = st.columns(2)
-                    
-                    # Calculate safe min/max to ensure core fits within building
-                    # Use flange_width and web_length for I-Section/C-Wall
-                    half_core_x = flange_width / 2.0
-                    half_core_y = web_length / 2.0
-                    min_x = half_core_x
-                    max_x = b_width - half_core_x
-                    min_y = half_core_y
-                    max_y = b_depth - half_core_y
-                    
-                    # Clamp to ensure valid range
-                    min_x = max(0.0, min_x)
-                    max_x = max(min_x + 0.1, max_x)
-                    min_y = max(0.0, min_y)
-                    max_y = max(min_y + 0.1, max_y)
-                    
-                    with l_col:
-                        custom_x = st.number_input(
-                            "Center X (m)", 
-                            min_value=0.0, 
-                            max_value=float(b_width), 
-                            value=float(b_width/2), 
-                            step=1.0,
-                            help=f"X-coordinate of the core wall centroid (valid range: {min_x:.1f}m - {max_x:.1f}m)"
-                        )
-                    with r_col:
-                        custom_y = st.number_input(
-                            "Center Y (m)", 
-                            min_value=0.0, 
-                            max_value=float(b_depth), 
-                            value=float(b_depth/2), 
-                            step=1.0,
-                            help=f"Y-coordinate of the core wall centroid (valid range: {min_y:.1f}m - {max_y:.1f}m)"
-                        )
-                    
-                    # Validation warning for edge cases
-                    if custom_x < min_x or custom_x > max_x:
-                        st.warning(f"Core wall may extend outside building in X direction. "
-                                   f"Recommended X range: {min_x:.1f}m - {max_x:.1f}m")
-                    if custom_y < min_y or custom_y > max_y:
-                        st.warning(f"Core wall may extend outside building in Y direction. "
-                                   f"Recommended Y range: {min_y:.1f}m - {max_y:.1f}m")
-                        
-                    selected_core_location = "Custom"
-                else:
-                    selected_core_location = "Center"
-
-            else:  # TUBE configurations
+            else:  # TUBE_WITH_OPENINGS
                 st.caption("Tube Dimensions")
                 col1, col2 = st.columns(2)
                 with col1:
                     length_x = st.number_input(
-                        "Length X (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
-                        help="Outer dimension in X direction"
+                        "Length X (m)", min_value=2.0, max_value=15.0, value=3.0, step=0.5,
+                        help="Outer dimension in X direction",
+                        disabled=inputs_locked,
                     )
                 with col2:
                     length_y = st.number_input(
-                        "Length Y (m)", min_value=2.0, max_value=15.0, value=6.0, step=0.5,
-                        help="Outer dimension in Y direction"
+                        "Length Y (m)", min_value=2.0, max_value=15.0, value=3.0, step=0.5,
+                        help="Outer dimension in Y direction",
+                        disabled=inputs_locked,
                     )
 
-                st.caption("Opening Dimensions")
-                col1, col2 = st.columns(2)
-                with col1:
-                    opening_width = st.number_input(
-                        "Opening Width (m)", min_value=0.5, max_value=5.0, value=2.0, step=0.5,
-                        help="Width of opening"
-                    )
-                with col2:
-                    opening_height = st.number_input(
-                        "Opening Height (m)", min_value=0.5, max_value=5.0, value=2.0, step=0.5,
-                        help="Height of opening"
-                    )
+                placement_labels = {
+                    TubeOpeningPlacement.TOP_BOT: "Top-Bot",
+                    TubeOpeningPlacement.NONE: "None",
+                }
+                selected_placement_label = st.selectbox(
+                    "Opening Placement",
+                    options=list(placement_labels.values()),
+                    index=0,
+                    help="Choose where tube core openings are placed.",
+                    key="runtime_opening_placement",
+                    disabled=inputs_locked,
+                )
+                selected_opening_placement = list(placement_labels.keys())[
+                    list(placement_labels.values()).index(selected_placement_label)
+                ]
 
-                # Set core_x and core_y from tube dimensions
+                st.caption("Opening Dimension")
+                opening_size = st.number_input(
+                    "Opening Size (m)",
+                    min_value=0.5,
+                    max_value=5.0,
+                    value=1.0,
+                    step=0.5,
+                    help="Single opening dimension used for top and bottom openings.",
+                    disabled=inputs_locked or selected_opening_placement == TubeOpeningPlacement.NONE,
+                )
+                opening_width = (
+                    None
+                    if selected_opening_placement == TubeOpeningPlacement.NONE
+                    else opening_size
+                )
+                opening_height = None
+
                 core_x = length_x
                 core_y = length_y
                 flange_width = None
                 web_length = None
 
-                # Core Position UI for TUBE configurations (Task 17.2)
-                st.caption("Core Position")
-                col_loc1, col_loc2 = st.columns(2)
-                with col_loc1:
-                    core_loc_type = st.radio(
-                        "Position Type",
-                        options=["Center", "Custom"],
-                        index=0,
-                        horizontal=True,
-                        help="Place core at building center or define specific coordinates. "
-                             "Coordinate system: Origin (0,0) at bottom-left corner of building, "
-                             "X increases to the right, Y increases upward.",
-                        key="tube_position_type"
-                    )
-                
-                custom_x = None
-                custom_y = None
-                
-                if core_loc_type == "Custom":
-                    b_width = bay_x * num_bays_x
-                    b_depth = bay_y * num_bays_y
-                    
-                    with col_loc2:
-                        st.caption(f"Building: {b_width:.1f}m x {b_depth:.1f}m")
-                    
-                    # Coordinate system tooltip
-                    st.info(
-                        "**Coordinate System:** Origin (0, 0) is at the bottom-left corner. "
-                        "X-axis runs left-to-right, Y-axis runs bottom-to-top."
-                    )
-                        
-                    l_col, r_col = st.columns(2)
-                    
-                    # Calculate safe min/max to ensure core fits within building
-                    half_core_x = length_x / 2.0
-                    half_core_y = length_y / 2.0
-                    min_x = half_core_x
-                    max_x = b_width - half_core_x
-                    min_y = half_core_y
-                    max_y = b_depth - half_core_y
-                    
-                    # Clamp to ensure valid range
-                    min_x = max(0.0, min_x)
-                    max_x = max(min_x + 0.1, max_x)
-                    min_y = max(0.0, min_y)
-                    max_y = max(min_y + 0.1, max_y)
-                    
-                    with l_col:
-                        custom_x = st.number_input(
-                            "Center X (m)", 
-                            min_value=0.0, 
-                            max_value=float(b_width), 
-                            value=float(b_width/2), 
-                            step=1.0,
-                            help=f"X-coordinate of the core wall centroid (valid range: {min_x:.1f}m - {max_x:.1f}m)"
-                        )
-                    with r_col:
-                        custom_y = st.number_input(
-                            "Center Y (m)", 
-                            min_value=0.0, 
-                            max_value=float(b_depth), 
-                            value=float(b_depth/2), 
-                            step=1.0,
-                            help=f"Y-coordinate of the core wall centroid (valid range: {min_y:.1f}m - {max_y:.1f}m)"
-                        )
-                    
-                    # Validation warning for edge cases
-                    if custom_x < min_x or custom_x > max_x:
-                        st.warning(f"Core wall may extend outside building in X direction. "
-                                   f"Recommended X range: {min_x:.1f}m - {max_x:.1f}m")
-                    if custom_y < min_y or custom_y > max_y:
-                        st.warning(f"Core wall may extend outside building in Y direction. "
-                                   f"Recommended Y range: {min_y:.1f}m - {max_y:.1f}m")
-                        
-                    selected_core_location = "Custom"
-                else:
-                    selected_core_location = "Center"
+            # Core Location Preset (9 positions)
+            st.caption("Core Position")
+            preset_labels = {
+                CoreLocationPreset.CENTER: "Center",
+                CoreLocationPreset.NORTH: "North",
+                CoreLocationPreset.SOUTH: "South",
+                CoreLocationPreset.EAST: "East",
+                CoreLocationPreset.WEST: "West",
+                CoreLocationPreset.NORTHEAST: "Northeast",
+                CoreLocationPreset.NORTHWEST: "Northwest",
+                CoreLocationPreset.SOUTHEAST: "Southeast",
+                CoreLocationPreset.SOUTHWEST: "Southwest",
+            }
+            selected_preset_label = st.selectbox(
+                "Location Preset",
+                options=list(preset_labels.values()),
+                index=0,
+                help="Select core wall placement in floor plan. All presets enforce bounding-box clearance.",
+                key="runtime_core_location_preset",
+                disabled=inputs_locked,
+            )
+            selected_core_location = list(preset_labels.keys())[
+                list(preset_labels.values()).index(selected_preset_label)
+            ]
+            custom_x = None
+            custom_y = None
             
             # Calculate and display section properties
             st.caption("Calculated Section Properties")
@@ -1556,9 +1510,10 @@ def main():
                 length_x=length_x * 1000 if length_x else 6000.0,
                 length_y=length_y * 1000 if length_y else 6000.0,
                 opening_width=opening_width * 1000 if opening_width else None,
-                opening_height=opening_height * 1000 if opening_height else None,
+                opening_height=None,
                 flange_width=flange_width * 1000 if flange_width else None,
                 web_length=web_length * 1000 if web_length else None,
+                opening_placement=selected_opening_placement,
             )
 
             section_props = calculate_core_wall_properties(temp_geometry)
@@ -1579,7 +1534,7 @@ def main():
         else:
             core_x = 0.0
             core_y = 0.0
-            selected_core_location = "Center"
+            selected_core_location = CoreLocationPreset.CENTER
             selected_core_wall_config = None
             wall_thickness = 500.0
             flange_width = None
@@ -1616,9 +1571,10 @@ def main():
                     length_x=length_x * 1000 if length_x else 6000.0,
                     length_y=length_y * 1000 if length_y else 6000.0,
                     opening_width=opening_width * 1000 if opening_width else None,
-                    opening_height=opening_height * 1000 if opening_height else None,
+                    opening_height=None,
                     flange_width=flange_width * 1000 if flange_width else None,
                     web_length=web_length * 1000 if web_length else None,
+                    opening_placement=selected_opening_placement,
                 )
                 
                 # We need the calculated centroid to position the core correctly in the checker
@@ -1944,9 +1900,10 @@ def main():
             length_x=length_x * 1000 if length_x else 6000.0,
             length_y=length_y * 1000 if length_y else 6000.0,
             opening_width=opening_width * 1000 if opening_width else None,
-            opening_height=opening_height * 1000 if opening_height else None,
+            opening_height=None,
             flange_width=flange_width * 1000 if flange_width else None,
             web_length=web_length * 1000 if web_length else None,
+            opening_placement=selected_opening_placement,
         )
 
         # Calculate section properties
@@ -1960,11 +1917,11 @@ def main():
         wall_thickness=wall_thickness,
         core_geometry=core_geometry,
         section_properties=section_properties,
-        # Task 17.2: Pass custom core wall position
-        location_type=selected_core_location if has_core else "Center",
-        custom_center_x=custom_x if has_core and selected_core_location == "Custom" else None,
-        custom_center_y=custom_y if has_core and selected_core_location == "Custom" else None,
+        location_preset=selected_core_location if has_core else CoreLocationPreset.CENTER,
+        custom_center_x=custom_x if has_core else None,
+        custom_center_y=custom_y if has_core else None,
     )
+    project.wind_result = project_wind_result
     project.load_combination = selected_load_comb
 
     # Run calculations with optional overrides
@@ -1984,40 +1941,6 @@ def main():
     st.session_state.project = project
 
     # ===== MAIN CONTENT =====
-
-    # Key Metrics Row
-    st.markdown("### Key Metrics")
-    col1, col2, col3, col4 = st.columns(4)
-
-    with col1:
-        st.metric(
-            "Live Load",
-            f"{project.loads.live_load:.1f} kPa",
-            help="From HK Code Table 3.2"
-        )
-
-    with col2:
-        design_load = project.get_design_load()
-        st.metric(
-            "Design Load",
-            f"{design_load:.1f} kPa",
-            help=f"Factored load ({selected_comb_label})"
-        )
-
-    with col3:
-        st.metric(
-            "Concrete Volume",
-            f"{project.concrete_volume:.1f} m\u00b3",
-            help="Estimated total concrete volume"
-        )
-
-    with col4:
-        carbon_per_m2 = project.carbon_emission / (project.geometry.bay_x * project.geometry.bay_y * project.geometry.floors) if project.geometry.floors > 0 else 0
-        st.metric(
-            "Carbon Intensity",
-            f"{carbon_per_m2:.0f} kgCO\u2082e/m\u00b2",
-            help="Embodied carbon per floor area"
-        )
 
     # FEM Analysis & Preview
     st.markdown("### FEM Analysis")
@@ -2152,6 +2075,39 @@ def main():
                 - Limit: 1/500 = 0.002
                 - Status: {'PASS' if project.wind_result.drift_ok else 'FAIL'}
                 """)
+            
+            with st.expander("🔍 Wind Load Details (per floor)", expanded=False):
+                st.markdown(f"""
+                **Calculation Traceability**
+                
+                {project.wind_result.code_reference}
+                """)
+
+                if has_complete_floor_wind_data(project.wind_result):
+                    df = build_wind_details_dataframe(project.wind_result)
+                    summary = build_wind_details_summary(project.wind_result)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+
+                    st.markdown(f"""
+                    **Summary:**
+                    - Total floors: {int(summary['total_floors'])}
+                    - Sum Wx: {summary['sum_wx']:.1f} kN
+                    - Sum Wy: {summary['sum_wy']:.1f} kN
+                    - Terrain factor (Sz): {summary['terrain_factor']:.2f}
+                    - Force coefficient (Cf): {summary['force_coefficient']:.2f}
+                    - Design pressure: {summary['design_pressure']:.2f} kPa
+                    """)
+                elif any(
+                    (
+                        project.wind_result.floor_elevations,
+                        project.wind_result.floor_wind_x,
+                        project.wind_result.floor_wind_y,
+                        project.wind_result.floor_torsion_z,
+                    )
+                ):
+                    st.warning("Per-floor wind load arrays are inconsistent. Recalculate wind loads.")
+                else:
+                    st.info("Per-floor wind loads not available (legacy calculation without floor count)")
 
             if project.core_wall_result:
                 st.markdown(f"""

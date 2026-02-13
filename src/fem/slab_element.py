@@ -66,20 +66,27 @@ class SlabPanel:
 
 @dataclass
 class SlabOpening:
-    """Opening in a slab panel (stairs, elevator, MEP shaft).
+    """Opening in a slab panel (stairs, elevator, MEP shaft, or core wall footprint).
+    
+    Supports both rectangular (width_x/width_y) and polygonal (polygon_vertices) openings.
+    Phase 14 Gate E adds polygon support for I-section core wall footprint exclusion.
     
     Attributes:
         opening_id: Unique identifier for the opening
-        origin: (x, y) coordinates of bottom-left corner (m)
-        width_x: Opening dimension along X-axis (m)
-        width_y: Opening dimension along Y-axis (m)
-        opening_type: Type of opening ("stair", "elevator", "mep", "generic")
+        origin: (x, y) coordinates of bottom-left corner (m) - for rectangular openings
+        width_x: Opening dimension along X-axis (m) - for rectangular openings
+        width_y: Opening dimension along Y-axis (m) - for rectangular openings
+        opening_type: Type of opening ("stair", "elevator", "mep", "core_wall", "generic")
+        polygon_vertices: Optional list of (x, y) vertices for polygonal openings.
+                         When provided, rectangular bounds (origin/width) are ignored
+                         for containment checks. Used for I-section core wall footprint.
     """
     opening_id: str
     origin: Tuple[float, float]
     width_x: float
     width_y: float
     opening_type: str = "generic"
+    polygon_vertices: Optional[List[Tuple[float, float]]] = None
     
     def __post_init__(self):
         if self.width_x <= 0:
@@ -294,13 +301,19 @@ class SlabMeshGenerator:
                 # Skip element if it overlaps with any opening
                 skip_element = False
                 for opening in openings:
-                    ox_min, oy_min, ox_max, oy_max = opening.bounds
-                    # Check if element center is inside opening
-                    if (ox_min <= elem_center_x <= ox_max and
-                        oy_min <= elem_center_y <= oy_max):
-                        skip_element = True
-                        skipped_for_openings += 1
-                        break
+                    if opening.polygon_vertices is not None:
+                        from src.fem.model_builder import _point_in_polygon
+                        if _point_in_polygon((elem_center_x, elem_center_y), opening.polygon_vertices):
+                            skip_element = True
+                            skipped_for_openings += 1
+                            break
+                    else:
+                        ox_min, oy_min, ox_max, oy_max = opening.bounds
+                        if (ox_min <= elem_center_x <= ox_max and
+                            oy_min <= elem_center_y <= oy_max):
+                            skip_element = True
+                            skipped_for_openings += 1
+                            break
                 
                 if skip_element:
                     continue

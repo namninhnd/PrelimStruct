@@ -26,7 +26,7 @@ def test_slab_wall_connectivity():
     )
     
     # Central 6x6m Core Wall
-    core_config = CoreWallConfig.TUBE_CENTER_OPENING
+    core_config = CoreWallConfig.TUBE_WITH_OPENINGS
     project.lateral = LateralInput(
         building_width=18.0,
         building_depth=18.0,

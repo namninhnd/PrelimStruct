@@ -401,7 +401,7 @@ class TestCreateDesignReviewPrompt:
             concrete_grade="C50",
             beam_sections="500x800",
             column_sections="700x700",
-            core_wall_config="TWO_C_FACING",
+            core_wall_config="TUBE_WITH_OPENINGS",
             lateral_system="Core wall + Outriggers",
             design_summary="High-rise design",
         )
@@ -409,7 +409,7 @@ class TestCreateDesignReviewPrompt:
         assert "85m" in user_prompt
         assert "25 floors" in user_prompt
         assert "C50" in user_prompt
-        assert "TWO_C_FACING" in user_prompt
+        assert "TUBE_WITH_OPENINGS" in user_prompt
         assert "High-rise design" in user_prompt
 
 

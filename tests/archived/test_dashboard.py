@@ -141,7 +141,7 @@ class TestDashboardIntegration:
             building_width=8.0,
             building_depth=8.0,
             core_geometry=CoreWallGeometry(
-                config=CoreWallConfig.TUBE_CENTER_OPENING,
+                config=CoreWallConfig.TUBE_WITH_OPENINGS,
                 length_x=5000.0,
                 length_y=5000.0,
                 opening_width=2000.0,

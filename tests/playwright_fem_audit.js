@@ -1,135 +1,241 @@
 const { chromium } = require('playwright');
+const fs = require('fs');
 const path = require('path');
 
 const STREAMLIT_URL = 'http://localhost:8501';
-const SCREENSHOT_DIR = path.join(__dirname, '..', 'screenshots');
+const SCREENSHOT_DIR = path.join(__dirname, 'audit_screenshots', 'omitted_columns_regression');
+
+function ensureDir(dir) {
+    fs.mkdirSync(dir, { recursive: true });
+}
+
+async function waitForAnalysisCompletion(page, timeoutMs = 180000) {
+    const start = Date.now();
+    const successBanner = page.locator('text=Analysis Successful').first();
+    const previousBanner = page.locator('text=Previous Analysis Available').first();
+    const failedBanner = page.locator('text=Analysis Failed').first();
+
+    while (Date.now() - start < timeoutMs) {
+        if (await failedBanner.count() > 0) {
+            const failText = ((await failedBanner.textContent()) || '').trim();
+            throw new Error(`FEM analysis failed: ${failText}`);
+        }
+        if (await successBanner.count() > 0 || await previousBanner.count() > 0) {
+            return;
+        }
+        await page.waitForTimeout(1000);
+    }
+
+    throw new Error(`Timed out after ${timeoutMs}ms waiting for FEM analysis completion`);
+}
+
+async function screenshot(page, name) {
+    await page.screenshot({
+        path: path.join(SCREENSHOT_DIR, name),
+        fullPage: true,
+    });
+}
+
+async function clickIfVisible(locator) {
+    if (await locator.count() > 0) {
+        await locator.first().scrollIntoViewIfNeeded();
+        await locator.first().click();
+        return true;
+    }
+    return false;
+}
+
+async function setInputByLabel(page, label, value) {
+    const input = page.locator(`input[aria-label="${label}"]`).first();
+    if (await input.count() === 0) {
+        return false;
+    }
+    await input.scrollIntoViewIfNeeded();
+    await input.fill(String(value));
+    await page.waitForTimeout(700);
+    return true;
+}
+
+async function selectOptionByLabel(page, label, optionText) {
+    const combo = page.locator(`[aria-label="${label}"]`).first();
+    if (await combo.count() === 0) {
+        return false;
+    }
+
+    await combo.scrollIntoViewIfNeeded();
+    await combo.click({ force: true });
+    await page.waitForTimeout(400);
+
+    const optionByRole = page.getByRole('option', { name: optionText }).first();
+    if (await optionByRole.count() > 0) {
+        await optionByRole.click({ force: true });
+        await page.waitForTimeout(700);
+        return true;
+    }
+
+    const optionByText = page.locator(`li:has-text("${optionText}")`).first();
+    if (await optionByText.count() > 0) {
+        await optionByText.click({ force: true });
+        await page.waitForTimeout(700);
+        return true;
+    }
+
+    return false;
+}
+
+async function getLegendCount(page, label) {
+    return await page.locator(`g.legend text:has-text("${label}")`).count();
+}
 
 async function runFEMAudit() {
-    console.log('Starting Playwright FEM Audit...');
-    
+    ensureDir(SCREENSHOT_DIR);
+    console.log('Starting omitted-columns Playwright regression audit...');
+
     const browser = await chromium.launch({ headless: false });
     const context = await browser.newContext({ viewport: { width: 1920, height: 1080 } });
     const page = await context.newPage();
-    
+
     try {
-        console.log('1. Navigating to Streamlit app...');
+        console.log('1) Open app');
         await page.goto(STREAMLIT_URL, { waitUntil: 'networkidle', timeout: 60000 });
         await page.waitForTimeout(3000);
-        
-        console.log('2. Taking initial screenshot...');
-        await page.screenshot({ path: path.join(SCREENSHOT_DIR, '01_initial_load.png'), fullPage: true });
-        
-        console.log('3. Setting up multi-bay building (3x3 bays)...');
-        const baysXInput = page.locator('input[aria-label="Bays in X"]');
-        if (await baysXInput.count() > 0) {
-            await baysXInput.fill('3');
-        }
-        
-        const baysYInput = page.locator('input[aria-label="Bays in Y"]');
-        if (await baysYInput.count() > 0) {
-            await baysYInput.fill('3');
-        }
-        await page.waitForTimeout(2000);
-        
-        console.log('4. Scrolling to FEM section...');
-        await page.evaluate(() => {
-            const femSection = Array.from(document.querySelectorAll('h3')).find(el => el.textContent.includes('FEM'));
-            if (femSection) femSection.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        });
-        await page.waitForTimeout(1000);
-        await page.screenshot({ path: path.join(SCREENSHOT_DIR, '02_multi_bay_setup.png'), fullPage: false });
-        
-        console.log('5. Looking for Run FEM Analysis button...');
-        const runButton = page.getByRole('button', { name: /Run FEM Analysis/i });
-        if (await runButton.count() > 0) {
-            console.log('   Found Run FEM Analysis button, clicking...');
-            await runButton.click();
-            await page.waitForTimeout(5000);
-            await page.screenshot({ path: path.join(SCREENSHOT_DIR, '03_after_analysis.png'), fullPage: false });
-        } else {
-            console.log('   Run FEM Analysis button not found');
-        }
-        
-        console.log('6. Checking for Lock indicator...');
-        const lockIndicator = await page.locator('text=🔒').count();
-        console.log(`   Lock indicator visible: ${lockIndicator > 0}`);
-        
-        console.log('7. Scrolling down to Display Options...');
-        await page.evaluate(() => window.scrollBy(0, 400));
-        await page.waitForTimeout(500);
-        
-        console.log('8. Looking for Display Options expander...');
-        const displayOptions = page.getByText('Display Options');
-        if (await displayOptions.count() > 0) {
-            // Scroll expander into view first
-            await displayOptions.scrollIntoViewIfNeeded();
-            await page.waitForTimeout(500);
-            await displayOptions.click();
-            await page.waitForTimeout(1000);
-            
-            console.log('9. Looking for Section Forces label and Mz radio...');
-            // Scroll down more to reveal the radio buttons
-            await page.evaluate(() => window.scrollBy(0, 300));
-            await page.waitForTimeout(500);
-            
-            // Try clicking by label text which is more reliable for Streamlit radios
-            const mzLabel = page.locator('label:has-text("Mz (Moment Z)")');
-            if (await mzLabel.count() > 0) {
-                console.log('   Found Mz label, scrolling into view and clicking...');
-                await mzLabel.scrollIntoViewIfNeeded();
-                await page.waitForTimeout(300);
-                await mzLabel.click();
-                await page.waitForTimeout(2000);
-                await page.screenshot({ path: path.join(SCREENSHOT_DIR, '04_mz_force_selected.png'), fullPage: false });
-            } else {
-                // Fallback: try the radio input directly with force click
-                const mzRadio = page.getByRole('radio', { name: /Mz/i });
-                if (await mzRadio.count() > 0) {
-                    console.log('   Found Mz radio, force clicking...');
-                    await mzRadio.click({ force: true });
-                    await page.waitForTimeout(2000);
-                    await page.screenshot({ path: path.join(SCREENSHOT_DIR, '04_mz_force_selected.png'), fullPage: false });
-                } else {
-                    console.log('   Mz radio not found, taking screenshot of current state...');
-                    await page.screenshot({ path: path.join(SCREENSHOT_DIR, '04_display_options_state.png'), fullPage: false });
-                }
+        await screenshot(page, '01_initial.png');
+
+        console.log('2) Configure tube core and dimensions that trigger omitted-column suggestions');
+        await setInputByLabel(page, 'Bays in X', 3);
+        await setInputByLabel(page, 'Bays in Y', 2);
+        await setInputByLabel(page, 'Floors', 8);
+
+        const coreWallCheckbox = page.getByLabel('Core Wall System').first();
+        if (await coreWallCheckbox.count() > 0) {
+            if (!await coreWallCheckbox.isChecked()) {
+                const coreWallLabel = page.locator('label:has-text("Core Wall System")').first();
+                await coreWallLabel.scrollIntoViewIfNeeded();
+                await coreWallLabel.click({ force: true });
+                await page.waitForTimeout(1200);
+            }
+
+            const coreWallCheckboxPost = page.getByLabel('Core Wall System').first();
+            if (!await coreWallCheckboxPost.isChecked()) {
+                throw new Error('Core Wall System checkbox remained unchecked');
             }
         }
-        
-        console.log('10. Testing Unlock button...');
-        const unlockButton = page.getByRole('button', { name: /Unlock to Modify/i });
-        if (await unlockButton.count() > 0) {
-            console.log('   Found Unlock button, clicking...');
-            await unlockButton.click();
-            await page.waitForTimeout(2000);
-            await page.screenshot({ path: path.join(SCREENSHOT_DIR, '05_after_unlock.png'), fullPage: false });
+
+        const configSelected = await selectOptionByLabel(page, 'Core Wall Configuration', 'Tube with Openings');
+        console.log(`   Core config select success: ${configSelected}`);
+        if (!configSelected) {
+            const tubeCardClicked = await clickIfVisible(page.getByRole('button', { name: 'Tube with Openings' }));
+            console.log(`   Tube card click success: ${tubeCardClicked}`);
+            if (!tubeCardClicked) {
+                throw new Error('Tube with Openings selector not found');
+            }
+            await page.waitForTimeout(1200);
+        }
+
+        const lengthXSet = await setInputByLabel(page, 'Length X (m)', 7.0);
+        const lengthYSet = await setInputByLabel(page, 'Length Y (m)', 7.0);
+        console.log(`   Length inputs found: X=${lengthXSet}, Y=${lengthYSet}`);
+        if (!lengthXSet || !lengthYSet) {
+            throw new Error('Tube Length X/Y inputs not found; could not force omission scenario');
+        }
+        await screenshot(page, '02_geometry_set.png');
+
+        console.log('3) Open Column Omission Review and verify suggestions are present');
+        const omissionExpander = page
+            .locator('[data-testid="stSidebar"]')
+            .getByText('Column Omission Review')
+            .first();
+        if (await omissionExpander.count() === 0) {
+            throw new Error('Column Omission Review expander not found');
+        }
+        await omissionExpander.scrollIntoViewIfNeeded();
+        await omissionExpander.click({ force: true });
+        await page.waitForTimeout(1000);
+
+        const suggestionLine = page
+            .locator('[data-testid="stSidebar"]')
+            .locator('text=/columns suggested for omission:/i')
+            .first();
+        if (await suggestionLine.count() === 0) {
+            throw new Error('No omitted-column suggestions detected; scenario not reproduced');
+        }
+        const suggestionText = (await suggestionLine.textContent()) || '';
+        console.log(`   ${suggestionText.trim()}`);
+        await screenshot(page, '03_sidebar_omit_controls.png');
+
+        console.log('4) Run FEM analysis');
+        const runButton = page.getByRole('button', { name: /Run FEM Analysis/i }).first();
+        if (await runButton.count() === 0) {
+            throw new Error('Run FEM Analysis button not found');
+        }
+        await runButton.scrollIntoViewIfNeeded();
+        if (!await runButton.isDisabled()) {
+            await runButton.click();
+            await waitForAnalysisCompletion(page);
+        }
+        await screenshot(page, '04_analysis_complete.png');
+
+        console.log('5) Open Plan View and capture omitted-columns legend count');
+        await clickIfVisible(page.getByRole('button', { name: 'Plan View' }));
+        await page.waitForTimeout(1500);
+        const countBefore = await getLegendCount(page, 'Omitted Columns');
+        console.log(`   Legend count before toggle: ${countBefore}`);
+        await screenshot(page, '05_plan_before_toggle.png');
+
+        console.log('6) Toggle "Show ghost cols" OFF and verify legend hides');
+        const displayOptionsExpander = page.getByText('Display Options').first();
+        await displayOptionsExpander.scrollIntoViewIfNeeded();
+        await displayOptionsExpander.click();
+        await page.waitForTimeout(700);
+
+        const showGhostLabel = page.locator('label:has-text("Show ghost cols")').first();
+        const showGhostInput = page.locator('input[aria-label="Show ghost cols"]').first();
+        let ghostBefore = null;
+        if (await showGhostInput.count() > 0) {
+            ghostBefore = await showGhostInput.isChecked();
+        }
+        if (await showGhostLabel.count() > 0) {
+            await showGhostLabel.scrollIntoViewIfNeeded();
+            await showGhostLabel.click({ force: true });
+            await page.waitForTimeout(1200);
         } else {
-            console.log('   Unlock button not found (might not be locked)');
+            console.log('   "Show ghost cols" control not found');
         }
-        
-        console.log('11. Changing secondary beams to test state invalidation...');
-        const secBeamsInput = page.locator('input[aria-label="Number of Secondary Beams"]');
-        if (await secBeamsInput.count() > 0) {
-            await secBeamsInput.fill('5');
-            await page.waitForTimeout(2000);
-            await page.screenshot({ path: path.join(SCREENSHOT_DIR, '06_after_beam_change.png'), fullPage: false });
-            
-            const analysisCleared = await page.locator('text=Analysis Successful').count() === 0;
-            console.log(`   Analysis state cleared after change: ${analysisCleared}`);
+
+        let ghostAfter = null;
+        if (await showGhostInput.count() > 0) {
+            ghostAfter = await showGhostInput.isChecked();
         }
-        
-        console.log('12. Final full page screenshot...');
-        await page.screenshot({ path: path.join(SCREENSHOT_DIR, '07_final_state.png'), fullPage: true });
-        
-        console.log('\n=== AUDIT COMPLETE ===');
+        console.log(`   Show ghost cols state: before=${ghostBefore}, after=${ghostAfter}`);
+
+        const countAfter = await getLegendCount(page, 'Omitted Columns');
+        console.log(`   Legend count after toggle OFF: ${countAfter}`);
+        await screenshot(page, '06_plan_after_toggle_off.png');
+
+        if (countBefore === 0) {
+            throw new Error('Omitted-columns legend not rendered; scenario reproduction failed');
+        }
+        if (countBefore > 1) {
+            throw new Error(`Regression: duplicate "Omitted Columns" legend entries (${countBefore})`);
+        }
+        if (countBefore > 0 && countAfter > 0) {
+            throw new Error(
+                `Regression: omitted-columns legend still visible after toggle off (before=${countBefore}, after=${countAfter})`
+            );
+        }
+
+        console.log('PASS: omitted-columns legend duplication/toggle regression not observed in this run.');
         console.log(`Screenshots saved to: ${SCREENSHOT_DIR}`);
-        
     } catch (error) {
-        console.error('Error during audit:', error.message);
-        await page.screenshot({ path: path.join(SCREENSHOT_DIR, 'error_state.png'), fullPage: true });
+        console.error(`FAIL: ${error.message}`);
+        await screenshot(page, '99_error_state.png');
+        throw error;
     } finally {
         await browser.close();
     }
 }
 
-runFEMAudit().catch(console.error);
+runFEMAudit().catch((error) => {
+    console.error(error);
+    process.exit(1);
+});

@@ -377,8 +377,7 @@ def test_coupling_beam_both_orientations_in_same_model() -> None:
 @pytest.mark.parametrize(
     ("config", "opening_width", "expected_vecxz"),
     [
-        (CoreWallConfig.TWO_C_FACING, 1500.0, (0.0, -1.0, 0.0)),
-        (CoreWallConfig.TUBE_SIDE_OPENING, 300.0, (1.0, 0.0, 0.0)),
+        (CoreWallConfig.TUBE_WITH_OPENINGS, 1500.0, (0.0, -1.0, 0.0)),
     ],
 )
 def test_beam_builder_computes_coupling_vecxz_and_preserves_flag(
@@ -426,9 +425,7 @@ def test_beam_builder_computes_coupling_vecxz_and_preserves_flag(
 @pytest.mark.parametrize(
     ("config", "opening_width", "expected_vecxz"),
     [
-        (CoreWallConfig.TWO_C_FACING, 1500.0, (0.0, -1.0, 0.0)),
-        (CoreWallConfig.TUBE_SIDE_OPENING, 300.0, (1.0, 0.0, 0.0)),
-        (CoreWallConfig.TWO_C_BACK_TO_BACK, 1500.0, (0.0, -1.0, 0.0)),
+        (CoreWallConfig.TUBE_WITH_OPENINGS, 1500.0, (0.0, -1.0, 0.0)),
     ],
 )
 def test_model_builder_computes_coupling_vecxz_and_preserves_parent_key(

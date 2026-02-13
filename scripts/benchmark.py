@@ -8,6 +8,7 @@ Target: <30 seconds for 30-story building (conservative limit: <60s)
 
 Usage:
     python scripts/benchmark.py --floors 30 --timeout 60
+    python scripts/benchmark.py --floors 30 --timeout 60 --wind
     python scripts/benchmark.py --all
 """
 
@@ -16,7 +17,7 @@ import sys
 import time
 import tracemalloc
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -31,12 +32,14 @@ from src.core.data_models import (
     TerrainCategory,
     ExposureClass,
     LateralInput,
+    WindResult,
 )
 from src.fem.model_builder import build_fem_model, ModelBuilderOptions
 from src.fem.solver import analyze_model, AnalysisResult
+from src.fem.wind_case_synthesizer import with_synthesized_w1_w24_cases
 
 
-def create_test_building(num_floors: int) -> ProjectData:
+def create_test_building(num_floors: int, include_wind: bool = False) -> ProjectData:
     """Create a test building configuration for benchmarking.
     
     Args:
@@ -45,7 +48,7 @@ def create_test_building(num_floors: int) -> ProjectData:
     Returns:
         ProjectData with standard test configuration
     """
-    return ProjectData(
+    project = ProjectData(
         project_name=f"Benchmark {num_floors} Floors",
         project_number=f"BENCH-{num_floors}",
         engineer="Benchmark Test",
@@ -81,8 +84,17 @@ def create_test_building(num_floors: int) -> ProjectData:
         ),
     )
 
+    if include_wind:
+        project.wind_result = WindResult(
+            base_shear=220.0,
+            base_shear_x=220.0,
+            base_shear_y=180.0,
+        )
 
-def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
+    return project
+
+
+def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[float, float, bool, str]:
     """Benchmark FEM analysis for a building.
     
     Args:
@@ -95,7 +107,7 @@ def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
     print(f"Benchmarking {num_floors}-floor building...")
     print(f"{'='*60}")
     
-    project = create_test_building(num_floors)
+    project = create_test_building(num_floors, include_wind=include_wind)
     
     tracemalloc.start()
     
@@ -104,14 +116,21 @@ def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
     try:
         print("  -> Building FEM model...")
         options = ModelBuilderOptions(
-            apply_wind_loads=False,
+            apply_wind_loads=include_wind,
             apply_gravity_loads=True,
         )
         model = build_fem_model(project, options=options)
         
         print("  -> Running linear static analysis...")
-        results_dict = analyze_model(model, load_pattern=1)
-        result: AnalysisResult = results_dict.get("combined") or next(iter(results_dict.values()))
+        run_load_cases = ["DL", "SDL", "LL"]
+        if include_wind:
+            run_load_cases.extend(["Wx", "Wy", "Wtz"])
+
+        results_dict = analyze_model(model, load_cases=run_load_cases)
+        if include_wind:
+            results_dict = with_synthesized_w1_w24_cases(results_dict)
+
+        first_case_result: AnalysisResult = results_dict.get("DL") or next(iter(results_dict.values()))
         
         end_time = time.time()
         wall_time = end_time - start_time
@@ -120,15 +139,31 @@ def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
         peak_memory_mb = peak / (1024 * 1024)
         tracemalloc.stop()
         
-        success = result.success and result.converged
-        message = result.message
+        failed_cases = [
+            case_name for case_name in run_load_cases
+            if not (results_dict.get(case_name) and results_dict[case_name].success and results_dict[case_name].converged)
+        ]
+        has_w1_w24 = all(f"W{i}" in results_dict for i in range(1, 25)) if include_wind else True
+
+        success = not failed_cases and has_w1_w24
+        if success:
+            message = f"{len(run_load_cases)} base cases converged"
+            if include_wind:
+                message += "; W1-W24 synthesized"
+        else:
+            message_parts = []
+            if failed_cases:
+                message_parts.append(f"failed base cases: {', '.join(failed_cases)}")
+            if include_wind and not has_w1_w24:
+                message_parts.append("missing W1-W24 synthesized cases")
+            message = "; ".join(message_parts)
         
         print(f"\n  OK Analysis completed")
         print(f"    - Wall time: {wall_time:.2f}s")
         print(f"    - Peak memory: {peak_memory_mb:.2f} MB")
         print(f"    - Status: {message}")
-        print(f"    - Nodes: {len(result.node_displacements)}")
-        print(f"    - Elements: {len(result.element_forces)}")
+        print(f"    - Nodes: {len(first_case_result.node_displacements)}")
+        print(f"    - Elements: {len(first_case_result.element_forces)}")
         
         return wall_time, peak_memory_mb, success, message
         
@@ -143,7 +178,10 @@ def benchmark_analysis(num_floors: int) -> Tuple[float, float, bool, str]:
         return wall_time, 0.0, False, error_msg
 
 
-def run_benchmarks(floor_counts: list[int]) -> Dict[int, dict]:
+def run_benchmarks(
+    floor_counts: list[int],
+    include_wind: bool = False,
+) -> Dict[int, Dict[str, Any]]:
     """Run benchmarks for multiple building sizes.
     
     Args:
@@ -155,7 +193,7 @@ def run_benchmarks(floor_counts: list[int]) -> Dict[int, dict]:
     results = {}
     
     for num_floors in floor_counts:
-        wall_time, memory_mb, success, message = benchmark_analysis(num_floors)
+        wall_time, memory_mb, success, message = benchmark_analysis(num_floors, include_wind=include_wind)
         
         results[num_floors] = {
             'wall_time_s': wall_time,
@@ -167,7 +205,7 @@ def run_benchmarks(floor_counts: list[int]) -> Dict[int, dict]:
     return results
 
 
-def print_summary(results: Dict[int, dict], timeout: float = 60.0):
+def print_summary(results: Dict[int, Dict[str, Any]], timeout: float = 60.0):
     """Print formatted summary of benchmark results.
     
     Args:
@@ -232,6 +270,11 @@ def main():
         default=60.0,
         help='Target timeout in seconds (default: 60s)'
     )
+    parser.add_argument(
+        '--wind',
+        action='store_true',
+        help='Include base wind load cases (Wx/Wy/Wtz) and W1-W24 synthesis check',
+    )
     
     args = parser.parse_args()
     
@@ -246,10 +289,11 @@ def main():
     
     print("PrelimStruct v3.5 Performance Benchmark")
     print(f"Testing: {floor_counts} floors")
+    print(f"Mode: {'gravity+wind' if args.wind else 'gravity only'}")
     print(f"Target: <{args.timeout}s for 30-floor building\n")
     
     # Run benchmarks
-    results = run_benchmarks(floor_counts)
+    results = run_benchmarks(floor_counts, include_wind=args.wind)
     
     # Print summary
     print_summary(results, timeout=args.timeout)

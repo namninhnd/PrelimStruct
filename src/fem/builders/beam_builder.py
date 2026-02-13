@@ -492,9 +492,10 @@ class BeamBuilder:
         created_elements = []
         all_nodes = set()
         
-        # Only create if there's an opening
-        if core_geometry.opening_width is None or core_geometry.opening_width <= 0:
-            return BeamCreationResult(element_tags=[], node_tags=[], core_boundary_points=[])
+        # Only create if there's an opening (not applicable to I_SECTION which has no opening)
+        if core_geometry.config != CoreWallConfig.I_SECTION:
+            if core_geometry.opening_width is None or core_geometry.opening_width <= 0:
+                return BeamCreationResult(element_tags=[], node_tags=[], core_boundary_points=[])
         
         # Generate coupling beam geometry
         coupling_beam_generator = CouplingBeamGenerator(core_geometry)
@@ -541,27 +542,10 @@ class BeamBuilder:
                 half_span = (cb.clear_span / 2.0) / 1000.0
                 
                 # Determine beam orientation based on core config
-                if core_geometry.config in (
-                    CoreWallConfig.TWO_C_FACING,
-                    CoreWallConfig.TUBE_CENTER_OPENING,
-                ):
-                    # Beam spans along X
-                    start_x = cb_x_center - half_span
-                    start_y = cb_y_center
-                    end_x = cb_x_center + half_span
-                    end_y = cb_y_center
-                elif core_geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-                    # Beam spans along Y
-                    start_x = cb_x_center
-                    start_y = cb_y_center - half_span
-                    end_x = cb_x_center
-                    end_y = cb_y_center + half_span
-                else:
-                    # Default: span along X
-                    start_x = cb_x_center - half_span
-                    start_y = cb_y_center
-                    end_x = cb_x_center + half_span
-                    end_y = cb_y_center
+                start_x = cb_x_center - half_span
+                start_y = cb_y_center
+                end_x = cb_x_center + half_span
+                end_y = cb_y_center
                 
                 # Create nodes
                 start_node = self.registry.get_or_create(

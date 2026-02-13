@@ -9,10 +9,7 @@ from src.core.data_models import (
 )
 from src.fem.core_wall_geometry import (
     ISectionCoreWall,
-    TwoCFacingCoreWall,
-    TwoCBackToBackCoreWall,
-    TubeCenterOpeningCoreWall,
-    TubeSideOpeningCoreWall,
+    TubeWithOpeningsCoreWall,
 )
 from src.fem.coupling_beam import CouplingBeamGenerator
 
@@ -29,21 +26,11 @@ def calculate_core_wall_properties(geometry: CoreWallGeometry) -> Optional[CoreW
     try:
         if geometry.config == CoreWallConfig.I_SECTION:
             core_wall = ISectionCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TWO_C_FACING:
-            core_wall = TwoCFacingCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-            core_wall = TwoCBackToBackCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-            core_wall = TubeCenterOpeningCoreWall(geometry)
-            return core_wall.calculate_section_properties()
-        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-            core_wall = TubeSideOpeningCoreWall(geometry)
-            return core_wall.calculate_section_properties()
+        elif geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            core_wall = TubeWithOpeningsCoreWall(geometry)
         else:
             return None
+        return core_wall.calculate_section_properties()
     except Exception:
         return None
 
@@ -60,21 +47,11 @@ def get_core_wall_outline(geometry: CoreWallGeometry) -> Optional[List[Tuple[flo
     try:
         if geometry.config == CoreWallConfig.I_SECTION:
             core_wall = ISectionCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TWO_C_FACING:
-            core_wall = TwoCFacingCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-            core_wall = TwoCBackToBackCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-            core_wall = TubeCenterOpeningCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
-        elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-            core_wall = TubeSideOpeningCoreWall(geometry)
-            return core_wall.get_outline_coordinates()
+        elif geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            core_wall = TubeWithOpeningsCoreWall(geometry)
         else:
             return None
+        return core_wall.get_outline_coordinates()
     except Exception:
         return None
 

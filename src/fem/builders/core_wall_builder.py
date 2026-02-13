@@ -8,22 +8,16 @@ providing a clean API for creating shell walls with mesh generation.
 import logging
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
-from src.core.data_models import CoreWallGeometry, GeometryInput, ProjectData
+from src.core.data_models import CoreWallConfig, CoreWallGeometry, GeometryInput, ProjectData, TubeOpeningPlacement
+from src.fem.core_wall_geometry import resolve_i_section_plan_dimensions
 from src.fem.model_builder import trim_beam_segment_against_polygon
 from src.fem.builders.beam_builder import BeamBuilder
-from src.fem.core_wall_geometry import (
-    ISectionCoreWall,
-    TwoCFacingCoreWall,
-    TwoCBackToBackCoreWall,
-    TubeCenterOpeningCoreWall,
-    TubeSideOpeningCoreWall,
-)
 from src.fem.fem_engine import Element, ElementType, FEMModel
 from src.fem.materials import ConcreteProperties, get_plane_stress_material, get_plate_fiber_section
 from src.fem.wall_element import WallPanel, WallMeshGenerator
 
 if TYPE_CHECKING:
-    from src.fem.model_builder import ModelBuilderOptions
+    from src.fem.model_builder import ModelBuilderOptions, NodeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +82,7 @@ class CoreWallBuilder:
         offset_x: float,
         offset_y: float,
         registry_nodes_by_floor: Dict[int, List[int]],
+        registry: Optional["NodeRegistry"] = None,
     ) -> Tuple[List[int], List[int]]:
         """Create all core wall shell elements.
         
@@ -95,6 +90,7 @@ class CoreWallBuilder:
             offset_x: X offset of core wall in meters
             offset_y: Y offset of core wall in meters
             registry_nodes_by_floor: Dictionary to track nodes by floor
+            registry: Optional NodeRegistry for registering wall nodes
             
         Returns:
             Tuple of (wall_node_tags, wall_element_tags)
@@ -125,14 +121,23 @@ class CoreWallBuilder:
                 section_tag=self.wall_section_tag,
                 elements_along_length=2,
                 elements_per_story=2,
+                registry=registry,
             )
             
             # Add wall nodes to model
             for node_tag, x, y, z, floor_level in mesh_result.nodes:
-                restraints = [1, 1, 1, 1, 1, 1] if z == 0.0 else None
-                from src.fem.fem_engine import Node
-                node = Node(tag=node_tag, x=x, y=y, z=z, restraints=restraints)
-                self.model.add_node(node)
+                if registry is None:
+                    restraints = [1, 1, 1, 1, 1, 1] if z == 0.0 else None
+                    from src.fem.fem_engine import Node
+                    node = Node(
+                        tag=node_tag,
+                        x=x,
+                        y=y,
+                        z=z,
+                        restraints=restraints or [0, 0, 0, 0, 0, 0],
+                    )
+                    self.model.add_node(node)
+                
                 self.wall_nodes.append(node_tag)
                 
                 # Track in registry for diaphragms
@@ -176,21 +181,82 @@ class CoreWallBuilder:
             List of WallPanel objects
         """
         config = core_geometry.config
+        thickness_m = core_geometry.wall_thickness / 1000.0
+        fcu = 40.0
+        panels: List[WallPanel] = []
         
-        if config.value == "i_section":
-            generator = ISectionCoreWall(core_geometry)
-        elif config.value == "two_c_facing":
-            generator = TwoCFacingCoreWall(core_geometry)
-        elif config.value == "two_c_back_to_back":
-            generator = TwoCBackToBackCoreWall(core_geometry)
-        elif config.value == "tube_center_opening":
-            generator = TubeCenterOpeningCoreWall(core_geometry)
-        elif config.value == "tube_side_opening":
-            generator = TubeSideOpeningCoreWall(core_geometry)
+        if config == CoreWallConfig.I_SECTION:
+            length_x_mm, length_y_mm = resolve_i_section_plan_dimensions(core_geometry)
+            length_x_m = length_x_mm / 1000.0
+            length_y_m = length_y_mm / 1000.0
+            
+            panels.append(WallPanel(
+                wall_id="IW1",
+                base_point=(offset_x, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="IW2",
+                base_point=(offset_x + length_x_m, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
+            web_y = offset_y + length_y_m / 2
+            panels.append(WallPanel(
+                wall_id="IW3",
+                base_point=(offset_x, web_y),
+                length=length_x_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            
+        elif config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            length_x_m = core_geometry.length_x / 1000.0
+            length_y_m = core_geometry.length_y / 1000.0
+            opening_width_m = core_geometry.opening_width / 1000.0 if core_geometry.opening_width else 0.0
+            placement = core_geometry.opening_placement
+            if placement in {
+                TubeOpeningPlacement.BOTH,
+                TubeOpeningPlacement.TOP,
+                TubeOpeningPlacement.BOTTOM,
+            }:
+                placement = TubeOpeningPlacement.TOP_BOT
+
+            opening_enabled = placement == TubeOpeningPlacement.TOP_BOT
+
+            has_top_bot_openings = (
+                opening_enabled
+                and opening_width_m > 0.0
+                and opening_width_m < length_x_m
+            )
+
+            if has_top_bot_openings:
+                side_length = (length_x_m - opening_width_m) / 2.0
+                panels.append(WallPanel("TW1_left", (offset_x, offset_y), side_length, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW1_right", (offset_x + side_length + opening_width_m, offset_y), side_length, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW2", (offset_x + length_x_m, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+                panels.append(WallPanel("TW3_left", (offset_x, offset_y + length_y_m), side_length, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW3_right", (offset_x + side_length + opening_width_m, offset_y + length_y_m), side_length, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW4", (offset_x, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+            else:
+                panels.append(WallPanel("TW1", (offset_x, offset_y), length_x_m, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW2", (offset_x + length_x_m, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+                panels.append(WallPanel("TW3", (offset_x, offset_y + length_y_m), length_x_m, thickness_m, 1.0, 0.0, fcu))
+                panels.append(WallPanel("TW4", (offset_x, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+            
         else:
             raise ValueError(f"Unsupported core wall configuration: {config}")
         
-        return generator.generate_panels(offset_x=offset_x * 1000.0, offset_y=offset_y * 1000.0)
+        return panels
 
     def get_material_tag(self) -> Optional[int]:
         """Get the wall material tag.

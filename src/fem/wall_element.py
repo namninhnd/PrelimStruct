@@ -11,10 +11,15 @@ References:
     - https://opensees.berkeley.edu/wiki/index.php?title=Plate_Fiber_Section
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional
+from typing import TYPE_CHECKING, List, Tuple, Dict, Optional
 import math
 import logging
+
+if TYPE_CHECKING:
+    from src.fem.model_builder import NodeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +136,8 @@ class WallMeshGenerator:
         story_height: float,
         section_tag: int,
         elements_along_length: int = 1,
-        elements_per_story: int = 2
+        elements_per_story: int = 2,
+        registry: Optional[NodeRegistry] = None,
     ) -> WallMeshResult:
         """Generate mesh for a wall panel.
         
@@ -142,6 +148,12 @@ class WallMeshGenerator:
             section_tag: Section tag for PlateFiberSection
             elements_along_length: Number of elements along wall length
             elements_per_story: Number of elements per story height
+            registry: Optional NodeRegistry for node deduplication.
+                      When provided, uses get_or_create() to reuse nodes
+                      at coincident coordinates (e.g. flange-web junctions).
+                      Nodes are added to the OpenSeesPy model by the registry;
+                      callers MUST NOT call model.add_node() or
+                      registry.register_existing() afterward.
         
         Returns:
             WallMeshResult with nodes, elements, and edge nodes
@@ -174,7 +186,19 @@ class WallMeshGenerator:
                 x = wall.base_point[0] + ix * dx
                 y = wall.base_point[1] + ix * dy
                 
-                tag = self._get_next_node_tag()
+                if registry is not None:
+                    # Deduplicated path: registry handles node creation
+                    # and adds to OpenSeesPy model internally
+                    restraints = [1, 1, 1, 1, 1, 1] if z == 0.0 else None
+                    tag = registry.get_or_create(
+                        x, y, z,
+                        restraints=restraints,
+                        floor_level=floor_level,
+                    )
+                else:
+                    # Legacy path: sequential tag assignment
+                    tag = self._get_next_node_tag()
+                
                 nodes.append((tag, x, y, z, floor_level))
                 row.append(tag)
                 

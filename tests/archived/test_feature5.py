@@ -77,7 +77,7 @@ def calculate_carbon_emission(project):
 def create_core_geometry(length_x_m: float, length_y_m: float) -> CoreWallGeometry:
     """Create a default core wall geometry in mm from metric inputs."""
     return CoreWallGeometry(
-        config=CoreWallConfig.TUBE_CENTER_OPENING,
+        config=CoreWallConfig.TUBE_WITH_OPENINGS,
         length_x=length_x_m * 1000.0,
         length_y=length_y_m * 1000.0,
         opening_width=2000.0,

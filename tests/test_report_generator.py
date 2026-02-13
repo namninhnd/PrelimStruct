@@ -68,7 +68,7 @@ def sample_project():
             building_width=8.0,
             building_depth=6.0,
             core_geometry=CoreWallGeometry(
-                config=CoreWallConfig.TUBE_CENTER_OPENING,
+                config=CoreWallConfig.TUBE_WITH_OPENINGS,
                 length_x=6000.0,
                 length_y=4000.0,
                 opening_width=2000.0,

@@ -34,14 +34,50 @@ class TerrainCategory(Enum):
 class CoreWallConfig(Enum):
     """Core wall configuration types for FEM modeling.
     
-    These configurations represent typical tall building core wall arrangements
-    commonly used in Hong Kong structural design practice.
+    Simplified model for Phase 12A:
+    - I_SECTION: Two walls blended into I-section shape
+    - TUBE_WITH_OPENINGS: Tube/box core with configurable opening placement
     """
-    I_SECTION = "i_section"                     # 2 walls blended into I-section
-    TWO_C_FACING = "two_c_facing"               # 2 C-shaped walls facing each other
-    TWO_C_BACK_TO_BACK = "two_c_back_to_back"   # 2 C-shaped walls back to back
-    TUBE_CENTER_OPENING = "tube_center_opening" # Tube/box with center opening
-    TUBE_SIDE_OPENING = "tube_side_opening"     # Tube/box with side flange opening
+    I_SECTION = "i_section"
+    TUBE_WITH_OPENINGS = "tube_with_openings"
+
+
+class TubeOpeningPlacement(Enum):
+    """Opening placement options for tube core walls.
+    
+    Primary UI options:
+    - TOP_BOT: Openings at both top and bottom faces
+    - NONE: No opening
+
+    Backward-compatibility aliases are retained for persisted legacy values.
+    """
+    TOP_BOT = "top_bot"
+    NONE = "none"
+
+    TOP = "top"
+    BOTTOM = "bottom"
+    BOTH = "both"
+
+
+class CoreLocationPreset(Enum):
+    """Preset locations for core wall placement in floor plan.
+    
+    9 standard positions:
+    - CENTER: Center of floor plan
+    - NORTH/SOUTH/EAST/WEST: Side-middle positions
+    - NORTHEAST/NORTHWEST/SOUTHEAST/SOUTHWEST: Corner positions
+    
+    All presets enforce bounding-box clearance from floor edges.
+    """
+    CENTER = "center"
+    NORTH = "north"
+    SOUTH = "south"
+    EAST = "east"
+    WEST = "west"
+    NORTHEAST = "northeast"
+    NORTHWEST = "northwest"
+    SOUTHEAST = "southeast"
+    SOUTHWEST = "southwest"
 
 
 class WindLoadCase(Enum):
@@ -487,10 +523,12 @@ class CoreWallGeometry:
         wall_thickness: Wall thickness in mm (default 500mm per HK practice)
         length_x: Core wall outer dimension in X direction (mm)
         length_y: Core wall outer dimension in Y direction (mm)
-        opening_width: Width of opening in core wall (mm), if applicable
-        opening_height: Height of opening in core wall (mm), if applicable
+        opening_width: Opening size in core wall (mm), if applicable
+        opening_height: Optional legacy opening height (mm). If omitted,
+            opening_width is reused for height-dependent calculations.
         flange_width: Flange width for I-section or C-section configurations (mm)
         web_length: Web length for I-section or C-section configurations (mm)
+        opening_placement: Opening placement for TUBE_WITH_OPENINGS (Phase 12A)
     """
     config: CoreWallConfig
     wall_thickness: float = 500.0  # mm
@@ -500,6 +538,7 @@ class CoreWallGeometry:
     opening_height: Optional[float] = None  # mm
     flange_width: Optional[float] = None    # mm
     web_length: Optional[float] = None      # mm
+    opening_placement: TubeOpeningPlacement = TubeOpeningPlacement.TOP_BOT
 
 
 @dataclass
@@ -622,10 +661,10 @@ class LateralInput:
     building_width: float = 0   # Total building width (m)
     building_depth: float = 0   # Total building depth (m)
 
-    # Core Wall Location (Task 17.2)
-    location_type: str = "Center"  # "Center" or "Custom"
-    custom_center_x: Optional[float] = None
-    custom_center_y: Optional[float] = None
+    # Core Wall Location (Phase 12A)
+    location_preset: CoreLocationPreset = CoreLocationPreset.CENTER
+    custom_center_x: Optional[float] = None  # Hidden compatibility field
+    custom_center_y: Optional[float] = None  # Hidden compatibility field
 
 
 @dataclass
@@ -721,7 +760,13 @@ class CoreWallResult(DesignResult):
 
 @dataclass
 class WindResult:
-    """Wind load calculation results"""
+    """Wind load calculation results
+    
+    Gate H Extension (Phase 13A):
+    Added traceability and per-floor wind loads for read-only detail expansion.
+    Fields enable UI to show calculation breakdown without editable inputs.
+    """
+    # Legacy aggregate fields (backward compatibility)
     base_shear: float = 0.0          # kN (legacy aggregate for backward compatibility)
     base_shear_x: float = 0.0        # kN (wind in X direction)
     base_shear_y: float = 0.0        # kN (wind in Y direction)
@@ -731,6 +776,18 @@ class WindResult:
     drift_index: float = 0.0         # Drift ratio (Δ/H)
     drift_ok: bool = True
     lateral_system: str = "CORE_WALL"  # "CORE_WALL" or "MOMENT_FRAME"
+    
+    # Gate H: Traceability (wind code reference)
+    code_reference: str = "HK Wind Code 2019 - Simplified Analysis"
+    terrain_factor: float = 0.0      # Sz terrain coefficient
+    force_coefficient: float = 0.0   # Cf aerodynamic coefficient
+    design_pressure: float = 0.0     # kPa (reference_pressure * terrain_factor)
+    
+    # Gate H: Per-floor wind loads (empty lists if not calculated)
+    floor_elevations: List[float] = field(default_factory=list)  # m (from base)
+    floor_wind_x: List[float] = field(default_factory=list)      # kN per floor (X direction)
+    floor_wind_y: List[float] = field(default_factory=list)      # kN per floor (Y direction)
+    floor_torsion_z: List[float] = field(default_factory=list)   # kNm per floor (torsional)
 
 
 @dataclass

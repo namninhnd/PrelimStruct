@@ -769,6 +769,47 @@ class FEMModel:
                 if slave == diaphragm.master_node:
                     errors.append("Diaphragm slave cannot equal master node")
         
+        # Gate I: Check for orphan nodes (nodes not connected to any element)
+        nodes_in_elements = set()
+        for elem in self.elements.values():
+            nodes_in_elements.update(elem.node_tags)
+        
+        # Also include diaphragm slave nodes as "connected" (they're constrained to master)
+        for diaphragm in self.diaphragms:
+            nodes_in_elements.update(diaphragm.slave_nodes)
+            nodes_in_elements.add(diaphragm.master_node)
+        
+        orphan_nodes = set(self.nodes.keys()) - nodes_in_elements
+        if orphan_nodes:
+            # Filter out fixed/pinned nodes (supports can be orphans - they provide reactions)
+            structural_orphans = [
+                tag for tag in orphan_nodes 
+                if not (self.nodes[tag].is_fixed or self.nodes[tag].is_pinned)
+            ]
+            if structural_orphans:
+                sample = structural_orphans[:5]
+                errors.append(
+                    f"Found {len(structural_orphans)} orphan node(s) not connected to elements: {sample}"
+                )
+        
+        # Gate I: Check for zero-length elements (coincident nodes)
+        zero_length_tolerance = 1e-6  # 1 micron
+        for elem in self.elements.values():
+            if len(elem.node_tags) >= 2:
+                # Check first two nodes for beam elements
+                n1 = self.nodes[elem.node_tags[0]]
+                n2 = self.nodes[elem.node_tags[1]]
+                
+                length = np.sqrt(
+                    (n2.x - n1.x)**2 + (n2.y - n1.y)**2 + (n2.z - n1.z)**2
+                )
+                
+                if length < zero_length_tolerance:
+                    errors.append(
+                        f"Element {elem.tag} has zero/near-zero length ({length:.2e} m) "
+                        f"between nodes {elem.node_tags[0]} and {elem.node_tags[1]}"
+                    )
+        
         # Mesh quality checks for shell elements (warn only)
         max_aspect_ratio = 5.0
         high_aspect_ratio_shells: List[Tuple[int, float]] = []

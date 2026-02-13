@@ -301,10 +301,10 @@ class VisualizationConfig:
         show_slabs: Display slab elements
         show_slab_mesh_grid: Display slab mesh grid lines
     """
-    show_nodes: bool = True
+    show_nodes: bool = False
     show_elements: bool = True
     show_supports: bool = True
-    show_loads: bool = True
+    show_loads: bool = False
     show_labels: bool = False
     node_size: int = 8
     element_width: int = 3
@@ -314,9 +314,13 @@ class VisualizationConfig:
     floor_level: Optional[float] = None
     exaggeration: float = 10.0
     show_slabs: bool = True
-    show_slab_mesh_grid: bool = True
-    show_ghost_columns: bool = True
+    show_slab_mesh_grid: bool = False
+    show_ghost_columns: bool = False
     show_diaphragms: bool = False
+    show_diaphragm_master: bool = False
+    show_beams: bool = True
+    show_columns: bool = True
+    show_walls: bool = True
     grid_spacing: Optional[float] = None
     show_deformed: bool = False
     show_reactions: bool = False
@@ -663,12 +667,22 @@ def _get_utilization_color(utilization: float, colorscale: str) -> str:
 
 def _get_element_color(element: Element) -> str:
     """Get element color based on element type."""
-    if element.element_type == ElementType.COUPLING_BEAM:
+    if _is_coupling_beam_element(element):
         return COLORS["coupling_beam"]
     elif element.element_type == ElementType.SHELL:
         return COLORS["core_wall"]
     else:
         return COLORS["beam"]
+
+
+def _is_coupling_beam_element(element: Element) -> bool:
+    if element.element_type == ElementType.COUPLING_BEAM:
+        return True
+    geometry = element.geometry or {}
+    return bool(
+        geometry.get("coupling_beam")
+        or ("parent_coupling_beam_id" in geometry)
+    )
 
 
 def _get_element_endpoints(model: ModelLike, element: Element) -> Tuple[Node, Node]:
@@ -717,7 +731,7 @@ def _classify_elements(model: ModelLike) -> Dict[str, List[int]]:
                       abs(node_i.x - node_j.x) < 0.01 and
                       abs(node_i.y - node_j.y) < 0.01)
 
-        if elem.element_type == ElementType.COUPLING_BEAM:
+        if _is_coupling_beam_element(elem):
             classification["coupling_beams"].append(elem.tag)
         elif is_vertical:
             classification["columns"].append(elem.tag)
@@ -758,11 +772,16 @@ def _get_floor_elevations(model: ModelLike, tolerance: float = 0.01) -> List[flo
         if not any(abs(z_value - e) < tolerance for e in elevations):
             elevations.append(z_value)
 
-    # Prefer slab and horizontal element elevations to avoid column subnodes
+    # Prefer slab (horizontal) shell element elevations.
+    # Wall shells span between floors (different z-values across nodes) and
+    # must be excluded to avoid intermediate/duplicate floor entries.
     for elem in model.elements.values():
         if elem.element_type in (ElementType.SHELL_MITC4, ElementType.SHELL):
             node_zs = [model.nodes[n].z for n in elem.node_tags if n in model.nodes]
             if node_zs:
+                z_spread = max(node_zs) - min(node_zs)
+                if z_spread > tolerance:
+                    continue  # vertical (wall) shell — skip
                 _add_level(sum(node_zs) / len(node_zs))
 
     if not elevations:
@@ -1749,6 +1768,8 @@ def create_plan_view(model: ModelLike,
                      config: Optional[VisualizationConfig] = None,
                      floor_elevation: Optional[float] = None,
                      utilization: Optional[Dict[int, float]] = None,
+                     displaced_nodes: Optional[Dict[int, Tuple[float, float, float]]] = None,
+                     reactions: Optional[Dict[int, List[float]]] = None,
                      analysis_result: Optional[Any] = None) -> PlotlyFigure:
     """Create plan view (XY) visualization of FEM model.
 
@@ -1757,6 +1778,8 @@ def create_plan_view(model: ModelLike,
         config: Visualization configuration
         floor_elevation: Specific floor elevation to show (None = top floor)
         utilization: Optional dict of element tag -> utilization ratio for coloring
+        displaced_nodes: Optional dict of node tag -> (dx, dy, dz) displacements
+        reactions: Optional dict of node tag -> [Fx, Fy, Fz, Mx, My, Mz] reactions
         analysis_result: Optional analysis results (currently unused, for API compatibility)
 
     Returns:
@@ -1765,6 +1788,8 @@ def create_plan_view(model: ModelLike,
     _check_plotly()
     config = config or VisualizationConfig()
     utilization_map = cast(Dict[int, float], utilization or {})
+    displaced_nodes = cast(Dict[int, Tuple[float, float, float]], displaced_nodes or {})
+    reactions = cast(Dict[int, List[float]], reactions or {})
 
     # Determine floor elevation
     floors = _get_floor_elevations(model)
@@ -1789,59 +1814,60 @@ def create_plan_view(model: ModelLike,
     use_utilization = len(utilization_map) > 0
 
     # Draw core walls (vertical shell elements intersecting this floor)
-    wall_x: List[Optional[float]] = []
-    wall_y: List[Optional[float]] = []
-    wall_text: List[str] = []
-    wall_trace_added = False
-    
-    for elem_tag in classification["core_walls"]:
-        elem = model.elements[elem_tag]
-        if len(elem.node_tags) != 4:
-            continue
-            
-        nodes = [model.nodes[tag] for tag in elem.node_tags]
+    if config.show_walls:
+        wall_x: List[Optional[float]] = []
+        wall_y: List[Optional[float]] = []
+        wall_text: List[str] = []
+        wall_trace_added = False
         
-        # Check edges (0-1, 1-2, 2-3, 3-0)
-        # If an edge lies entirely on the target_z plane, draw it
-        for i in range(4):
-            n1 = nodes[i]
-            n2 = nodes[(i + 1) % 4]
-            
-            if (abs(n1.z - target_z) < tolerance and 
-                abs(n2.z - target_z) < tolerance):
+        for elem_tag in classification["core_walls"]:
+            elem = model.elements[elem_tag]
+            if len(elem.node_tags) != 4:
+                continue
                 
-                if use_utilization:
-                    util = utilization_map.get(elem_tag, 0.0)
-                    color = _get_utilization_color(util, config.colorscale)
-                    fig.add_trace(go.Scatter(
-                        x=[n1.x, n2.x],
-                        y=[n1.y, n2.y],
-                        mode='lines',
-                        line=dict(color=color, width=config.element_width + 4), # Thicker than beams
-                        name='Core Walls',
-                        showlegend=not wall_trace_added,
-                        customdata=[[elem_tag, util]],
-                        hovertemplate=(
-                            "Core Wall %{customdata[0]}<br>"
-                            "Util: %{customdata[1]:.1%}<extra></extra>"
-                        ),
-                    ))
-                    wall_trace_added = True
-                else:
-                    wall_x.extend([n1.x, n2.x, None])
-                    wall_y.extend([n1.y, n2.y, None])
-                    wall_text.append(f"Core Wall {elem_tag}")
+            nodes = [model.nodes[tag] for tag in elem.node_tags]
+            
+            # Check edges (0-1, 1-2, 2-3, 3-0)
+            # If an edge lies entirely on the target_z plane, draw it
+            for i in range(4):
+                n1 = nodes[i]
+                n2 = nodes[(i + 1) % 4]
+                
+                if (abs(n1.z - target_z) < tolerance and 
+                    abs(n2.z - target_z) < tolerance):
+                    
+                    if use_utilization:
+                        util = utilization_map.get(elem_tag, 0.0)
+                        color = _get_utilization_color(util, config.colorscale)
+                        fig.add_trace(go.Scatter(
+                            x=[n1.x, n2.x],
+                            y=[n1.y, n2.y],
+                            mode='lines',
+                            line=dict(color=color, width=config.element_width + 4),
+                            name='Core Walls',
+                            showlegend=not wall_trace_added,
+                            customdata=[[elem_tag, util]],
+                            hovertemplate=(
+                                "Core Wall %{customdata[0]}<br>"
+                                "Util: %{customdata[1]:.1%}<extra></extra>"
+                            ),
+                        ))
+                        wall_trace_added = True
+                    else:
+                        wall_x.extend([n1.x, n2.x, None])
+                        wall_y.extend([n1.y, n2.y, None])
+                        wall_text.append(f"Core Wall {elem_tag}")
 
-    if wall_x and not use_utilization:
-        fig.add_trace(go.Scatter(
-            x=wall_x,
-            y=wall_y,
-            mode='lines',
-            line=dict(color=COLORS["core_wall"], width=config.element_width + 4),
-            name='Core Walls',
-            hoverinfo='text',
-            text=wall_text * (len(wall_x) // 3) if wall_text else None,
-        ))
+        if wall_x and not use_utilization:
+            fig.add_trace(go.Scatter(
+                x=wall_x,
+                y=wall_y,
+                mode='lines',
+                line=dict(color=COLORS["core_wall"], width=config.element_width + 4),
+                name='Core Walls',
+                hoverinfo='text',
+                text=wall_text * (len(wall_x) // 3) if wall_text else None,
+            ))
 
 
     # Draw beams (horizontal elements at this floor)
@@ -1854,7 +1880,7 @@ def create_plan_view(model: ModelLike,
     beam_label_groups: Dict[int, List[Tuple[int, int]]] = {}
     beam_trace_added = False
 
-    for elem_tag in classification["beams"]:
+    for elem_tag in (classification["beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
 
@@ -1896,7 +1922,7 @@ def create_plan_view(model: ModelLike,
                 sub_idx = geom.get("sub_element_index", 0)
                 beam_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
-    if beam_x and not use_utilization:
+    if config.show_beams and beam_x and not use_utilization:
         fig.add_trace(go.Scatter(
             x=beam_x,
             y=beam_y,
@@ -1925,7 +1951,7 @@ def create_plan_view(model: ModelLike,
             hoverinfo='none',
         ))
 
-    if config.show_labels and beam_label_groups:
+    if config.show_beams and config.show_labels and beam_label_groups:
         for parent_id, sub_elements in beam_label_groups.items():
             sub_elements.sort(key=lambda item: item[0])
             first_elem = model.elements.get(sub_elements[0][1])
@@ -1938,7 +1964,7 @@ def create_plan_view(model: ModelLike,
             beam_label_y.append((start_node.y + end_node.y) / 2)
             beam_label_text.append(f"B{parent_id}")
 
-    if config.show_labels and beam_label_x:
+    if config.show_beams and config.show_labels and beam_label_x:
         fig.add_trace(go.Scatter(
             x=beam_label_x,
             y=beam_label_y,
@@ -1960,7 +1986,7 @@ def create_plan_view(model: ModelLike,
     sec_beam_label_groups: Dict[int, List[Tuple[int, int]]] = {}
     sec_beam_trace_added = False
 
-    for elem_tag in classification["beams_secondary"]:
+    for elem_tag in (classification["beams_secondary"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
 
@@ -2002,7 +2028,7 @@ def create_plan_view(model: ModelLike,
                 sub_idx = geom.get("sub_element_index", 0)
                 sec_beam_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
-    if sec_beam_x and not use_utilization:
+    if config.show_beams and sec_beam_x and not use_utilization:
         fig.add_trace(go.Scatter(
             x=sec_beam_x,
             y=sec_beam_y,
@@ -2013,7 +2039,7 @@ def create_plan_view(model: ModelLike,
             text=sec_beam_text * (len(sec_beam_x) // 3) if sec_beam_text else None,
         ))
 
-    if config.show_labels and sec_beam_label_groups:
+    if config.show_beams and config.show_labels and sec_beam_label_groups:
         for parent_id, sub_elements in sec_beam_label_groups.items():
             sub_elements.sort(key=lambda item: item[0])
             first_elem = model.elements.get(sub_elements[0][1])
@@ -2026,7 +2052,7 @@ def create_plan_view(model: ModelLike,
             sec_beam_label_y.append((start_node.y + end_node.y) / 2)
             sec_beam_label_text.append(f"SB{parent_id}")
 
-    if config.show_labels and sec_beam_label_x:
+    if config.show_beams and config.show_labels and sec_beam_label_x:
         fig.add_trace(go.Scatter(
             x=sec_beam_label_x,
             y=sec_beam_label_y,
@@ -2038,44 +2064,6 @@ def create_plan_view(model: ModelLike,
             hoverinfo='skip',
         ))
 
-    # Render ghost columns (omitted columns)
-    if config.show_ghost_columns and hasattr(model, 'omitted_columns'):
-        ghost_x = []
-        ghost_y = []
-        ghost_text = []
-        
-        for ghost in model.omitted_columns:
-            # model.omitted_columns is a list of dicts: {"x": x, "y": y, "id": col_id}
-            # Or if passing from VisualizationData, it's also a list of dicts or tuples
-            # Let's handle dict format as per model_builder.py
-            if isinstance(ghost, dict):
-                x, y, col_id = ghost.get("x"), ghost.get("y"), ghost.get("id")
-            else:
-                continue
-
-            if x is not None and y is not None:
-                ghost_x.append(x)
-                ghost_y.append(y)
-                ghost_text.append(f"Omitted: {col_id}")
-        
-        if ghost_x:
-            fig.add_trace(go.Scatter(
-                x=ghost_x,
-                y=ghost_y,
-                mode='markers',
-                marker=dict(
-                    size=12,
-                    color='rgba(150, 150, 150, 0.3)',  # Light grey
-                    symbol='circle-open', # Dashed effect via open circle + line width
-                    line=dict(color='rgba(100, 100, 100, 0.6)', width=2) 
-                ),
-                name='Omitted Columns',
-                text=ghost_text,
-                hoverinfo='text',
-                showlegend=True,
-            ))
-
-
     # Draw coupling beams
     cb_x: List[Optional[float]] = []
     cb_y: List[Optional[float]] = []
@@ -2084,7 +2072,7 @@ def create_plan_view(model: ModelLike,
     cb_label_text: List[str] = []
     cb_label_groups: Dict[int, List[Tuple[int, int]]] = {}
 
-    for elem_tag in classification["coupling_beams"]:
+    for elem_tag in (classification["coupling_beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
 
@@ -2094,11 +2082,15 @@ def create_plan_view(model: ModelLike,
             cb_y.extend([node_i.y, node_j.y, None])
             if config.show_labels:
                 geom = elem.geometry or {}
-                parent_id = geom.get("parent_coupling_beam_id", elem_tag)
+                parent_id = (
+                    geom.get("parent_coupling_beam_id")
+                    or geom.get("parent_beam_id")
+                    or elem_tag
+                )
                 sub_idx = geom.get("sub_element_index", 0)
                 cb_label_groups.setdefault(parent_id, []).append((sub_idx, elem_tag))
 
-    if cb_x:
+    if config.show_beams and cb_x:
         fig.add_trace(go.Scatter(
             x=cb_x,
             y=cb_y,
@@ -2107,7 +2099,7 @@ def create_plan_view(model: ModelLike,
             name='Coupling Beams',
         ))
 
-    if config.show_labels and cb_label_groups:
+    if config.show_beams and config.show_labels and cb_label_groups:
         for parent_id, sub_elements in cb_label_groups.items():
             sub_elements.sort(key=lambda item: item[0])
             first_elem = model.elements.get(sub_elements[0][1])
@@ -2120,7 +2112,7 @@ def create_plan_view(model: ModelLike,
             cb_label_y.append((start_node.y + end_node.y) / 2)
             cb_label_text.append(f"CB{parent_id}")
 
-    if config.show_labels and cb_label_x:
+    if config.show_beams and config.show_labels and cb_label_x:
         fig.add_trace(go.Scatter(
             x=cb_label_x,
             y=cb_label_y,
@@ -2135,7 +2127,7 @@ def create_plan_view(model: ModelLike,
     # Draw columns as markers (intersection points)
     column_points: Dict[Tuple[float, float], Dict[str, Any]] = {}
 
-    for elem_tag in classification["columns"]:
+    for elem_tag in (classification["columns"] if config.show_columns else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
 
@@ -2156,7 +2148,7 @@ def create_plan_view(model: ModelLike,
                 column_points[key]["util"] = max(column_points[key]["util"], util)
                 column_points[key]["labels"].append(elem_tag)
 
-    if column_points:
+    if config.show_columns and column_points:
         col_x: List[float] = []
         col_y: List[float] = []
         col_text: List[str] = []
@@ -2206,7 +2198,7 @@ def create_plan_view(model: ModelLike,
             ))
 
     # Draw ghost columns (omitted columns near core wall)
-    if hasattr(model, 'omitted_columns') and model.omitted_columns:
+    if config.show_ghost_columns and hasattr(model, 'omitted_columns') and model.omitted_columns:
         ghost_col_x: List[float] = []
         ghost_col_y: List[float] = []
         ghost_col_text: List[str] = []
@@ -2234,7 +2226,7 @@ def create_plan_view(model: ModelLike,
             ))
 
     # Draw slab elements (SHELL_MITC4 quads at this floor level)
-    if config.show_slabs and classification["slabs"]:
+    if (config.show_slabs or config.show_slab_mesh_grid) and classification["slabs"]:
         slab_fill_added = False
         slab_mesh_added = False
         
@@ -2402,7 +2394,7 @@ def create_plan_view(model: ModelLike,
         ))
 
     # Draw diaphragm nodes (master + slaves)
-    if config.show_diaphragms and model.diaphragms:
+    if (config.show_diaphragms or config.show_diaphragm_master) and model.diaphragms:
         master_x: List[float] = []
         master_y: List[float] = []
         master_text: List[str] = []
@@ -2414,17 +2406,20 @@ def create_plan_view(model: ModelLike,
             master_node = model.nodes.get(diaphragm.master_node)
             if master_node is None or abs(master_node.z - target_z) >= tolerance:
                 continue
-            master_x.append(master_node.x)
-            master_y.append(master_node.y)
-            master_text.append(f"Diaphragm Master {master_node.tag}")
 
-            for slave_tag in diaphragm.slave_nodes:
-                slave_node = model.nodes.get(slave_tag)
-                if slave_node is None or abs(slave_node.z - target_z) >= tolerance:
-                    continue
-                slave_x.append(slave_node.x)
-                slave_y.append(slave_node.y)
-                slave_text.append(f"Diaphragm Slave {slave_node.tag}")
+            if config.show_diaphragm_master:
+                master_x.append(master_node.x)
+                master_y.append(master_node.y)
+                master_text.append(f"Diaphragm Master {master_node.tag}")
+
+            if config.show_diaphragms:
+                for slave_tag in diaphragm.slave_nodes:
+                    slave_node = model.nodes.get(slave_tag)
+                    if slave_node is None or abs(slave_node.z - target_z) >= tolerance:
+                        continue
+                    slave_x.append(slave_node.x)
+                    slave_y.append(slave_node.y)
+                    slave_text.append(f"Diaphragm Slave {slave_node.tag}")
 
         if master_x:
             fig.add_trace(go.Scatter(
@@ -2432,7 +2427,7 @@ def create_plan_view(model: ModelLike,
                 y=master_y,
                 mode='markers',
                 marker=dict(size=config.node_size + 2, color="#a855f7", symbol="x"),
-                name='Diaphragm Nodes',
+                name='Diaphragm Master',
                 text=master_text,
                 hoverinfo='text',
             ))
@@ -2443,8 +2438,8 @@ def create_plan_view(model: ModelLike,
                 y=slave_y,
                 mode='markers',
                 marker=dict(size=config.node_size + 1, color="#a855f7", symbol="circle-open"),
-                name=None,
-                showlegend=False,
+                name='Diaphragm',
+                showlegend=True,
                 text=slave_text,
                 hoverinfo='text',
             ))
@@ -2615,6 +2610,108 @@ def create_plan_view(model: ModelLike,
                     ))
                     legend_added = True
 
+    if config.show_deformed and displaced_nodes:
+        def_x: List[Optional[float]] = []
+        def_y: List[Optional[float]] = []
+
+        for elem_group in ("beams", "beams_secondary", "coupling_beams"):
+            for elem_tag in classification[elem_group]:
+                elem = model.elements[elem_tag]
+                node_i, node_j = _get_element_endpoints(model, elem)
+                if (abs(node_i.z - target_z) >= tolerance or
+                    abs(node_j.z - target_z) >= tolerance):
+                    continue
+
+                dx_i, dy_i, _ = displaced_nodes.get(node_i.tag, (0.0, 0.0, 0.0))
+                dx_j, dy_j, _ = displaced_nodes.get(node_j.tag, (0.0, 0.0, 0.0))
+                def_x.extend([
+                    node_i.x + dx_i * config.exaggeration,
+                    node_j.x + dx_j * config.exaggeration,
+                    None,
+                ])
+                def_y.extend([
+                    node_i.y + dy_i * config.exaggeration,
+                    node_j.y + dy_j * config.exaggeration,
+                    None,
+                ])
+
+        if def_x:
+            fig.add_trace(go.Scatter(
+                x=def_x,
+                y=def_y,
+                mode='lines',
+                line=dict(color="rgba(239, 68, 68, 0.7)", width=2, dash='dash'),
+                name='Deflected Shape',
+            ))
+
+    # Reaction forces at supports
+    if reactions and config.show_reactions:
+        base_nodes = [n for n in model.nodes.values() if n.z < tolerance]
+        max_reaction = 1e-6
+        reaction_display_nodes: Dict[int, Node] = {}
+
+        for node in base_nodes:
+            reaction = reactions.get(node.tag)
+            if not reaction:
+                continue
+            fx, fy = reaction[0], reaction[1]
+            max_reaction = max(max_reaction, abs(fx), abs(fy))
+
+            display_node = floor_nodes.get(node.tag)
+            if display_node is None:
+                for floor_node in floor_nodes.values():
+                    if abs(floor_node.x - node.x) < tolerance and abs(floor_node.y - node.y) < tolerance:
+                        display_node = floor_node
+                        break
+            if display_node is not None:
+                reaction_display_nodes[node.tag] = display_node
+
+        scale = config.load_scale * 0.5 / max_reaction
+        reaction_x: List[float] = []
+        reaction_y: List[float] = []
+        reaction_text: List[str] = []
+
+        for base_tag, display_node in reaction_display_nodes.items():
+            reaction = reactions.get(base_tag)
+            if not reaction:
+                continue
+            fx, fy, fz = reaction[0], reaction[1], reaction[2]
+            if abs(fx) < 1e-6 and abs(fy) < 1e-6 and abs(fz) < 1e-6:
+                continue
+
+            x0, y0 = display_node.x, display_node.y
+            x1 = x0 + fx * scale
+            y1 = y0 + fy * scale
+            if abs(fx) > 1e-6 or abs(fy) > 1e-6:
+                fig.add_annotation(
+                    x=x1, y=y1,
+                    ax=x0, ay=y0,
+                    xref='x', yref='y',
+                    axref='x', ayref='y',
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1.5,
+                    arrowwidth=2,
+                    arrowcolor=COLORS["support_fixed"],
+                )
+
+            reaction_x.append(x0)
+            reaction_y.append(y0)
+            reaction_text.append(
+                f"Reaction<br>Fx: {fx:.2f} N<br>Fy: {fy:.2f} N<br>Fz: {fz:.2f} N"
+            )
+
+        if reaction_x:
+            fig.add_trace(go.Scatter(
+                x=reaction_x,
+                y=reaction_y,
+                mode='markers',
+                marker=dict(size=config.node_size + 2, color=COLORS["support_fixed"], symbol='diamond'),
+                name='Reactions',
+                text=reaction_text,
+                hoverinfo='text',
+            ))
+
     if config.section_force_type and analysis_result:
         from src.fem.results_processor import ResultsProcessor
         
@@ -2652,6 +2749,16 @@ def create_plan_view(model: ModelLike,
             showarrow=False,
             font=dict(size=9, color="gray"),
             align="left",
+        )
+
+    if config.show_deformed and displaced_nodes:
+        fig.add_annotation(
+            text=f"Deformed Scale: x{config.exaggeration:.2f}",
+            xref="paper", yref="paper",
+            x=0.99, y=0.01,
+            showarrow=False,
+            xanchor='right',
+            font=dict(size=9, color="gray"),
         )
 
     # Layout
@@ -2751,13 +2858,75 @@ def create_elevation_view(model: ModelLike,
         return (abs(coord_i - gridline_coord) < gridline_tol and 
                 abs(coord_j - gridline_coord) < gridline_tol)
 
+    if config.show_walls:
+        wall_h: List[Optional[float]] = []
+        wall_v: List[Optional[float]] = []
+        wall_text: List[str] = []
+        wall_trace_added = False
+
+        for elem_tag in classification["core_walls"]:
+            elem = model.elements[elem_tag]
+            if len(elem.node_tags) != 4:
+                continue
+
+            nodes = [model.nodes[tag] for tag in elem.node_tags if tag in model.nodes]
+            if len(nodes) != 4:
+                continue
+
+            if gridline_coord is not None:
+                filter_coords = [get_filter_coord(n) for n in nodes]
+                if gridline_coord < min(filter_coords) - gridline_tol or gridline_coord > max(filter_coords) + gridline_tol:
+                    continue
+
+            h_values = [get_h(n) for n in nodes]
+            v_values = [get_v(n) for n in nodes]
+            v_min = min(v_values)
+            v_max = max(v_values)
+            if abs(v_max - v_min) < 1e-9:
+                continue
+
+            h_center = sum(h_values) / len(h_values)
+
+            if use_utilization:
+                util = utilization.get(elem_tag, 0.0)
+                color = _get_utilization_color(util, config.colorscale)
+                fig.add_trace(go.Scatter(
+                    x=[h_center, h_center],
+                    y=[v_min, v_max],
+                    mode='lines',
+                    line=dict(color=color, width=config.element_width + 3),
+                    name='Core Walls',
+                    showlegend=not wall_trace_added,
+                    customdata=[[elem_tag, util]],
+                    hovertemplate=(
+                        "Core Wall %{customdata[0]}<br>"
+                        "Util: %{customdata[1]:.1%}<extra></extra>"
+                    ),
+                ))
+                wall_trace_added = True
+            else:
+                wall_h.extend([h_center, h_center, None])
+                wall_v.extend([v_min, v_max, None])
+                wall_text.append(f"Core Wall {elem_tag}")
+
+        if wall_h and not use_utilization:
+            fig.add_trace(go.Scatter(
+                x=wall_h,
+                y=wall_v,
+                mode='lines',
+                line=dict(color=COLORS["core_wall"], width=config.element_width + 3),
+                name='Core Walls',
+                text=wall_text * (len(wall_h) // 3) if wall_text else None,
+                hoverinfo='text',
+            ))
+
     # Draw columns (vertical elements)
     col_h: List[Optional[float]] = []
     col_v: List[Optional[float]] = []
     col_text: List[str] = []
     col_trace_added = False
 
-    for elem_tag in classification["columns"]:
+    for elem_tag in (classification["columns"] if config.show_columns else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         
@@ -2786,7 +2955,7 @@ def create_elevation_view(model: ModelLike,
             col_v.extend([get_v(node_i), get_v(node_j), None])
             col_text.append(f"Column {elem_tag}")
 
-    if col_h and not use_utilization:
+    if config.show_columns and col_h and not use_utilization:
         fig.add_trace(go.Scatter(
             x=col_h,
             y=col_v,
@@ -2843,7 +3012,7 @@ def create_elevation_view(model: ModelLike,
     beam_v: List[Optional[float]] = []
     beam_trace_added = False
 
-    for elem_tag in classification["beams"]:
+    for elem_tag in (classification["beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         
@@ -2898,7 +3067,7 @@ def create_elevation_view(model: ModelLike,
                     beam_h.extend([get_h(node_i), get_h(node_j), None])
                     beam_v.extend([get_v(node_i), get_v(node_j), None])
 
-    if beam_h and not use_utilization:
+    if config.show_beams and beam_h and not use_utilization:
         fig.add_trace(go.Scatter(
             x=beam_h,
             y=beam_v,
@@ -2911,7 +3080,7 @@ def create_elevation_view(model: ModelLike,
     cb_h: List[Optional[float]] = []
     cb_v: List[Optional[float]] = []
 
-    for elem_tag in classification["coupling_beams"]:
+    for elem_tag in (classification["coupling_beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         
@@ -2921,7 +3090,7 @@ def create_elevation_view(model: ModelLike,
         cb_h.extend([get_h(node_i), get_h(node_j), None])
         cb_v.extend([get_v(node_i), get_v(node_j), None])
 
-    if cb_h:
+    if config.show_beams and cb_h:
         fig.add_trace(go.Scatter(
             x=cb_h,
             y=cb_v,
@@ -3021,7 +3190,7 @@ def create_elevation_view(model: ModelLike,
         ))
 
     # Deflected shape overlay
-    if displaced_nodes:
+    if config.show_deformed and displaced_nodes:
         def_h: List[Optional[float]] = []
         def_v: List[Optional[float]] = []
 
@@ -3178,7 +3347,7 @@ def create_elevation_view(model: ModelLike,
                 legend_added = True
 
     # Reaction forces at supports
-    if reactions and config.show_supports:
+    if reactions and config.show_reactions:
         base_nodes = [n for n in model.nodes.values() if n.z < 0.01]
         max_reaction = 1e-6
         for node in base_nodes:
@@ -3282,6 +3451,16 @@ def create_elevation_view(model: ModelLike,
             align="left",
         )
 
+    if config.show_deformed and displaced_nodes:
+        fig.add_annotation(
+            text=f"Deformed Scale: x{config.exaggeration:.2f}",
+            xref="paper", yref="paper",
+            x=0.99, y=0.01,
+            showarrow=False,
+            xanchor='right',
+            font=dict(size=9, color="gray"),
+        )
+
     # Layout
     fig.update_layout(
         title=f"Elevation View ({view_direction} Direction)",
@@ -3366,7 +3545,7 @@ def create_3d_view(model: ModelLike,
     col_z: List[Optional[float]] = []
     col_trace_added = False
 
-    for elem_tag in classification["columns"]:
+    for elem_tag in (classification["columns"] if config.show_columns else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         xi, yi, zi = get_coords(node_i)
@@ -3395,7 +3574,7 @@ def create_3d_view(model: ModelLike,
             col_y.extend([yi, yj, None])
             col_z.extend([zi, zj, None])
 
-    if col_x and not use_utilization:
+    if config.show_columns and col_x and not use_utilization:
         fig.add_trace(go.Scatter3d(
             x=col_x,
             y=col_y,
@@ -3409,9 +3588,11 @@ def create_3d_view(model: ModelLike,
     wall_x: List[Optional[float]] = []
     wall_y: List[Optional[float]] = []
     wall_z: List[Optional[float]] = []
+    wall_vertices: Dict[int, Tuple[float, float, float]] = {}
+    wall_faces: List[Tuple[int, int, int]] = []
     wall_trace_added = False
 
-    for elem_tag in classification["core_walls"]:
+    for elem_tag in (classification["core_walls"] if config.show_walls else []):
         elem = model.elements[elem_tag]
         if len(elem.node_tags) != 4:
             continue
@@ -3453,14 +3634,42 @@ def create_3d_view(model: ModelLike,
             wall_y.extend(wy)
             wall_z.extend(wz)
 
-    if wall_x and not use_utilization:
+            for ntag in elem.node_tags:
+                if ntag not in wall_vertices:
+                    node = model.nodes[ntag]
+                    wall_vertices[ntag] = get_coords(node)
+
+            vertex_ids = list(wall_vertices.keys())
+            v_indices = [vertex_ids.index(ntag) for ntag in elem.node_tags]
+            wall_faces.append((v_indices[0], v_indices[1], v_indices[2]))
+            wall_faces.append((v_indices[0], v_indices[2], v_indices[3]))
+
+    if config.show_walls and wall_faces and not use_utilization:
+        wall_vertex_list = list(wall_vertices.values())
+        fig.add_trace(go.Mesh3d(
+            x=[v[0] for v in wall_vertex_list],
+            y=[v[1] for v in wall_vertex_list],
+            z=[v[2] for v in wall_vertex_list],
+            i=[f[0] for f in wall_faces],
+            j=[f[1] for f in wall_faces],
+            k=[f[2] for f in wall_faces],
+            color="#64748B",
+            opacity=0.55,
+            name='Core Walls',
+            showlegend=True,
+            hoverinfo='name',
+            flatshading=True,
+        ))
+
+    if config.show_walls and wall_x and not use_utilization:
         fig.add_trace(go.Scatter3d(
             x=wall_x,
             y=wall_y,
             z=wall_z,
             mode='lines',
             line=dict(color=COLORS["core_wall"], width=config.element_width),
-            name='Core Walls',
+            name=None,
+            showlegend=False,
         ))
 
     # Render ghost columns (omitted columns)
@@ -3505,7 +3714,7 @@ def create_3d_view(model: ModelLike,
     beam_z: List[Optional[float]] = []
     beam_trace_added = False
 
-    for elem_tag in classification["beams"]:
+    for elem_tag in (classification["beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         xi, yi, zi = get_coords(node_i)
@@ -3534,7 +3743,7 @@ def create_3d_view(model: ModelLike,
             beam_y.extend([yi, yj, None])
             beam_z.extend([zi, zj, None])
 
-    if beam_x and not use_utilization:
+    if config.show_beams and beam_x and not use_utilization:
         fig.add_trace(go.Scatter3d(
             x=beam_x,
             y=beam_y,
@@ -3550,7 +3759,7 @@ def create_3d_view(model: ModelLike,
     sec_beam_z: List[Optional[float]] = []
     sec_beam_trace_added = False
 
-    for elem_tag in classification["beams_secondary"]:
+    for elem_tag in (classification["beams_secondary"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         xi, yi, zi = get_coords(node_i)
@@ -3579,7 +3788,7 @@ def create_3d_view(model: ModelLike,
             sec_beam_y.extend([yi, yj, None])
             sec_beam_z.extend([zi, zj, None])
 
-    if sec_beam_x and not use_utilization:
+    if config.show_beams and sec_beam_x and not use_utilization:
         fig.add_trace(go.Scatter3d(
             x=sec_beam_x,
             y=sec_beam_y,
@@ -3595,7 +3804,7 @@ def create_3d_view(model: ModelLike,
     cb_y: List[Optional[float]] = []
     cb_z: List[Optional[float]] = []
 
-    for elem_tag in classification["coupling_beams"]:
+    for elem_tag in (classification["coupling_beams"] if config.show_beams else []):
         elem = model.elements[elem_tag]
         node_i, node_j = _get_element_endpoints(model, elem)
         xi, yi, zi = get_coords(node_i)
@@ -3605,7 +3814,7 @@ def create_3d_view(model: ModelLike,
         cb_y.extend([yi, yj, None])
         cb_z.extend([zi, zj, None])
 
-    if cb_x:
+    if config.show_beams and cb_x:
         fig.add_trace(go.Scatter3d(
             x=cb_x,
             y=cb_y,
@@ -3662,11 +3871,12 @@ def create_3d_view(model: ModelLike,
                 i=i_faces,
                 j=j_faces,
                 k=k_faces,
-                color=COLORS["slab"],
-                opacity=0.3,
+                color="#60A5FA",
+                opacity=0.5,
                 name='Slabs',
                 showlegend=True,
                 hoverinfo='name',
+                flatshading=True,
             ))
 
     # Draw supports
@@ -3702,7 +3912,7 @@ def create_3d_view(model: ModelLike,
             ))
 
     # Deflected shape overlay
-    if displaced_nodes:
+    if config.show_deformed and displaced_nodes:
         def_x: List[Optional[float]] = []
         def_y: List[Optional[float]] = []
         def_z: List[Optional[float]] = []
@@ -3728,7 +3938,7 @@ def create_3d_view(model: ModelLike,
             ))
 
     # Reaction forces at supports
-    if reactions and config.show_supports:
+    if reactions and config.show_reactions:
         base_nodes = [n for n in model.nodes.values() if n.z < 0.01]
         max_reaction = 1e-6
         for node in base_nodes:
@@ -3797,6 +4007,16 @@ def create_3d_view(model: ModelLike,
             marker=dict(size=config.node_size // 2, color=COLORS["node"], opacity=0.3),
             name='Nodes',
         ))
+
+    if config.show_deformed and displaced_nodes:
+        fig.add_annotation(
+            text=f"Deformed Scale: x{config.exaggeration:.2f}",
+            xref="paper", yref="paper",
+            x=0.99, y=0.01,
+            showarrow=False,
+            xanchor='right',
+            font=dict(size=9, color="gray"),
+        )
 
     # Layout
     x_range = [min(n.x for n in model.nodes.values()), max(n.x for n in model.nodes.values())]

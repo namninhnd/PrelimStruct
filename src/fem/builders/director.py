@@ -21,13 +21,6 @@ from src.fem.builders.column_builder import ColumnBuilder
 from src.fem.builders.core_wall_builder import CoreWallBuilder
 from src.fem.builders.node_grid_builder import NodeGridBuilder
 from src.fem.builders.slab_builder import SlabBuilder
-from src.fem.core_wall_geometry import (
-    ISectionCoreWall,
-    TwoCFacingCoreWall,
-    TwoCBackToBackCoreWall,
-    TubeCenterOpeningCoreWall,
-    TubeSideOpeningCoreWall,
-)
 from src.fem.fem_engine import FEMModel
 from src.fem.materials import ConcreteProperties
 from src.fem.model_builder import (
@@ -301,6 +294,7 @@ class FEMModelDirector:
             offset_x=offset_x,
             offset_y=offset_y,
             registry_nodes_by_floor=registry.nodes_by_floor,
+            registry=registry,
         )
         
         # Create coupling beams using BeamBuilder

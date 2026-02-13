@@ -159,3 +159,20 @@ def test_synthesize_fails_fast_when_component_case_is_unsuccessful() -> None:
                 "Wtz": _build_result(scale=1.0),
             }
         )
+
+
+def test_with_synthesized_returns_originals_when_component_fails() -> None:
+    """with_synthesized gracefully skips W1-W24 when a component is unsuccessful."""
+    dl = _build_result(scale=1.0)
+    wx = _build_result(scale=2.0)
+    wy = _build_result(scale=3.0, success=False)  # failed
+    wtz = _build_result(scale=4.0)
+    
+    merged = with_synthesized_w1_w24_cases({"DL": dl, "Wx": wx, "Wy": wy, "Wtz": wtz})
+    
+    assert merged["DL"] is dl  # original preserved
+    assert merged["Wx"] is wx  # original preserved
+    assert merged["Wy"] is wy  # original preserved (failed case)
+    assert merged["Wtz"] is wtz  # original preserved
+    assert "W1" not in merged  # no synthesis attempted
+    assert "W24" not in merged

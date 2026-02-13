@@ -422,6 +422,7 @@ def _run_single_load_case(
         return result
         
     except Exception as e:
+        _logger.error("Load case '%s' failed: %s", load_case, e, exc_info=True)
         return AnalysisResult(
             success=False,
             converged=False,

@@ -29,8 +29,8 @@ class TestCoreWallSelector(unittest.TestCase):
     @patch('src.ui.components.core_wall_selector.st')
     def test_render_core_wall_selector(self, mock_st):
         """Test selector rendering logic."""
-        # Mock streamlit columns
-        mock_cols = [MagicMock() for _ in range(5)]
+        # Mock streamlit columns (2 columns for 2 configs)
+        mock_cols = [MagicMock() for _ in range(2)]
         mock_st.columns.return_value = mock_cols
         
         # Mock button return value (simulate no click)
@@ -42,28 +42,20 @@ class TestCoreWallSelector(unittest.TestCase):
         # Should return current config if no button clicked
         self.assertEqual(result, CoreWallConfig.I_SECTION)
         
-        # Verify columns created
-        mock_st.columns.assert_called_with(5)
+        # Verify columns created (2 columns for 2 configs)
+        mock_st.columns.assert_called_with(2)
         
-        # Verify buttons created (5 buttons, one for each config)
-        self.assertEqual(mock_st.button.call_count, 5)
+        # Verify buttons created (2 buttons, one for each config)
+        self.assertEqual(mock_st.button.call_count, 2)
 
     @patch('src.ui.components.core_wall_selector.st')
     def test_render_core_wall_selector_click(self, mock_st):
         """Test selector state update on click."""
-        # Mock columns
-        mock_cols = [MagicMock() for _ in range(5)]
+        mock_cols = [MagicMock() for _ in range(2)]
         mock_st.columns.return_value = mock_cols
-        
-        # Simulate clicking the second button (TWO_C_FACING)
-        # button side_effect: [False, True, False, False, False]
-        mock_st.button.side_effect = [False, True, False, False, False]
-        
-        # Call function
+        mock_st.button.side_effect = [False, True]
         result = render_core_wall_selector(CoreWallConfig.I_SECTION)
-        
-        # Should return the clicked config
-        self.assertEqual(result, CoreWallConfig.TWO_C_FACING)
+        self.assertEqual(result, CoreWallConfig.TUBE_WITH_OPENINGS)
 
 if __name__ == '__main__':
     unittest.main()

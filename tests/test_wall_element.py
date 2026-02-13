@@ -326,3 +326,196 @@ class TestFEMModelIntegration:
         is_valid, errors = model.validate_model()
         # Model should be valid (has nodes, elements, and supports)
         assert is_valid or len([e for e in errors if "no fixed" not in e.lower()]) == 0
+
+
+class TestWallNodeDeduplication:
+    """Tests for wall panel node deduplication via NodeRegistry (Gate B, Phase 14)."""
+
+    def _make_registry(self):
+        from src.fem.model_builder import NodeRegistry
+        return NodeRegistry(FEMModel())
+
+    def test_registry_none_preserves_legacy_behavior(self):
+        """registry=None default gives same sequential tags as before."""
+        wall = WallPanel("W1", (0.0, 0.0), 4.0, 0.3, 6.0, 0.0)
+        gen = WallMeshGenerator(base_node_tag=1000, base_element_tag=5000)
+        result = gen.generate_mesh(
+            wall=wall, num_floors=2, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+        )
+        assert len(result.nodes) == 2 * 3
+        tags = [n[0] for n in result.nodes]
+        assert tags == list(range(1000, 1006))
+
+    def test_same_coords_same_tag(self):
+        """Two walls at identical coordinates yield same tag via registry."""
+        registry = self._make_registry()
+        wall_a = WallPanel("WA", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+        wall_b = WallPanel("WB", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+        gen = WallMeshGenerator()
+        r_a = gen.generate_mesh(
+            wall=wall_a, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        r_b = gen.generate_mesh(
+            wall=wall_b, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        tags_a = set(n[0] for n in r_a.nodes)
+        tags_b = set(n[0] for n in r_b.nodes)
+        assert tags_a == tags_b
+
+    def test_junction_node_merging_two_walls_sharing_edge(self):
+        """Two collinear walls sharing an endpoint get merged nodes at junction."""
+        registry = self._make_registry()
+        # Wall A: (0,0)→(2,0), Wall B: (2,0)→(4,0) — share (2,0) at each z
+        wall_a = WallPanel("WA", (0.0, 0.0), 2.0, 0.3, 9.0, 0.0)
+        wall_b = WallPanel("WB", (2.0, 0.0), 2.0, 0.3, 9.0, 0.0)
+
+        gen = WallMeshGenerator()
+        r_a = gen.generate_mesh(
+            wall=wall_a, num_floors=3, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=2,
+            registry=registry,
+        )
+        r_b = gen.generate_mesh(
+            wall=wall_b, num_floors=3, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=2,
+            registry=registry,
+        )
+        total_raw = len(r_a.nodes) + len(r_b.nodes)
+        unique_tags = set(n[0] for n in r_a.nodes) | set(n[0] for n in r_b.nodes)
+        num_z_levels = 2 * 3 + 1  # 7
+        expected_duplicates = 1 * num_z_levels  # 1 junction per z-level
+        assert total_raw - len(unique_tags) == expected_duplicates
+
+    def test_i_section_junction_merging(self):
+        """I-section with elements_along_length=2: web midpoints match flange midpoints."""
+        registry = self._make_registry()
+        offset_x, offset_y = 1.0, 1.0
+        length_x_m, length_y_m = 4.0, 6.0
+        web_y = offset_y + length_y_m / 2
+
+        iw1 = WallPanel("IW1", (offset_x, offset_y), length_y_m, 0.3, 9.0, 90.0)
+        iw2 = WallPanel("IW2", (offset_x + length_x_m, offset_y), length_y_m, 0.3, 9.0, 90.0)
+        iw3 = WallPanel("IW3", (offset_x, web_y), length_x_m, 0.3, 9.0, 0.0)
+
+        gen = WallMeshGenerator()
+        results = []
+        for wall in [iw1, iw2, iw3]:
+            results.append(gen.generate_mesh(
+                wall=wall, num_floors=3, story_height=3.0,
+                section_tag=1, elements_along_length=2, elements_per_story=2,
+                registry=registry,
+            ))
+
+        total_raw = sum(len(r.nodes) for r in results)
+        unique_tags = set()
+        for r in results:
+            unique_tags.update(n[0] for n in r.nodes)
+
+        num_z_levels = 2 * 3 + 1  # 7
+        junctions_per_level = 2  # IW3 start=IW1 mid, IW3 end=IW2 mid
+        expected_duplicates = junctions_per_level * num_z_levels  # 14
+        assert total_raw - len(unique_tags) == expected_duplicates
+
+    def test_no_value_error_from_double_add(self):
+        """Registry path never raises ValueError from FEMModel.add_node duplicate."""
+        registry = self._make_registry()
+        wall_a = WallPanel("WA", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+        wall_b = WallPanel("WB", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+
+        gen = WallMeshGenerator()
+        gen.generate_mesh(
+            wall=wall_a, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        gen.generate_mesh(
+            wall=wall_b, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+
+    def test_tube_walls_unaffected(self):
+        """Non-overlapping walls produce same node count with or without registry."""
+        walls = [
+            WallPanel("TW1", (0.0, 0.0), 4.0, 0.3, 6.0, 0.0),
+            WallPanel("TW2", (10.0, 0.0), 4.0, 0.3, 6.0, 0.0),
+        ]
+
+        gen1 = WallMeshGenerator(base_node_tag=1000)
+        no_reg_count = 0
+        for w in walls:
+            r = gen1.generate_mesh(
+                wall=w, num_floors=2, story_height=3.0,
+                section_tag=1, elements_along_length=1, elements_per_story=1,
+            )
+            no_reg_count += len(r.nodes)
+
+        registry = self._make_registry()
+        gen2 = WallMeshGenerator()
+        with_reg_unique = set()
+        for w in walls:
+            r = gen2.generate_mesh(
+                wall=w, num_floors=2, story_height=3.0,
+                section_tag=1, elements_along_length=1, elements_per_story=1,
+                registry=registry,
+            )
+            with_reg_unique.update(n[0] for n in r.nodes)
+
+        assert no_reg_count == len(with_reg_unique)
+
+    def test_ground_nodes_get_fixed_restraints(self):
+        """Nodes at z=0 get fixed restraints when created through registry."""
+        registry = self._make_registry()
+        wall = WallPanel("W1", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+        gen = WallMeshGenerator()
+        result = gen.generate_mesh(
+            wall=wall, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        for tag, x, y, z, fl in result.nodes:
+            node = registry.model.nodes[tag]
+            if z == 0.0:
+                assert node.restraints == [1, 1, 1, 1, 1, 1]
+            else:
+                assert node.restraints == [0, 0, 0, 0, 0, 0]
+
+    def test_elements_reference_correct_deduplicated_tags(self):
+        """Shell elements reference the merged tag at junction, not the duplicate."""
+        registry = self._make_registry()
+        wall_a = WallPanel("WA", (0.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+        wall_b = WallPanel("WB", (2.0, 0.0), 2.0, 0.3, 3.0, 0.0)
+
+        gen = WallMeshGenerator()
+        r_a = gen.generate_mesh(
+            wall=wall_a, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        r_b = gen.generate_mesh(
+            wall=wall_b, num_floors=1, story_height=3.0,
+            section_tag=1, elements_along_length=1, elements_per_story=1,
+            registry=registry,
+        )
+        # Wall A's right-side tags should equal Wall B's left-side tags at each z
+        a_right_tags = set()
+        for n in r_a.nodes:
+            if abs(n[1] - 2.0) < 1e-6:
+                a_right_tags.add(n[0])
+        b_left_tags = set()
+        for n in r_b.nodes:
+            if abs(n[1] - 2.0) < 1e-6:
+                b_left_tags.add(n[0])
+        assert a_right_tags == b_left_tags
+        assert len(a_right_tags) > 0
+
+        # Verify elements in both walls reference these shared tags
+        all_elem_tags = set()
+        for e in r_a.elements + r_b.elements:
+            all_elem_tags.update(e.node_tags)
+        assert a_right_tags.issubset(all_elem_tags)

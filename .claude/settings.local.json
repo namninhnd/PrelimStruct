@@ -12,7 +12,22 @@
       "Bash(dir:*)",
       "Bash(powershell -Command \"Get-ChildItem -Force -Name .cleo*\")",
       "Bash(powershell -Command \"cleo add ''Test task'' 2>&1\")",
-      "Bash(cleo help:*)"
+      "Bash(cleo help:*)",
+      "Bash(python -m py_compile:*)",
+      "Bash(python:*)",
+      "WebFetch(domain:openseespydoc.readthedocs.io)",
+      "Bash(cd:*)",
+      "Bash(git tag:*)",
+      "Bash(echo:*)",
+      "Bash(tee:*)",
+      "Bash(pip install:*)",
+      "mcp__megamemory__understand",
+      "mcp__megamemory__create_concept",
+      "mcp__megamemory__list_roots",
+      "mcp__megamemory__update_concept",
+      "Bash(grep:*)",
+      "Bash(python3:*)",
+      "Bash(git status:*)"
     ]
   }
 }

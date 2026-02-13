@@ -142,7 +142,7 @@ class TestWindEngine:
                 building_depth=24.0,
                 terrain=TerrainCategory.URBAN,
                 core_geometry=CoreWallGeometry(
-                    config=CoreWallConfig.TUBE_CENTER_OPENING,
+                    config=CoreWallConfig.TUBE_WITH_OPENINGS,
                     length_x=8000.0,
                     length_y=8000.0,
                     opening_width=2000.0,
@@ -182,7 +182,7 @@ class TestWindEngine:
                 building_depth=24.0,
                 terrain=TerrainCategory.OPEN_SEA,
                 core_geometry=CoreWallGeometry(
-                    config=CoreWallConfig.TUBE_CENTER_OPENING,
+                    config=CoreWallConfig.TUBE_WITH_OPENINGS,
                     length_x=5000.0,
                     length_y=5000.0,
                     opening_width=1500.0,
@@ -242,7 +242,7 @@ class TestWindEngine:
                     building_depth=24.0,
                     terrain=TerrainCategory.URBAN,
                     core_geometry=CoreWallGeometry(
-                        config=CoreWallConfig.TUBE_CENTER_OPENING,
+                        config=CoreWallConfig.TUBE_WITH_OPENINGS,
                         length_x=8000.0,
                         length_y=8000.0,
                         opening_width=2000.0,
@@ -310,7 +310,7 @@ class TestWindEngine:
                     building_depth=24.0,
                     terrain=TerrainCategory.URBAN,
                     core_geometry=CoreWallGeometry(
-                        config=CoreWallConfig.TUBE_CENTER_OPENING,
+                        config=CoreWallConfig.TUBE_WITH_OPENINGS,
                         length_x=core_x * 1000.0,
                         length_y=core_y * 1000.0,
                         opening_width=2000.0,
@@ -344,7 +344,7 @@ class TestWindEngine:
                 building_depth=24.0,
                 terrain=TerrainCategory.URBAN,
                 core_geometry=CoreWallGeometry(
-                    config=CoreWallConfig.TUBE_CENTER_OPENING,
+                    config=CoreWallConfig.TUBE_WITH_OPENINGS,
                     length_x=7000.0,
                     length_y=7000.0,
                     opening_width=2000.0,
@@ -383,7 +383,7 @@ class TestWindEngine:
                 building_depth=27.0,
                 terrain=TerrainCategory.CITY_CENTRE,
                 core_geometry=CoreWallGeometry(
-                    config=CoreWallConfig.TUBE_CENTER_OPENING,
+                    config=CoreWallConfig.TUBE_WITH_OPENINGS,
                     length_x=12000.0,
                     length_y=12000.0,
                     opening_width=2400.0,

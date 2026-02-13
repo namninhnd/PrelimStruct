@@ -3,6 +3,8 @@ import pytest
 from src.core.data_models import (
     BeamResult,
     ColumnResult,
+    CoreWallConfig,
+    CoreWallGeometry,
     GeometryInput,
     LoadInput,
     LateralInput,
@@ -11,7 +13,7 @@ from src.core.data_models import (
     WindResult,
 )
 from src.fem.beam_trimmer import BeamConnectionType
-from src.fem.fem_engine import FEMModel, Node
+from src.fem.fem_engine import ElementType, FEMModel, Node
 from src.fem.model_builder import (
     apply_lateral_loads_to_diaphragms,
     create_floor_rigid_diaphragms,
@@ -19,6 +21,9 @@ from src.fem.model_builder import (
     ModelBuilderOptions,
     _compute_floor_shears,
     _compute_wtz_torsional_moments,
+    _extract_wall_panels,
+    _get_core_wall_offset,
+    _get_core_wall_outline,
     NUM_SUBDIVISIONS,
     trim_beam_segment_against_polygon,
 )
@@ -402,6 +407,48 @@ class TestTrimBeamSegment:
         assert segments[0].end == (3000.0, 1000.0)
         assert segments[0].start_connection == BeamConnectionType.MOMENT
 
+    def test_concave_i_section_four_intersections_keeps_middle_segment(self) -> None:
+        i_section = CoreWallGeometry(
+            config=CoreWallConfig.I_SECTION,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+        )
+        polygon = _get_core_wall_outline(i_section)
+
+        segments = trim_beam_segment_against_polygon(
+            start=(200.0, -1000.0),
+            end=(200.0, 7000.0),
+            polygon=polygon,
+        )
+
+        assert len(segments) == 3
+        assert segments[1].start[1] == pytest.approx(500.0)
+        assert segments[1].end[1] == pytest.approx(5500.0)
+        assert segments[1].start_connection == BeamConnectionType.MOMENT
+        assert segments[1].end_connection == BeamConnectionType.MOMENT
+
+    def test_beam_on_polygon_edge_trims_overlapping_boundary_span(self) -> None:
+        core = [
+            (7500.0, 4500.0),
+            (10500.0, 4500.0),
+            (10500.0, 7500.0),
+            (7500.0, 7500.0),
+            (7500.0, 4500.0),
+        ]
+
+        segments = trim_beam_segment_against_polygon(
+            start=(6000.0, 7500.0),
+            end=(12000.0, 7500.0),
+            polygon=core,
+        )
+
+        assert len(segments) == 2
+        assert segments[0].start == pytest.approx((6000.0, 7500.0))
+        assert segments[0].end == pytest.approx((7500.0, 7500.0))
+        assert segments[1].start == pytest.approx((10500.0, 7500.0))
+        assert segments[1].end == pytest.approx((12000.0, 7500.0))
+
 
 class TestApplyLateralLoads:
     """Additional tests for lateral load application."""
@@ -591,6 +638,176 @@ class TestBuildFEMModelIntegration:
 
         is_valid, errors = model.validate_model()
         assert is_valid is True, f"Validation errors: {errors}"
+
+    def test_i_section_outline_and_panel_footprints_use_canonical_dimensions(self) -> None:
+        core_geometry = CoreWallGeometry(
+            config=CoreWallConfig.I_SECTION,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            length_x=9000.0,
+            length_y=4000.0,
+        )
+        offset_x = 4.0
+        offset_y = 7.0
+
+        outline = _get_core_wall_outline(core_geometry)
+        outline_global = [
+            (x / 1000.0 + offset_x, y / 1000.0 + offset_y)
+            for x, y in outline
+        ]
+        panels = _extract_wall_panels(core_geometry, offset_x, offset_y)
+
+        panel_points = []
+        for panel in panels:
+            panel_points.append(panel.base_point)
+            panel_points.append(panel.end_point)
+
+        outline_x = [point[0] for point in outline_global]
+        outline_y = [point[1] for point in outline_global]
+        panel_x = [point[0] for point in panel_points]
+        panel_y = [point[1] for point in panel_points]
+
+        assert min(panel_x) == pytest.approx(min(outline_x))
+        assert max(panel_x) == pytest.approx(max(outline_x))
+        assert min(panel_y) == pytest.approx(min(outline_y))
+        assert max(panel_y) == pytest.approx(max(outline_y))
+
+    def test_i_section_coupling_endpoints_share_wall_nodes(self) -> None:
+        project = _make_project(floors=2)
+        project.geometry.bay_x = 8.0
+        project.geometry.bay_y = 8.0
+        project.geometry.num_bays_x = 2
+        project.geometry.num_bays_y = 2
+        project.lateral.core_geometry = CoreWallGeometry(
+            config=CoreWallConfig.I_SECTION,
+            wall_thickness=500.0,
+            flange_width=3000.0,
+            web_length=6000.0,
+            length_x=3000.0,
+            length_y=6000.0,
+        )
+
+        model = build_fem_model(
+            project,
+            ModelBuilderOptions(
+                include_core_wall=True,
+                include_slabs=False,
+                apply_wind_loads=False,
+            ),
+        )
+
+        coupling_elements = [
+            elem
+            for elem in model.elements.values()
+            if elem.geometry and "parent_coupling_beam_id" in elem.geometry
+        ]
+        assert len(coupling_elements) == project.geometry.floors * 2 * NUM_SUBDIVISIONS
+
+        wall_node_tags = set()
+        for elem in model.elements.values():
+            if elem.element_type == ElementType.SHELL_MITC4 and elem.section_tag == 10:
+                wall_node_tags.update(elem.node_tags)
+
+        by_parent = {}
+        for elem in coupling_elements:
+            parent_id = elem.geometry["parent_coupling_beam_id"]
+            if parent_id not in by_parent:
+                by_parent[parent_id] = []
+            by_parent[parent_id].append(elem)
+
+        assert len(by_parent) == project.geometry.floors * 2
+        for parent_elements in by_parent.values():
+            ordered = sorted(parent_elements, key=lambda item: item.geometry["sub_element_index"])
+            start_tag = ordered[0].node_tags[0]
+            end_tag = ordered[-1].node_tags[1]
+            assert start_tag in wall_node_tags
+            assert end_tag in wall_node_tags
+
+    def test_i_section_mid_gridline_has_no_retained_primary_segment_inside_core(self) -> None:
+        project = ProjectData(
+            geometry=GeometryInput(
+                bay_x=6.0,
+                bay_y=4.0,
+                floors=1,
+                story_height=3.0,
+                num_bays_x=3,
+                num_bays_y=2,
+            ),
+            loads=LoadInput(live_load_class="2", live_load_sub="2.5", dead_load=2.0),
+            materials=MaterialInput(fcu_slab=35, fcu_beam=40, fcu_column=45),
+            lateral=LateralInput(
+                building_width=18.0,
+                building_depth=8.0,
+                core_geometry=CoreWallGeometry(
+                    config=CoreWallConfig.I_SECTION,
+                    wall_thickness=500.0,
+                    flange_width=3000.0,
+                    web_length=3000.0,
+                ),
+            ),
+        )
+
+        project.primary_beam_result = BeamResult(
+            element_type="Primary Beam",
+            size="300x600",
+            width=300,
+            depth=600,
+        )
+        project.secondary_beam_result = BeamResult(
+            element_type="Secondary Beam",
+            size="250x500",
+            width=250,
+            depth=500,
+        )
+        project.column_result = ColumnResult(
+            element_type="Column",
+            size="400",
+            dimension=400,
+        )
+
+        model = build_fem_model(
+            project,
+            ModelBuilderOptions(
+                include_core_wall=True,
+                include_slabs=False,
+                apply_wind_loads=False,
+                num_secondary_beams=0,
+            ),
+        )
+
+        core_geometry = project.lateral.core_geometry
+        assert core_geometry is not None
+        outline = _get_core_wall_outline(core_geometry)
+        offset_x, offset_y = _get_core_wall_offset(project, outline, edge_clearance_m=0.2)
+        core_min_x = offset_x
+        assert core_geometry.flange_width is not None
+        assert core_geometry.web_length is not None
+        core_max_x = offset_x + (core_geometry.flange_width / 1000.0)
+        mid_y = offset_y + (core_geometry.web_length / 2000.0)
+
+        retained_inside = []
+        for elem in model.elements.values():
+            if elem.element_type != ElementType.ELASTIC_BEAM:
+                continue
+            if elem.section_tag == 20:
+                continue
+            if len(elem.node_tags) != 2:
+                continue
+            n1 = model.nodes[elem.node_tags[0]]
+            n2 = model.nodes[elem.node_tags[1]]
+            if abs(n1.z - 3.0) > 1e-6 or abs(n2.z - 3.0) > 1e-6:
+                continue
+            if abs(n1.y - mid_y) > 1e-6 or abs(n2.y - mid_y) > 1e-6:
+                continue
+            x_mid = (n1.x + n2.x) / 2.0
+            if core_min_x + 1e-6 < x_mid < core_max_x - 1e-6:
+                retained_inside.append((elem.tag, n1.x, n2.x))
+
+        assert not retained_inside, (
+            f"Expected no retained primary segments inside I-section core at y={mid_y:.3f}; "
+            f"found {retained_inside}"
+        )
 
 
 class TestHelperFunctions:
@@ -836,7 +1053,7 @@ def test_secondary_beams_trimmed_at_core_wall() -> None:
     # Create a core wall centered in the building (centered at 12m, 12m)
     # Total building is 24m x 24m, core is ~6m x 6m centered
     project.lateral.core_geometry = CoreWallGeometry(
-        config=CoreWallConfig.TUBE_CENTER_OPENING,
+        config=CoreWallConfig.TUBE_WITH_OPENINGS,
         wall_thickness=400.0,
         length_x=6000.0,  # 6m
         length_y=6000.0,  # 6m
@@ -929,7 +1146,7 @@ def test_secondary_beams_not_inside_core_wall_footprint() -> None:
     
     # Create a centered core wall
     project.lateral.core_geometry = CoreWallGeometry(
-        config=CoreWallConfig.TUBE_CENTER_OPENING,
+        config=CoreWallConfig.TUBE_WITH_OPENINGS,
         wall_thickness=400.0,
         length_x=6000.0,
         length_y=6000.0,
@@ -989,3 +1206,247 @@ def test_secondary_beams_not_inside_core_wall_footprint() -> None:
     # (boundary endpoints are OK - those are valid trimmed connections)
     assert len(beams_fully_inside) == 0, \
         f"Found {len(beams_fully_inside)} secondary beams fully inside core wall: {beams_fully_inside}"
+
+
+def test_no_non_coupling_beams_inside_tube_footprint() -> None:
+    """Test that zero non-coupling floor beams exist inside the tube core wall footprint.
+    
+    Gate C evidence item E-C2: Assertions proving zero non-coupling interior beams in tube footprint.
+    
+    This test verifies that when building a model with include_core_wall=True and trim_beams_at_core=True,
+    no BEAM elements (primary or secondary, excluding coupling beams) have BOTH endpoints inside the tube
+    core wall footprint. Coupling beams are expected inside the core, but regular floor beams are not.
+    """
+    from src.core.data_models import CoreWallConfig, CoreWallGeometry
+    from src.fem.model_builder import _get_core_wall_outline, _get_core_wall_offset
+    
+    project = _make_project()
+    project.geometry.num_bays_x = 3
+    project.geometry.num_bays_y = 3
+    project.geometry.bay_x = 8.0
+    project.geometry.bay_y = 8.0
+    project.geometry.floors = 1
+    
+    # Create a TUBE_WITH_OPENINGS core wall spanning across some grid intersections
+    project.lateral.core_geometry = CoreWallGeometry(
+        config=CoreWallConfig.TUBE_WITH_OPENINGS,
+        wall_thickness=400.0,
+        length_x=6000.0,  # 6m tube dimension
+        length_y=6000.0,  # 6m tube dimension
+        opening_width=2000.0,
+        opening_height=2000.0,
+    )
+    
+    # Build model with core wall and beam trimming enabled
+    model = build_fem_model(
+        project,
+        ModelBuilderOptions(
+            include_core_wall=True,
+            include_slabs=False,
+            apply_wind_loads=False,
+            trim_beams_at_core=True,
+        )
+    )
+    
+    # Compute the tube footprint rectangle in global coordinates (meters)
+    outline_mm = _get_core_wall_outline(project.lateral.core_geometry)
+    offset_x, offset_y = _get_core_wall_offset(project, outline_mm, 0.5)
+    
+    # Tube footprint bounds (simple rectangle)
+    xs_mm = [p[0] for p in outline_mm]
+    ys_mm = [p[1] for p in outline_mm]
+    tube_min_x = min(xs_mm) / 1000.0 + offset_x
+    tube_max_x = max(xs_mm) / 1000.0 + offset_x
+    tube_min_y = min(ys_mm) / 1000.0 + offset_y
+    tube_max_y = max(ys_mm) / 1000.0 + offset_y
+    
+    # Identify all non-coupling beam elements with BOTH endpoints inside tube footprint
+    # Non-coupling beams are regular floor beams (primary/secondary), not coupling beams
+    non_coupling_beams_inside = []
+    
+    for elem in model.elements.values():
+        # Check for beam elements (BEAM_COLUMN, ELASTIC_BEAM, SECONDARY_BEAM)
+        # Exclude COUPLING_BEAM (which are expected inside the core)
+        is_beam = elem.element_type in [
+            ElementType.BEAM_COLUMN,
+            ElementType.ELASTIC_BEAM,
+            ElementType.SECONDARY_BEAM,
+        ]
+        
+        # Also exclude elements marked as coupling beams via geometry metadata
+        is_coupling = elem.element_type == ElementType.COUPLING_BEAM or (
+            elem.geometry and "parent_coupling_beam_id" in elem.geometry
+        )
+        
+        if is_beam and not is_coupling:
+            # Check if both endpoint nodes are inside the tube footprint
+            node_i = model.nodes[elem.node_tags[0]]
+            node_j = model.nodes[elem.node_tags[1]]
+            
+            def is_inside_tube(x: float, y: float) -> bool:
+                """Check if point (x, y) is inside the tube rectangle."""
+                return (tube_min_x <= x <= tube_max_x and
+                        tube_min_y <= y <= tube_max_y)
+            
+            if is_inside_tube(node_i.x, node_i.y) and is_inside_tube(node_j.x, node_j.y):
+                non_coupling_beams_inside.append({
+                    "element_tag": elem.tag,
+                    "element_type": elem.element_type.value,
+                    "section_tag": elem.section_tag,
+                    "node_i": (node_i.x, node_i.y, node_i.z),
+                    "node_j": (node_j.x, node_j.y, node_j.z),
+                })
+    
+    # Assert: Zero non-coupling beams should exist fully inside the tube footprint
+    assert len(non_coupling_beams_inside) == 0, (
+        f"Found {len(non_coupling_beams_inside)} non-coupling beam(s) fully inside tube footprint. "
+        f"Gate C E-C2 FAILED. Beams: {non_coupling_beams_inside}"
+    )
+
+
+def test_no_non_coupling_beams_inside_i_section_coupling_band() -> None:
+    from src.core.data_models import CoreWallConfig, CoreWallGeometry
+    from src.fem.model_builder import _get_core_wall_outline, _get_core_wall_offset
+
+    project = _make_project()
+    project.geometry.num_bays_x = 3
+    project.geometry.num_bays_y = 3
+    project.geometry.bay_x = 6.0
+    project.geometry.bay_y = 6.0
+    project.geometry.floors = 1
+
+    project.lateral.core_geometry = CoreWallGeometry(
+        config=CoreWallConfig.I_SECTION,
+        wall_thickness=500.0,
+        flange_width=3000.0,
+        web_length=3000.0,
+    )
+
+    model = build_fem_model(
+        project,
+        ModelBuilderOptions(
+            include_core_wall=True,
+            include_slabs=False,
+            apply_wind_loads=False,
+            trim_beams_at_core=True,
+            secondary_beam_direction="X",
+            num_secondary_beams=2,
+        ),
+    )
+
+    core_geometry = project.lateral.core_geometry
+    assert core_geometry is not None
+    assert core_geometry.flange_width is not None
+    assert core_geometry.web_length is not None
+
+    outline_mm = _get_core_wall_outline(core_geometry)
+    offset_x, offset_y = _get_core_wall_offset(project, outline_mm, edge_clearance_m=0.5)
+    x_min = offset_x
+    x_max = offset_x + (core_geometry.flange_width / 1000.0)
+    y_min = offset_y
+    y_max = offset_y + (core_geometry.web_length / 1000.0)
+
+    non_coupling_inside = []
+    non_coupling_overlap = []
+    eps = 1e-6
+    for elem in model.elements.values():
+        is_beam = elem.element_type in [
+            ElementType.BEAM_COLUMN,
+            ElementType.ELASTIC_BEAM,
+            ElementType.SECONDARY_BEAM,
+        ]
+        is_coupling = bool(
+            elem.geometry
+            and (
+                elem.geometry.get("coupling_beam")
+                or "parent_coupling_beam_id" in elem.geometry
+            )
+        )
+        if not is_beam or is_coupling:
+            continue
+
+        node_i = model.nodes[elem.node_tags[0]]
+        node_j = model.nodes[elem.node_tags[1]]
+
+        if abs(node_i.z - node_j.z) > eps:
+            continue
+
+        inside_i = (x_min + eps < node_i.x < x_max - eps and y_min + eps < node_i.y < y_max - eps)
+        inside_j = (x_min + eps < node_j.x < x_max - eps and y_min + eps < node_j.y < y_max - eps)
+        if inside_i and inside_j:
+            non_coupling_inside.append(elem.tag)
+
+        seg_min_x = min(node_i.x, node_j.x)
+        seg_max_x = max(node_i.x, node_j.x)
+        seg_min_y = min(node_i.y, node_j.y)
+        seg_max_y = max(node_i.y, node_j.y)
+
+        overlap_x = min(seg_max_x, x_max) - max(seg_min_x, x_min)
+        overlap_y = min(seg_max_y, y_max) - max(seg_min_y, y_min)
+        if overlap_x > eps and overlap_y > eps:
+            non_coupling_overlap.append(elem.tag)
+
+        horizontal_on_band = abs(node_i.y - node_j.y) <= eps and (
+            abs(node_i.y - y_min) <= eps or abs(node_i.y - y_max) <= eps
+        )
+        if horizontal_on_band and overlap_x > eps:
+            non_coupling_overlap.append(elem.tag)
+
+        horizontal_in_band = (
+            abs(node_i.y - node_j.y) <= eps
+            and (y_min + eps < node_i.y < y_max - eps)
+            and overlap_x > eps
+        )
+        if horizontal_in_band:
+            non_coupling_overlap.append(elem.tag)
+
+        vertical_in_band = (
+            abs(node_i.x - node_j.x) <= eps
+            and (x_min + eps < node_i.x < x_max - eps)
+            and overlap_y > eps
+        )
+        if vertical_in_band:
+            non_coupling_overlap.append(elem.tag)
+
+    assert not non_coupling_inside, (
+        f"Found non-coupling beam elements fully inside I-section coupling band: {non_coupling_inside}"
+    )
+    assert not non_coupling_overlap, (
+        f"Found non-coupling beam elements overlapping I-section coupling band: {sorted(set(non_coupling_overlap))}"
+    )
+
+
+def test_get_floor_elevations_excludes_wall_shells() -> None:
+    from src.fem.visualization import _get_floor_elevations
+    from src.fem.fem_engine import Element
+    
+    model = FEMModel()
+    
+    model.add_node(Node(tag=1, x=0.0, y=0.0, z=0.0))
+    model.add_node(Node(tag=2, x=3.0, y=0.0, z=0.0))
+    model.add_node(Node(tag=3, x=3.0, y=3.0, z=0.0))
+    model.add_node(Node(tag=4, x=0.0, y=3.0, z=0.0))
+    
+    model.add_node(Node(tag=5, x=0.0, y=0.0, z=3.0))
+    model.add_node(Node(tag=6, x=3.0, y=0.0, z=3.0))
+    model.add_node(Node(tag=7, x=3.0, y=3.0, z=3.0))
+    model.add_node(Node(tag=8, x=0.0, y=3.0, z=3.0))
+    
+    model.add_element(Element(
+        tag=100,
+        element_type=ElementType.SHELL,
+        node_tags=[1, 2, 6, 5],
+        material_tag=1,
+    ))
+    
+    model.add_element(Element(
+        tag=200,
+        element_type=ElementType.SHELL,
+        node_tags=[5, 6, 7, 8],
+        material_tag=1,
+    ))
+    
+    elevations = _get_floor_elevations(model, tolerance=0.01)
+    
+    assert len(elevations) == 1, f"Expected 1 elevation (slab at z=3.0), got {len(elevations)}: {elevations}"
+    assert abs(elevations[0] - 3.0) < 0.01, f"Expected elevation ~3.0, got {elevations[0]}"

@@ -162,7 +162,7 @@ class TestBeamTrimmerTubeSection:
     def setup_method(self):
         """Set up tube with center opening for testing."""
         self.core_geometry = CoreWallGeometry(
-            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            config=CoreWallConfig.TUBE_WITH_OPENINGS,
             wall_thickness=500.0,
             length_x=6000.0,
             length_y=6000.0,
@@ -207,7 +207,7 @@ class TestPointInPolygon:
     def setup_method(self):
         """Set up simple rectangular core wall."""
         self.core_geometry = CoreWallGeometry(
-            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            config=CoreWallConfig.TUBE_WITH_OPENINGS,
             wall_thickness=500.0,
             length_x=6000.0,
             length_y=6000.0,
@@ -319,7 +319,7 @@ class TestMultipleBeamTrimming:
     def setup_method(self):
         """Set up core wall and multiple beams."""
         self.core_geometry = CoreWallGeometry(
-            config=CoreWallConfig.TUBE_CENTER_OPENING,
+            config=CoreWallConfig.TUBE_WITH_OPENINGS,
             wall_thickness=500.0,
             length_x=6000.0,
             length_y=6000.0,

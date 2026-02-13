@@ -132,6 +132,43 @@ def test_plan_view_coupling_beams() -> None:
     assert "Coupling Beams" in trace_names
 
 
+def test_plan_view_runtime_coupling_metadata_classification() -> None:
+    model = FEMModel()
+    model.add_node(Node(tag=1, x=0.0, y=0.0, z=3.0))
+    model.add_node(Node(tag=2, x=2.0, y=0.0, z=3.0))
+    model.add_node(Node(tag=3, x=0.0, y=1.0, z=3.0))
+    model.add_node(Node(tag=4, x=2.0, y=1.0, z=3.0))
+
+    model.add_element(
+        Element(
+            tag=10,
+            element_type=ElementType.ELASTIC_BEAM,
+            node_tags=[1, 2],
+            material_tag=1,
+            section_tag=20,
+            geometry={"coupling_beam": True, "parent_beam_id": 70000, "sub_element_index": 0},
+        )
+    )
+
+    model.add_element(
+        Element(
+            tag=11,
+            element_type=ElementType.ELASTIC_BEAM,
+            node_tags=[3, 4],
+            material_tag=1,
+            section_tag=20,
+            geometry={"parent_coupling_beam_id": 70001, "sub_element_index": 0},
+        )
+    )
+
+    fig = create_plan_view(model, config=VisualizationConfig(), floor_elevation=3.0)
+
+    trace_names = [trace.name for trace in fig.data]
+    assert "Coupling Beams" in trace_names
+    assert "Primary Beams" not in trace_names
+    assert "Secondary Beams" not in trace_names
+
+
 def test_plan_view_no_loads_hides_load_traces() -> None:
     """Test that plan view hides load traces when show_loads is False."""
     model = _build_plan_model()
@@ -142,6 +179,44 @@ def test_plan_view_no_loads_hides_load_traces() -> None:
     trace_names = [trace.name for trace in fig.data]
     assert "Point Loads" not in trace_names
     assert "Uniform Loads" not in trace_names
+
+
+def test_plan_view_hides_beams_when_toggle_off() -> None:
+    model = _build_plan_model()
+    config = VisualizationConfig(show_beams=False)
+
+    fig = create_plan_view(model, config=config, floor_elevation=3.0)
+
+    trace_names = [trace.name for trace in fig.data]
+    assert "Primary Beams" not in trace_names
+    assert "Secondary Beams" not in trace_names
+    assert "Coupling Beams" not in trace_names
+
+
+def test_plan_view_hides_columns_when_toggle_off() -> None:
+    model = _build_plan_model()
+    config = VisualizationConfig(show_columns=False)
+
+    fig = create_plan_view(model, config=config, floor_elevation=3.0)
+
+    trace_names = [trace.name for trace in fig.data]
+    assert "Columns" not in trace_names
+
+
+def test_plan_view_shows_reactions_with_reaction_toggle() -> None:
+    model = _build_plan_model()
+    reactions = {
+        1: [1200.0, 0.0, 5000.0, 0.0, 0.0, 0.0],
+        2: [800.0, 0.0, 4500.0, 0.0, 0.0, 0.0],
+        3: [0.0, 700.0, 4200.0, 0.0, 0.0, 0.0],
+        4: [0.0, 600.0, 4100.0, 0.0, 0.0, 0.0],
+    }
+    config = VisualizationConfig(show_reactions=True, show_supports=False)
+
+    fig = create_plan_view(model, config=config, floor_elevation=3.0, reactions=reactions)
+
+    trace_names = [trace.name for trace in fig.data]
+    assert "Reactions" in trace_names
 
 
 def test_plan_view_layout_properties() -> None:
@@ -155,6 +230,31 @@ def test_plan_view_layout_properties() -> None:
     assert fig.layout.yaxis.title.text == "Y (m)"
     assert fig.layout.showlegend is True
     assert fig.layout.plot_bgcolor == "white"
+
+
+def test_plan_view_hides_omitted_columns_when_toggle_off() -> None:
+    model = _build_plan_model()
+    model.omitted_columns = [{"x": 1.0, "y": 1.0, "id": "C1"}]
+    config = VisualizationConfig(show_ghost_columns=False)
+
+    fig = create_plan_view(model, config=config, floor_elevation=3.0)
+
+    omitted_traces = [trace for trace in fig.data if trace.name == "Omitted Columns"]
+    assert not omitted_traces
+
+
+def test_plan_view_omitted_columns_single_legend_trace() -> None:
+    model = _build_plan_model()
+    model.omitted_columns = [
+        {"x": 1.0, "y": 1.0, "id": "C1"},
+        {"x": 3.0, "y": 3.0, "id": "C2"},
+    ]
+    config = VisualizationConfig(show_ghost_columns=True)
+
+    fig = create_plan_view(model, config=config, floor_elevation=3.0)
+
+    omitted_traces = [trace for trace in fig.data if trace.name == "Omitted Columns"]
+    assert len(omitted_traces) == 1
 
 
 def test_plan_view_empty_floor() -> None:

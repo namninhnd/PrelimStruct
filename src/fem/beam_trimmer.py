@@ -123,24 +123,16 @@ class BeamTrimmer:
         """
         from src.fem.core_wall_geometry import (
             ISectionCoreWall,
-            TwoCFacingCoreWall,
-            TwoCBackToBackCoreWall,
-            TubeCenterOpeningCoreWall,
-            TubeSideOpeningCoreWall
+            TubeWithOpeningsCoreWall,
         )
         
         config = self.core_geometry.config
         
         if config == CoreWallConfig.I_SECTION:
             generator = ISectionCoreWall(self.core_geometry)
-        elif config == CoreWallConfig.TWO_C_FACING:
-            generator = TwoCFacingCoreWall(self.core_geometry)
-        elif config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-            generator = TwoCBackToBackCoreWall(self.core_geometry)
-        elif config == CoreWallConfig.TUBE_CENTER_OPENING:
-            generator = TubeCenterOpeningCoreWall(self.core_geometry)
-        elif config == CoreWallConfig.TUBE_SIDE_OPENING:
-            generator = TubeSideOpeningCoreWall(self.core_geometry)
+        elif config == CoreWallConfig.TUBE_WITH_OPENINGS:
+            # Route to center-opening trimming logic
+            generator = TubeWithOpeningsCoreWall(self.core_geometry)
         else:
             raise ValueError(f"Unsupported core wall configuration: {config}")
         

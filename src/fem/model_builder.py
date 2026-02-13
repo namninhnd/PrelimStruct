@@ -28,15 +28,14 @@ from src.core.data_models import (
     CoreWallConfig,
     CoreWallGeometry,
     CoreWallSectionProperties,
+    TubeOpeningPlacement,
 )
 
 from src.fem.beam_trimmer import BeamConnectionType
 from src.fem.core_wall_geometry import (
     ISectionCoreWall,
-    TwoCFacingCoreWall,
-    TwoCBackToBackCoreWall,
-    TubeCenterOpeningCoreWall,
-    TubeSideOpeningCoreWall,
+    TubeWithOpeningsCoreWall,
+    resolve_i_section_plan_dimensions,
 )
 from src.fem.coupling_beam import CouplingBeamGenerator
 from src.fem.fem_engine import FEMModel, RigidDiaphragm, Load, Node, Element, ElementType, UniformLoad
@@ -323,37 +322,92 @@ class NodeRegistry:
         
         return tag
 
+    def get_existing(self, x: float, y: float, z: float) -> Optional[int]:
+        key = self._key(x, y, z)
+        return self._key_to_tag.get(key)
+
+    def register_existing(
+        self,
+        *,
+        node_tag: int,
+        x: float,
+        y: float,
+        z: float,
+        floor_level: Optional[int] = None,
+    ) -> None:
+        key = self._key(x, y, z)
+        if key not in self._key_to_tag:
+            self._key_to_tag[key] = node_tag
+
+        if floor_level is not None:
+            if floor_level not in self.nodes_by_floor:
+                self.nodes_by_floor[floor_level] = []
+            if node_tag not in self.nodes_by_floor[floor_level]:
+                self.nodes_by_floor[floor_level].append(node_tag)
+
 
 def _get_core_wall_outline(geometry: CoreWallGeometry) -> List[Tuple[float, float]]:
     """Get core wall outline coordinates in mm based on configuration."""
     if geometry.config == CoreWallConfig.I_SECTION:
         generator = ISectionCoreWall(geometry)
-    elif geometry.config == CoreWallConfig.TWO_C_FACING:
-        generator = TwoCFacingCoreWall(geometry)
-    elif geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-        generator = TwoCBackToBackCoreWall(geometry)
-    elif geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-        generator = TubeCenterOpeningCoreWall(geometry)
-    elif geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-        generator = TubeSideOpeningCoreWall(geometry)
+    elif geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+        generator = TubeWithOpeningsCoreWall(geometry)
     else:
         raise ValueError(f"Unsupported core wall configuration: {geometry.config}")
 
     return generator.get_outline_coordinates()
 
 
+def _get_i_section_panel_aligned_polygon(
+    core_geometry: CoreWallGeometry,
+    offset_x: float,
+    offset_y: float,
+) -> Optional[List[Tuple[float, float]]]:
+    length_x_mm, length_y_mm = resolve_i_section_plan_dimensions(core_geometry)
+    width_m = length_x_mm / 1000.0
+    height_m = length_y_mm / 1000.0
+    thickness_m = core_geometry.wall_thickness / 1000.0
+
+    if width_m <= 0.0 or height_m <= 0.0 or thickness_m <= 0.0:
+        return None
+
+    flange_width = min(thickness_m, width_m / 2.0)
+    web_half_thickness = min(thickness_m / 2.0, height_m / 2.0)
+    web_bottom = (height_m / 2.0) - web_half_thickness
+    web_top = (height_m / 2.0) + web_half_thickness
+    right_inner_x = width_m - flange_width
+
+    if flange_width <= 0.0 or right_inner_x <= flange_width:
+        return None
+
+    polygon_vertices_local = [
+        (0.0, 0.0),
+        (flange_width, 0.0),
+        (flange_width, web_bottom),
+        (right_inner_x, web_bottom),
+        (right_inner_x, 0.0),
+        (width_m, 0.0),
+        (width_m, height_m),
+        (right_inner_x, height_m),
+        (right_inner_x, web_top),
+        (flange_width, web_top),
+        (flange_width, height_m),
+        (0.0, height_m),
+        (0.0, 0.0),
+    ]
+
+    return [
+        (x + offset_x, y + offset_y)
+        for x, y in polygon_vertices_local
+    ]
+
+
 def _calculate_core_wall_section_properties(geometry: CoreWallGeometry) -> CoreWallSectionProperties:
     """Calculate core wall section properties based on configuration."""
     if geometry.config == CoreWallConfig.I_SECTION:
         return ISectionCoreWall(geometry).calculate_section_properties()
-    if geometry.config == CoreWallConfig.TWO_C_FACING:
-        return TwoCFacingCoreWall(geometry).calculate_section_properties()
-    if geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-        return TwoCBackToBackCoreWall(geometry).calculate_section_properties()
-    if geometry.config == CoreWallConfig.TUBE_CENTER_OPENING:
-        return TubeCenterOpeningCoreWall(geometry).calculate_section_properties()
-    if geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-        return TubeSideOpeningCoreWall(geometry).calculate_section_properties()
+    if geometry.config == CoreWallConfig.TUBE_WITH_OPENINGS:
+        return TubeWithOpeningsCoreWall(geometry).calculate_section_properties()
 
     raise ValueError(f"Unsupported core wall configuration: {geometry.config}")
 
@@ -363,110 +417,38 @@ def _get_core_opening_for_slab(
     offset_x: float,
     offset_y: float,
 ) -> Optional[SlabOpening]:
-    """Extract the internal void area from core wall geometry for slab exclusion.
-    
-    This returns the interior space of the core wall (elevator lobby, stair area, etc.)
-    that should be excluded from the slab mesh. The slab should extend TO the wall 
-    outer boundary edges, but NOT exist inside the core interior.
-    
-    For TUBE configurations: excludes the entire interior of the tube (elevator/stair area)
-    For C-facing configurations: excludes the corridor space between C-walls
-    For I-SECTION: no interior void, slab extends to wall edges
-    
-    Args:
-        core_geometry: Core wall geometry configuration
-        offset_x: X offset of core wall in meters
-        offset_y: Y offset of core wall in meters
-        
-    Returns:
-        SlabOpening representing the internal void, or None if no opening exists
-    """
     config = core_geometry.config
-    wall_thickness_m = core_geometry.wall_thickness / 1000.0
     
-    # For TUBE configurations, exclude the entire interior (elevator lobby/stair area)
-    # The slab should NOT exist inside the closed box, only extend TO its outer boundary
-    if config in (CoreWallConfig.TUBE_CENTER_OPENING, CoreWallConfig.TUBE_SIDE_OPENING):
+    if config == CoreWallConfig.TUBE_WITH_OPENINGS:
         length_x_m = (core_geometry.length_x or 0) / 1000.0
         length_y_m = (core_geometry.length_y or 0) / 1000.0
         
-        # The interior void is the area inside the walls
-        # Interior starts at (offset + wall_thickness) and extends (length - 2*wall_thickness)
-        interior_x = offset_x + wall_thickness_m
-        interior_y = offset_y + wall_thickness_m
-        interior_width_x = length_x_m - 2 * wall_thickness_m
-        interior_width_y = length_y_m - 2 * wall_thickness_m
-        
-        # Ensure positive dimensions
-        if interior_width_x <= 0 or interior_width_y <= 0:
+        if length_x_m <= 0 or length_y_m <= 0:
             return None
             
         return SlabOpening(
-            opening_id="CORE_INTERIOR_VOID",
-            origin=(interior_x, interior_y),
-            width_x=interior_width_x,
-            width_y=interior_width_y,
-            opening_type="core_interior",
-        )
-        
-    elif config == CoreWallConfig.TWO_C_FACING:
-        # Two C facing: the void is the entire corridor space between the two C-walls
-        if core_geometry.opening_width is None:
-            return None
-            
-        flange_width_m = (core_geometry.flange_width or 0) / 1000.0
-        web_length_m = (core_geometry.web_length or 0) / 1000.0
-        opening_width_m = core_geometry.opening_width / 1000.0
-        
-        # The void is between the two C-walls (corridor/lobby area)
-        # This area spans the full height between flanges
-        void_x = offset_x + flange_width_m
-        void_y = offset_y + wall_thickness_m  # Clear of bottom flange
-        void_height_m = web_length_m - 2 * wall_thickness_m  # Clear height between flanges
-        
-        if void_height_m <= 0:
-            return None
-            
-        return SlabOpening(
-            opening_id="CORE_CORRIDOR_VOID",
-            origin=(void_x, void_y),
-            width_x=opening_width_m,
-            width_y=void_height_m,
-            opening_type="core_corridor",
-        )
-        
-    elif config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-        # Two C back-to-back: typically forms a closed box similar to tube
-        # The interior space between the two C-walls should be excluded
-        flange_width_m = (core_geometry.flange_width or 0) / 1000.0
-        web_length_m = (core_geometry.web_length or 0) / 1000.0
-        connection_m = (core_geometry.opening_width or 0) / 1000.0
-        
-        # The interior void is between the flanges of both C-walls
-        # Total width = 2 * flange_width + 2 * wall_thickness + connection
-        # Interior spans from wall_thickness to (total_width - wall_thickness)
-        interior_x = offset_x + wall_thickness_m
-        interior_y = offset_y + wall_thickness_m
-        interior_width_x = 2 * flange_width_m + connection_m
-        interior_width_y = web_length_m - 2 * wall_thickness_m
-        
-        if interior_width_x <= 0 or interior_width_y <= 0:
-            return None
-            
-        return SlabOpening(
-            opening_id="CORE_INTERIOR_VOID",
-            origin=(interior_x, interior_y),
-            width_x=interior_width_x,
-            width_y=interior_width_y,
-            opening_type="core_interior",
+            opening_id="CORE_FULL_FOOTPRINT",
+            origin=(offset_x, offset_y),
+            width_x=length_x_m,
+            width_y=length_y_m,
+            opening_type="core_footprint",
         )
         
     elif config == CoreWallConfig.I_SECTION:
-        # I-section: no internal void, slab extends to wall edges on both sides
-        # The I-section is solid (web connecting two flanges), no elevator lobby
-        return None
+        flange_width_m = (core_geometry.flange_width or 0) / 1000.0
+        web_length_m = (core_geometry.web_length or 0) / 1000.0
+
+        if flange_width_m <= 0 or web_length_m <= 0:
+            return None
+
+        return SlabOpening(
+            opening_id="CORE_I_SECTION_COUPLING_BAND",
+            origin=(offset_x, offset_y),
+            width_x=flange_width_m,
+            width_y=web_length_m,
+            opening_type="core_footprint",
+        )
         
-    # Default: no specific void geometry available
     return None
 
 
@@ -491,16 +473,8 @@ def _get_core_wall_offset(project: ProjectData,
     core_width = (max_x - min_x) / 1000.0
     core_height = (max_y - min_y) / 1000.0
 
-    # Task 17.2: Custom Location Support
     lateral_input = project.lateral
-    if lateral_input.location_type == "Custom" and lateral_input.custom_center_x is not None and lateral_input.custom_center_y is not None:
-        # User specified center (x, y)
-        # Offset is top-left corner (typically), but depends on how wall panels are built.
-        # Wall generator typically builds from (offset_x, offset_y) = bottom-left of bounding box
-        
-        # Calculate offset_x so that center is at custom_center_x
-        # center_x = offset_x + core_width/2
-        # => offset_x = custom_center_x - core_width/2
+    if lateral_input.custom_center_x is not None and lateral_input.custom_center_y is not None:
         offset_x = lateral_input.custom_center_x - (core_width / 2)
         offset_y = lateral_input.custom_center_y - (core_height / 2)
         
@@ -516,8 +490,12 @@ def _line_segment_intersection(p1: Tuple[float, float],
                                p2: Tuple[float, float],
                                p3: Tuple[float, float],
                                p4: Tuple[float, float],
-                               tolerance: float = 1e-9) -> Optional[Tuple[float, float, float]]:
-    """Compute intersection point between two line segments with parametric t on segment p1-p2."""
+                               tolerance: float = 1e-6) -> Optional[Tuple[float, float, float]]:
+    """Compute intersection point between two line segments with parametric t on segment p1-p2.
+    
+    Handles collinear segments by detecting overlap and returning midpoint/boundary.
+    Tolerance unified to 1e-6 to match NodeRegistry and trim functions (Phase 14 Gate D).
+    """
     x1, y1 = p1
     x2, y2 = p2
     x3, y3 = p3
@@ -530,7 +508,61 @@ def _line_segment_intersection(p1: Tuple[float, float],
     det = dx1 * dy2 - dy1 * dx2
 
     if abs(det) < tolerance:
-        return None
+        # Collinear or parallel case - check for 1D overlap
+        # Project segments onto dominant axis to detect overlap
+        seg1_len_sq = dx1**2 + dy1**2
+        seg2_len_sq = dx2**2 + dy2**2
+        
+        if seg1_len_sq < tolerance**2 or seg2_len_sq < tolerance**2:
+            return None  # Degenerate segment(s)
+        
+        # Use axis with larger variation for projection
+        if abs(dx1) >= abs(dy1):
+            # Project onto X axis
+            proj1_min, proj1_max = min(x1, x2), max(x1, x2)
+            proj2_min, proj2_max = min(x3, x4), max(x3, x4)
+            
+            # Check if p3-p4 is collinear with p1-p2 (not just parallel)
+            # Verify p3 is on line p1-p2
+            if seg1_len_sq > tolerance**2:
+                t3 = ((x3 - x1) * dx1 + (y3 - y1) * dy1) / seg1_len_sq
+                proj_y = y1 + t3 * dy1
+                if abs(y3 - proj_y) > tolerance:
+                    return None  # Parallel but not collinear
+        else:
+            # Project onto Y axis
+            proj1_min, proj1_max = min(y1, y2), max(y1, y2)
+            proj2_min, proj2_max = min(y3, y4), max(y3, y4)
+            
+            # Verify p3 is on line p1-p2
+            if seg1_len_sq > tolerance**2:
+                t3 = ((x3 - x1) * dx1 + (y3 - y1) * dy1) / seg1_len_sq
+                proj_x = x1 + t3 * dx1
+                if abs(x3 - proj_x) > tolerance:
+                    return None  # Parallel but not collinear
+        
+        # Check for overlap in projection
+        overlap_min = max(proj1_min, proj2_min)
+        overlap_max = min(proj1_max, proj2_max)
+        
+        if overlap_min > overlap_max + tolerance:
+            return None  # Disjoint collinear segments
+        
+        # Overlap exists - return midpoint of overlap region
+        overlap_mid = (overlap_min + overlap_max) / 2.0
+        
+        # Convert back to 2D coordinates using parametric form on segment p1-p2
+        if abs(dx1) >= abs(dy1):
+            t_mid = (overlap_mid - x1) / dx1 if abs(dx1) > tolerance else 0.5
+        else:
+            t_mid = (overlap_mid - y1) / dy1 if abs(dy1) > tolerance else 0.5
+        
+        # Clamp to [0, 1] range
+        t_mid = max(0.0, min(1.0, t_mid))
+        
+        x_mid = x1 + t_mid * dx1
+        y_mid = y1 + t_mid * dy1
+        return (x_mid, y_mid, t_mid)
 
     t = ((x3 - x1) * dy2 - (y3 - y1) * dx2) / det
     u = ((x3 - x1) * dy1 - (y3 - y1) * dx1) / det
@@ -605,6 +637,35 @@ def _classify_loops(loops: List[List[Tuple[float, float]]]
     return outer_loops, hole_loops
 
 
+def _loop_signed_area(loop: List[Tuple[float, float]]) -> float:
+    area = 0.0
+    if len(loop) < 3:
+        return area
+
+    points = loop
+    if points[0] != points[-1]:
+        points = points + [points[0]]
+
+    for i in range(len(points) - 1):
+        x1, y1 = points[i]
+        x2, y2 = points[i + 1]
+        area += x1 * y2 - x2 * y1
+
+    return 0.5 * area
+
+
+def _get_outer_trim_loop(outline: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
+    loops = _split_outline_loops(outline)
+    if not loops:
+        return outline
+
+    outer_loops, _ = _classify_loops(loops)
+    if not outer_loops:
+        outer_loops = loops
+
+    return max(outer_loops, key=lambda loop: abs(_loop_signed_area(loop)))
+
+
 def trim_beam_segment_against_polygon(start: Tuple[float, float],
                                       end: Tuple[float, float],
                                       polygon: Optional[List[Tuple[float, float]]],
@@ -627,9 +688,38 @@ def trim_beam_segment_against_polygon(start: Tuple[float, float],
         outer_loops = loops
 
     def _is_inside(point: Tuple[float, float]) -> bool:
+        def _point_on_segment(pt: Tuple[float, float], a: Tuple[float, float], b: Tuple[float, float]) -> bool:
+            px, py = pt
+            ax, ay = a
+            bx, by = b
+
+            dx = bx - ax
+            dy = by - ay
+            seg_len_sq = dx * dx + dy * dy
+            if seg_len_sq <= tolerance * tolerance:
+                return math.hypot(px - ax, py - ay) <= tolerance
+
+            cross = abs((px - ax) * dy - (py - ay) * dx)
+            if cross > tolerance * math.sqrt(seg_len_sq):
+                return False
+
+            dot = (px - ax) * dx + (py - ay) * dy
+            return -tolerance <= dot <= seg_len_sq + tolerance
+
+        def _point_on_loop_boundary(pt: Tuple[float, float], loop: List[Tuple[float, float]]) -> bool:
+            loop_points = loop[:]
+            if loop_points and loop_points[0] != loop_points[-1]:
+                loop_points.append(loop_points[0])
+            for i in range(max(0, len(loop_points) - 1)):
+                if _point_on_segment(pt, loop_points[i], loop_points[i + 1]):
+                    return True
+            return False
+
         inside_outer = any(_point_in_polygon(point, loop) for loop in outer_loops)
+        on_outer_boundary = any(_point_on_loop_boundary(point, loop) for loop in outer_loops)
         inside_hole = any(_point_in_polygon(point, loop) for loop in hole_loops)
-        return inside_outer and not inside_hole
+        on_hole_boundary = any(_point_on_loop_boundary(point, loop) for loop in hole_loops)
+        return (inside_outer or on_outer_boundary) and not inside_hole and not on_hole_boundary
 
     start_inside = _is_inside(start)
     end_inside = _is_inside(end)
@@ -663,62 +753,48 @@ def trim_beam_segment_against_polygon(start: Tuple[float, float],
             deduped.append((x, y, t))
     deduped.sort(key=lambda item: item[2])
 
-    if start_inside and end_inside:
-        return []
+    def _point_at(param_t: float) -> Tuple[float, float]:
+        return (
+            start[0] + (end[0] - start[0]) * param_t,
+            start[1] + (end[1] - start[1]) * param_t,
+        )
+
+    t_values: List[float] = [0.0]
+    for _, _, t in deduped:
+        if tolerance < t < 1.0 - tolerance:
+            t_values.append(t)
+    t_values.append(1.0)
+    t_values = sorted(set(t_values))
 
     segments: List[BeamSegment] = []
+    for t0, t1 in zip(t_values[:-1], t_values[1:]):
+        if t1 - t0 <= tolerance:
+            continue
 
-    if start_inside and not end_inside:
-        x_i, y_i, _ = deduped[0]
+        t_mid = 0.5 * (t0 + t1)
+        if _is_inside(_point_at(t_mid)):
+            continue
+
+        seg_start = _point_at(t0)
+        seg_end = _point_at(t1)
+        if math.hypot(seg_end[0] - seg_start[0], seg_end[1] - seg_start[1]) <= tolerance:
+            continue
+
+        start_connection = (
+            BeamConnectionType.MOMENT if t0 > tolerance else BeamConnectionType.PINNED
+        )
+        end_connection = (
+            BeamConnectionType.MOMENT if t1 < 1.0 - tolerance else BeamConnectionType.PINNED
+        )
         segments.append(
             BeamSegment(
-                start=(x_i, y_i),
-                end=end,
-                start_connection=BeamConnectionType.MOMENT,
-                end_connection=BeamConnectionType.PINNED,
+                start=seg_start,
+                end=seg_end,
+                start_connection=start_connection,
+                end_connection=end_connection,
             )
         )
-        return segments
 
-    if end_inside and not start_inside:
-        x_i, y_i, _ = deduped[-1]
-        segments.append(
-            BeamSegment(
-                start=start,
-                end=(x_i, y_i),
-                start_connection=BeamConnectionType.PINNED,
-                end_connection=BeamConnectionType.MOMENT,
-            )
-        )
-        return segments
-
-    if len(deduped) < 2:
-        return [
-            BeamSegment(start=start,
-                        end=end,
-                        start_connection=BeamConnectionType.PINNED,
-                        end_connection=BeamConnectionType.PINNED)
-        ]
-
-    first = deduped[0]
-    last = deduped[-1]
-
-    segments.append(
-        BeamSegment(
-            start=start,
-            end=(first[0], first[1]),
-            start_connection=BeamConnectionType.PINNED,
-            end_connection=BeamConnectionType.MOMENT,
-        )
-    )
-    segments.append(
-        BeamSegment(
-            start=(last[0], last[1]),
-            end=end,
-            start_connection=BeamConnectionType.MOMENT,
-            end_connection=BeamConnectionType.PINNED,
-        )
-    )
     return segments
 
 
@@ -937,9 +1013,9 @@ def _extract_wall_panels(
     
     if config == CoreWallConfig.I_SECTION:
         # I-section: 2 flanges (parallel to Y) + 1 web (parallel to X)
-        length_x_m = core_geometry.length_x / 1000.0
-        length_y_m = core_geometry.length_y / 1000.0
-        flange_width_m = (core_geometry.flange_width or 2000.0) / 1000.0
+        length_x_mm, length_y_mm = resolve_i_section_plan_dimensions(core_geometry)
+        length_x_m = length_x_mm / 1000.0
+        length_y_m = length_y_mm / 1000.0
         
         # Left flange (parallel to Y-axis)
         panels.append(WallPanel(
@@ -975,70 +1051,120 @@ def _extract_wall_panels(
             fcu=fcu,
         ))
         
-    elif config == CoreWallConfig.TUBE_CENTER_OPENING:
-        # Tube/box with center opening: 4 walls forming perimeter
+    elif config == CoreWallConfig.TUBE_WITH_OPENINGS:
         length_x_m = core_geometry.length_x / 1000.0
         length_y_m = core_geometry.length_y / 1000.0
-        
-        # Bottom wall (parallel to X)
-        panels.append(WallPanel(
-            wall_id="TW1",
-            base_point=(offset_x, offset_y),
-            length=length_x_m,
-            thickness=thickness_m,
-            height=1.0,
-            orientation=0.0,
-            fcu=fcu,
-        ))
-        
-        # Right wall (parallel to Y)
-        panels.append(WallPanel(
-            wall_id="TW2",
-            base_point=(offset_x + length_x_m, offset_y),
-            length=length_y_m,
-            thickness=thickness_m,
-            height=1.0,
-            orientation=90.0,
-            fcu=fcu,
-        ))
-        
-        # Top wall (parallel to X)
-        panels.append(WallPanel(
-            wall_id="TW3",
-            base_point=(offset_x, offset_y + length_y_m),
-            length=length_x_m,
-            thickness=thickness_m,
-            height=1.0,
-            orientation=0.0,
-            fcu=fcu,
-        ))
-        
-        # Left wall (parallel to Y)
-        panels.append(WallPanel(
-            wall_id="TW4",
-            base_point=(offset_x, offset_y),
-            length=length_y_m,
-            thickness=thickness_m,
-            height=1.0,
-            orientation=90.0,
-            fcu=fcu,
-        ))
+        opening_width_m = core_geometry.opening_width / 1000.0 if core_geometry.opening_width else 0.0
+        placement = core_geometry.opening_placement
+        if placement in {
+            TubeOpeningPlacement.BOTH,
+            TubeOpeningPlacement.TOP,
+            TubeOpeningPlacement.BOTTOM,
+        }:
+            placement = TubeOpeningPlacement.TOP_BOT
+
+        has_openings = (
+            placement == TubeOpeningPlacement.TOP_BOT
+            and opening_width_m > 0.0
+            and opening_width_m < length_x_m
+        )
+
+        if has_openings:
+            side_length = (length_x_m - opening_width_m) / 2.0
+            panels.append(WallPanel(
+                wall_id="TW1_left",
+                base_point=(offset_x, offset_y),
+                length=side_length,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW1_right",
+                base_point=(offset_x + side_length + opening_width_m, offset_y),
+                length=side_length,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW2",
+                base_point=(offset_x + length_x_m, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW3_left",
+                base_point=(offset_x, offset_y + length_y_m),
+                length=side_length,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW3_right",
+                base_point=(offset_x + side_length + opening_width_m, offset_y + length_y_m),
+                length=side_length,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW4",
+                base_point=(offset_x, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
+        else:
+            panels.append(WallPanel(
+                wall_id="TW1",
+                base_point=(offset_x, offset_y),
+                length=length_x_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW2",
+                base_point=(offset_x + length_x_m, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW3",
+                base_point=(offset_x, offset_y + length_y_m),
+                length=length_x_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=0.0,
+                fcu=fcu,
+            ))
+            panels.append(WallPanel(
+                wall_id="TW4",
+                base_point=(offset_x, offset_y),
+                length=length_y_m,
+                thickness=thickness_m,
+                height=1.0,
+                orientation=90.0,
+                fcu=fcu,
+            ))
         
     else:
-        # For other configurations (TWO_C_FACING, TWO_C_BACK_TO_BACK, TUBE_SIDE_OPENING),
-        # use simplified box representation (can be enhanced later)
-        logger.warning(
-            f"Wall configuration {config} using simplified box representation. "
-            "Full implementation pending."
-        )
-        length_x_m = core_geometry.length_x / 1000.0
-        length_y_m = core_geometry.length_y / 1000.0
-        
-        # Create 4 walls as a box
-        panels.append(WallPanel("W1", (offset_x, offset_y), length_x_m, thickness_m, 1.0, 0.0, fcu))
-        panels.append(WallPanel("W2", (offset_x + length_x_m, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
-        panels.append(WallPanel("W3", (offset_x, offset_y + length_y_m), length_x_m, thickness_m, 1.0, 0.0, fcu))
-        panels.append(WallPanel("W4", (offset_x, offset_y), length_y_m, thickness_m, 1.0, 90.0, fcu))
+        raise ValueError(f"Unsupported core wall configuration: {config}")
     
     return panels
 
@@ -1220,6 +1346,73 @@ def _create_subdivided_beam(
         element_tag += 1
     
     return element_tag, parent_beam_id
+
+
+def _resolve_coupling_endpoint_node(
+    model: FEMModel,
+    registry: NodeRegistry,
+    *,
+    x: float,
+    y: float,
+    z: float,
+    floor_level: int,
+    wall_node_tags: Set[int],
+    tolerance: float,
+    require_wall_node: bool,
+) -> int:
+    existing = registry.get_existing(x, y, z)
+    if existing is not None and (not require_wall_node or existing in wall_node_tags):
+        return existing
+
+    for wall_tag in wall_node_tags:
+        wall_node = model.nodes.get(wall_tag)
+        if wall_node is None:
+            continue
+        if (
+            abs(wall_node.x - x) <= tolerance
+            and abs(wall_node.y - y) <= tolerance
+            and abs(wall_node.z - z) <= tolerance
+        ):
+            registry.register_existing(
+                node_tag=wall_tag,
+                x=x,
+                y=y,
+                z=z,
+                floor_level=floor_level,
+            )
+            return wall_tag
+
+    if require_wall_node:
+        raise ValueError(
+            "Coupling endpoint is not connected to wall mesh "
+            f"at ({x:.6f}, {y:.6f}, {z:.6f}) on floor {floor_level}"
+        )
+
+    return registry.get_or_create(x, y, z, floor_level=floor_level)
+
+
+def _prune_disconnected_nodes(model: FEMModel, registry: NodeRegistry) -> None:
+    connected_node_tags: Set[int] = set()
+    for element in model.elements.values():
+        connected_node_tags.update(element.node_tags)
+
+    disconnected_node_tags = [
+        tag for tag in list(model.nodes.keys())
+        if tag not in connected_node_tags
+    ]
+    if not disconnected_node_tags:
+        return
+
+    disconnected_set = set(disconnected_node_tags)
+    for tag in disconnected_node_tags:
+        model.nodes.pop(tag, None)
+
+    for floor_level, node_tags in list(registry.nodes_by_floor.items()):
+        filtered = [tag for tag in node_tags if tag not in disconnected_set]
+        if filtered:
+            registry.nodes_by_floor[floor_level] = filtered
+        else:
+            registry.nodes_by_floor.pop(floor_level, None)
 
 
 def build_fem_model(project: ProjectData,
@@ -1435,6 +1628,7 @@ def build_fem_model(project: ProjectData,
     primary_along_x = options.secondary_beam_direction == "Y"
 
     core_outline_global: Optional[List[Tuple[float, float]]] = None
+    core_trim_polygon_global: Optional[List[Tuple[float, float]]] = None
     core_boundary_points: List[Tuple[float, float]] = []
 
     # Warn if beam trimming is requested but core geometry is missing
@@ -1450,6 +1644,21 @@ def build_fem_model(project: ProjectData,
         core_outline_global = [
             (x + offset_x * 1000.0, y + offset_y * 1000.0) for x, y in outline
         ]
+        if project.lateral.core_geometry.config == CoreWallConfig.I_SECTION:
+            length_x_mm, length_y_mm = resolve_i_section_plan_dimensions(
+                project.lateral.core_geometry
+            )
+            width_m = length_x_mm / 1000.0
+            height_m = length_y_mm / 1000.0
+            core_trim_polygon_global = [
+                (offset_x * 1000.0, offset_y * 1000.0),
+                ((offset_x + width_m) * 1000.0, offset_y * 1000.0),
+                ((offset_x + width_m) * 1000.0, (offset_y + height_m) * 1000.0),
+                (offset_x * 1000.0, (offset_y + height_m) * 1000.0),
+                (offset_x * 1000.0, offset_y * 1000.0),
+            ]
+        else:
+            core_trim_polygon_global = _get_outer_trim_loop(core_outline_global)
         core_boundary_points.extend(core_outline_global)
 
     # Beams along X direction (AT ALL GRIDLINES)
@@ -1469,7 +1678,7 @@ def build_fem_model(project: ProjectData,
                 segments = trim_beam_segment_against_polygon(
                     start=(x_start * 1000.0, y * 1000.0),
                     end=(x_end * 1000.0, y * 1000.0),
-                    polygon=core_outline_global if options.trim_beams_at_core else None,
+                    polygon=core_trim_polygon_global if options.trim_beams_at_core else None,
                 )
 
                 for segment in segments:
@@ -1534,7 +1743,7 @@ def build_fem_model(project: ProjectData,
                 segments = trim_beam_segment_against_polygon(
                     start=(x * 1000.0, y_start * 1000.0),
                     end=(x * 1000.0, y_end * 1000.0),
-                    polygon=core_outline_global if options.trim_beams_at_core else None,
+                    polygon=core_trim_polygon_global if options.trim_beams_at_core else None,
                 )
 
                 for segment in segments:
@@ -1613,7 +1822,7 @@ def build_fem_model(project: ProjectData,
                             segments = trim_beam_segment_against_polygon(
                                 start=(x * 1000.0, y_start * 1000.0),
                                 end=(x * 1000.0, y_end * 1000.0),
-                                polygon=core_outline_global if options.trim_beams_at_core else None,
+                                polygon=core_trim_polygon_global if options.trim_beams_at_core else None,
                             )
                             
                             for segment in segments:
@@ -1686,7 +1895,7 @@ def build_fem_model(project: ProjectData,
                             segments = trim_beam_segment_against_polygon(
                                 start=(x_start * 1000.0, y * 1000.0),
                                 end=(x_end * 1000.0, y * 1000.0),
-                                polygon=core_outline_global if options.trim_beams_at_core else None,
+                                polygon=core_trim_polygon_global if options.trim_beams_at_core else None,
                             )
                             
                             for segment in segments:
@@ -1778,6 +1987,7 @@ def build_fem_model(project: ProjectData,
             base_node_tag=50000,    # Use 50000-59999 range for wall nodes
             base_element_tag=50000,  # Use 50000-59999 range for wall elements
         )
+        wall_nodes_by_floor: Dict[int, Set[int]] = {}
         
         # Generate mesh for each wall panel
         for wall in wall_panels:
@@ -1788,18 +1998,15 @@ def build_fem_model(project: ProjectData,
                 section_tag=wall_section_tag,
                 elements_along_length=2,   # 2 elements along wall length
                 elements_per_story=2,       # 2 elements per story height
+                registry=registry,
             )
             
-            # Add wall nodes to model
+            # When registry is used, nodes are already added to model by
+            # registry.get_or_create() — skip model.add_node/register_existing
             for node_tag, x, y, z, floor_level in mesh_result.nodes:
-                restraints = [1, 1, 1, 1, 1, 1] if z == 0.0 else None
-                node = Node(tag=node_tag, x=x, y=y, z=z)
-                model.add_node(node)
-                
-                # Track in registry for diaphragms
-                if floor_level not in registry.nodes_by_floor:
-                    registry.nodes_by_floor[floor_level] = []
-                registry.nodes_by_floor[floor_level].append(node_tag)
+                if floor_level not in wall_nodes_by_floor:
+                    wall_nodes_by_floor[floor_level] = set()
+                wall_nodes_by_floor[floor_level].add(node_tag)
             
             # Add wall shell elements
             for shell_quad in mesh_result.elements:
@@ -1820,7 +2027,11 @@ def build_fem_model(project: ProjectData,
         # Generate coupling beams for core walls with openings
         # Coupling beams connect wall piers across openings at each floor level
         core_geometry = project.lateral.core_geometry
-        if core_geometry.opening_width is not None and core_geometry.opening_width > 0:
+        should_generate_coupling = (
+            core_geometry.config == CoreWallConfig.I_SECTION
+            or (core_geometry.opening_width is not None and core_geometry.opening_width > 0)
+        )
+        if should_generate_coupling:
             coupling_beam_generator = CouplingBeamGenerator(core_geometry)
             coupling_beams = coupling_beam_generator.generate_coupling_beams(
                 story_height=geometry.story_height * 1000.0,  # Convert m to mm
@@ -1840,6 +2051,11 @@ def build_fem_model(project: ProjectData,
                     section_tag=coupling_section_tag,
                 )
                 model.add_section(coupling_section_tag, coupling_section)
+
+                coupling_width_m = coupling_beam_template.width / 1000.0
+                coupling_depth_m = coupling_beam_template.depth / 1000.0
+                coupling_self_weight = CONCRETE_DENSITY * coupling_width_m * coupling_depth_m
+                coupling_w_total = coupling_self_weight * 1000.0  # N/m
                 
                 coupling_element_tag = 70000  # Use 70000+ range for coupling beams
                 coupling_beams_created = 0
@@ -1854,47 +2070,37 @@ def build_fem_model(project: ProjectData,
                         cb_x_center = (cb.location_x / 1000.0) + offset_x
                         cb_y_center = (cb.location_y / 1000.0) + offset_y
                         
-                        # Calculate beam start and end points based on opening
-                        # For TWO_C_FACING: beam spans horizontally (along X) across the opening
-                        # For TUBE configs: beam may span in X or Y depending on opening location
-                        half_span = (cb.clear_span / 2.0) / 1000.0  # Convert mm to m
+                        half_span = (cb.clear_span / 2.0) / 1000.0
                         
-                        # Determine beam orientation based on core config
-                        if core_geometry.config in (
-                            CoreWallConfig.TWO_C_FACING,
-                            CoreWallConfig.TUBE_CENTER_OPENING,
-                        ):
-                            # Beam spans along X direction (horizontal)
-                            start_x = cb_x_center - half_span
-                            start_y = cb_y_center
-                            end_x = cb_x_center + half_span
-                            end_y = cb_y_center
-                        elif core_geometry.config == CoreWallConfig.TUBE_SIDE_OPENING:
-                            # Beam spans along Y direction (for side opening in left wall)
-                            start_x = cb_x_center
-                            start_y = cb_y_center - half_span
-                            end_x = cb_x_center
-                            end_y = cb_y_center + half_span
-                        elif core_geometry.config == CoreWallConfig.TWO_C_BACK_TO_BACK:
-                            # Two beams: span along X at different Y positions
-                            # The coupling beam generator creates 2 beams for this config
-                            start_x = cb_x_center - half_span
-                            start_y = cb_y_center
-                            end_x = cb_x_center + half_span
-                            end_y = cb_y_center
-                        else:
-                            # Default: span along X
-                            start_x = cb_x_center - half_span
-                            start_y = cb_y_center
-                            end_x = cb_x_center + half_span
-                            end_y = cb_y_center
+                        start_x = cb_x_center - half_span
+                        start_y = cb_y_center
+                        end_x = cb_x_center + half_span
+                        end_y = cb_y_center
+                        require_wall_node = core_geometry.config == CoreWallConfig.I_SECTION
+                        wall_nodes_for_level = wall_nodes_by_floor.get(level, set())
                         
                         # Create nodes for coupling beam ends
-                        start_node = registry.get_or_create(
-                            start_x, start_y, z, floor_level=level
+                        start_node = _resolve_coupling_endpoint_node(
+                            model,
+                            registry,
+                            x=start_x,
+                            y=start_y,
+                            z=z,
+                            floor_level=level,
+                            wall_node_tags=wall_nodes_for_level,
+                            tolerance=options.tolerance,
+                            require_wall_node=require_wall_node,
                         )
-                        end_node = registry.get_or_create(
-                            end_x, end_y, z, floor_level=level
+                        end_node = _resolve_coupling_endpoint_node(
+                            model,
+                            registry,
+                            x=end_x,
+                            y=end_y,
+                            z=z,
+                            floor_level=level,
+                            wall_node_tags=wall_nodes_for_level,
+                            tolerance=options.tolerance,
+                            require_wall_node=require_wall_node,
                         )
                         
                         # Create 5 intermediate nodes at 1/6, 2/6, 3/6, 4/6, 5/6 positions
@@ -1937,6 +2143,15 @@ def build_fem_model(project: ProjectData,
                                     },
                                 )
                             )
+                            if options.apply_gravity_loads:
+                                model.add_uniform_load(
+                                    UniformLoad(
+                                        element_tag=coupling_element_tag,
+                                        load_type="Gravity",
+                                        magnitude=coupling_w_total,
+                                        load_pattern=options.dl_load_pattern,
+                                    )
+                                )
                             coupling_element_tag += 1
                         coupling_beams_created += 1
                 
@@ -1968,9 +2183,6 @@ def build_fem_model(project: ProjectData,
             base_element_tag=60000,
         )
         
-        # Create opening for core wall if present
-        # R3: Extract ONLY the actual internal opening (elevator shaft, stair void),
-        # NOT the entire core wall footprint. Slab extends to wall boundary edges.
         slab_openings: List[SlabOpening] = []
         if options.include_core_wall and project.lateral.core_geometry:
             # Get core wall offset for positioning
@@ -2078,13 +2290,19 @@ def build_fem_model(project: ProjectData,
                             openings=slab_openings
                         )
                         
-                        # Add new slab nodes to model and existing_nodes lookup
+                        used_slab_node_tags: Set[int] = set()
+                        for elem in mesh_result.elements:
+                            used_slab_node_tags.update(elem.node_tags)
+
                         for node_data in mesh_result.nodes:
                             tag, x, y, z_coord, floor_lvl = node_data
+                            if tag not in used_slab_node_tags:
+                                continue
+
                             node = Node(tag=tag, x=x, y=y, z=z_coord)
                             model.add_node(node)
                             existing_nodes[(round(x, 6), round(y, 6), round(z_coord, 6))] = tag
-                            
+
                             # Track in registry for diaphragm
                             if floor_lvl not in registry.nodes_by_floor:
                                 registry.nodes_by_floor[floor_lvl] = []
@@ -2118,6 +2336,8 @@ def build_fem_model(project: ProjectData,
                 ll_pattern=options.ll_load_pattern,
                 slab_thickness_m=options.slab_thickness,
             )
+
+    _prune_disconnected_nodes(model, registry)
 
 
 

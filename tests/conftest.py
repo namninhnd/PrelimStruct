@@ -9,6 +9,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from src.fem.opensees_capabilities import get_shell_dkgt_support
+
 
 class PatchedOps:
     """OpenSeesPy monkeypatch stub for unit tests."""
@@ -162,7 +164,7 @@ class PatchedOps:
 def ops_monkeypatch(monkeypatch: pytest.MonkeyPatch) -> PatchedOps:
     ops = PatchedOps()
     opensees_module = types.ModuleType("opensees")
-    opensees_module.opensees = ops
+    setattr(opensees_module, "opensees", ops)
     monkeypatch.setitem(sys.modules, "openseespy", opensees_module)
     monkeypatch.setitem(sys.modules, "openseespy.opensees", ops)
     return ops
@@ -174,3 +176,11 @@ try:
     pytest_plugins = ["pytest_playwright"]
 except ImportError:
     pass
+
+
+@pytest.fixture
+def require_shell_dkgt() -> str:
+    supported, detail = get_shell_dkgt_support()
+    if not supported:
+        pytest.skip(f"ShellDKGT unavailable: {detail}")
+    return detail
