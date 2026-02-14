@@ -21,6 +21,7 @@ class ElementType(Enum):
     SECONDARY_BEAM = "secondary_beam"    # Secondary beam element
     SHELL = "shell"                      # Shell element (walls, slabs) - legacy
     SHELL_MITC4 = "shell_mitc4"          # ShellMITC4 4-node quad shell element
+    SHELL_DKGT = "shell_dkgt"
     COUPLING_BEAM = "coupling_beam"      # Deep coupling beam
 
 
@@ -333,9 +334,24 @@ class FEMModel:
             )
 
         return wy, wz
+
+    @staticmethod
+    def _compute_planar_polygon_area(nodes: List[Node]) -> float:
+        if len(nodes) < 3:
+            return 0.0
+
+        area2 = 0.0
+        for idx, node in enumerate(nodes):
+            nxt = nodes[(idx + 1) % len(nodes)]
+            area2 += node.x * nxt.y - nxt.x * node.y
+        return abs(area2) * 0.5
     
     def build_openseespy_model(
-        self, ndm: int = 3, ndf: int = 6, active_pattern: Optional[int] = None
+        self,
+        ndm: int = 3,
+        ndf: int = 6,
+        active_pattern: Optional[int] = None,
+        rebuild_structure: bool = True,
     ) -> None:
         """Build OpenSeesPy model from definitions.
         
@@ -355,225 +371,226 @@ class FEMModel:
                 "openseespy is not installed. "
                 "Install with: pip install openseespy>=3.5.0"
             )
-        
-        # Wipe existing model
-        ops.wipe()
-        
-        # Create model
-        ops.model('basic', '-ndm', ndm, '-ndf', ndf)
-        
-        # Create nodes
-        for node in self.nodes.values():
-            if ndm == 2:
-                ops.node(node.tag, node.x, node.z)
-            else:  # ndm == 3
-                ops.node(node.tag, node.x, node.y, node.z)
-            
-            # Apply boundary conditions
-            if any(r == 1 for r in node.restraints):
-                ops.fix(node.tag, *node.restraints)
-        
-        # Create materials
-        for tag, params in self.materials.items():
-            mat_type = params['material_type']
-            if mat_type == 'Concrete01':
-                ops.uniaxialMaterial('Concrete01', tag, 
-                                    params['fpc'], params['epsc0'],
-                                    params['fpcu'], params['epsU'])
-            elif mat_type == 'Steel01':
-                ops.uniaxialMaterial('Steel01', tag,
-                                    params['fy'], params['E0'], params['b'])
-            elif mat_type == 'ElasticIsotropic':
-                # NDMaterial for shell elements (PlaneStress)
-                ops.nDMaterial('ElasticIsotropic', tag,
-                              params['E'], params['nu'], params['rho'])
-        
-        # Create sections
-        for tag, params in self.sections.items():
-            sec_type = params['section_type']
-            if sec_type == 'ElasticBeamSection':
-                if ndm == 3:
-                    # 3D elastic section
-                    ops.section('Elastic', tag, params['E'], params['A'],
-                               params['Iz'], params['Iy'], params['G'], params['J'])
+
+        if rebuild_structure or not self._ops_initialized:
+            ops.wipe()
+            ops.model('basic', '-ndm', ndm, '-ndf', ndf)
+
+            for node in self.nodes.values():
+                if ndm == 2:
+                    ops.node(node.tag, node.x, node.z)
                 else:
-                    # 2D elastic section
-                    ops.section('Elastic', tag, params['E'], params['A'], params['Iz'])
-            elif sec_type == 'PlateFiber':
-                # PlateFiberSection for ShellMITC4 elements
-                ops.section('PlateFiber', tag, params['matTag'], params['h'])
-            elif sec_type == 'ElasticMembranePlateSection':
-                # ElasticMembranePlateSection for slab shell elements
-                ops.section('ElasticMembranePlateSection', tag,
-                           params['E'], params['nu'], params['h'], params['rho'])
-        
-        # Create elements
-        for elem in self.elements.values():
-            if elem.element_type in [ElementType.ELASTIC_BEAM, ElementType.SECONDARY_BEAM]:
-                # Elastic beam-column element (includes secondary beams)
-                if elem.section_tag is None:
-                    raise ValueError(f"Element {elem.tag} missing section_tag")
-                if elem.section_tag not in self.sections:
-                    raise ValueError(
-                        f"Element {elem.tag} references unknown section {elem.section_tag}"
-                    )
+                    ops.node(node.tag, node.x, node.y, node.z)
 
-                section = self.sections[elem.section_tag]
-                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
+                if any(r == 1 for r in node.restraints):
+                    ops.fix(node.tag, *node.restraints)
 
-                if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['G'],
-                        section['J'],
-                        section['Iy'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
+            for tag, params in self.materials.items():
+                mat_type = params['material_type']
+                if mat_type == 'Concrete01':
+                    ops.uniaxialMaterial('Concrete01', tag,
+                                        params['fpc'], params['epsc0'],
+                                        params['fpcu'], params['epsU'])
+                elif mat_type == 'Steel01':
+                    ops.uniaxialMaterial('Steel01', tag,
+                                        params['fy'], params['E0'], params['b'])
+                elif mat_type == 'ElasticIsotropic':
+                    ops.nDMaterial('ElasticIsotropic', tag,
+                                  params['E'], params['nu'], params['rho'])
+
+            for tag, params in self.sections.items():
+                sec_type = params['section_type']
+                if sec_type == 'ElasticBeamSection':
+                    if ndm == 3:
+                        ops.section('Elastic', tag, params['E'], params['A'],
+                                   params['Iz'], params['Iy'], params['G'], params['J'])
+                    else:
+                        ops.section('Elastic', tag, params['E'], params['A'], params['Iz'])
+                elif sec_type == 'PlateFiber':
+                    ops.section('PlateFiber', tag, params['matTag'], params['h'])
+                elif sec_type == 'ElasticMembranePlateSection':
+                    ops.section('ElasticMembranePlateSection', tag,
+                               params['E'], params['nu'], params['h'], params['rho'])
+
+            for elem in self.elements.values():
+                if elem.element_type in [ElementType.ELASTIC_BEAM, ElementType.SECONDARY_BEAM]:
+                    if elem.section_tag is None:
+                        raise ValueError(f"Element {elem.tag} missing section_tag")
+                    if elem.section_tag not in self.sections:
+                        raise ValueError(
+                            f"Element {elem.tag} references unknown section {elem.section_tag}"
+                        )
+
+                    section = self.sections[elem.section_tag]
+                    geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                    vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
+
+                    if ndm == 3:
+                        ops.geomTransf('Linear', geom_transf_tag, *vecxz)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['G'],
+                            section['J'],
+                            section['Iy'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                    else:
+                        ops.geomTransf('Linear', geom_transf_tag)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                elif elem.element_type == ElementType.BEAM_COLUMN:
+                    if elem.section_tag is None:
+                        raise ValueError(f"Element {elem.tag} missing section_tag")
+                    if elem.section_tag not in self.sections:
+                        raise ValueError(
+                            f"Element {elem.tag} references unknown section {elem.section_tag}"
+                        )
+
+                    section = self.sections[elem.section_tag]
+                    geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                    vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
+
+                    if ndm == 3:
+                        ops.geomTransf('Linear', geom_transf_tag, *vecxz)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['G'],
+                            section['J'],
+                            section['Iy'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                    else:
+                        ops.geomTransf('Linear', geom_transf_tag)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                elif elem.element_type in (ElementType.SHELL, ElementType.COUPLING_BEAM):
+                    if elem.section_tag is None:
+                        raise ValueError(f"Element {elem.tag} missing section_tag")
+                    if elem.section_tag not in self.sections:
+                        raise ValueError(
+                            f"Element {elem.tag} references unknown section {elem.section_tag}"
+                        )
+
+                    section = self.sections[elem.section_tag]
+                    geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
+                    vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
+
+                    if ndm == 3:
+                        ops.geomTransf('Linear', geom_transf_tag, *vecxz)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['G'],
+                            section['J'],
+                            section['Iy'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                    else:
+                        ops.geomTransf('Linear', geom_transf_tag)
+                        ops.element(
+                            'elasticBeamColumn',
+                            elem.tag,
+                            *elem.node_tags,
+                            section['A'],
+                            section['E'],
+                            section['Iz'],
+                            geom_transf_tag,
+                        )
+                elif elem.element_type == ElementType.SHELL_MITC4:
+                    if elem.section_tag is None:
+                        raise ValueError(f"Element {elem.tag} missing section_tag")
+                    if len(elem.node_tags) != 4:
+                        raise ValueError(
+                            f"ShellMITC4 element {elem.tag} requires exactly 4 nodes, "
+                            f"got {len(elem.node_tags)}"
+                        )
+                    if ndm != 3:
+                        raise ValueError("ShellMITC4 elements require ndm=3 (3D model)")
+                    ops.element('ShellMITC4', elem.tag, *elem.node_tags, elem.section_tag)
+                elif elem.element_type == ElementType.SHELL_DKGT:
+                    if elem.section_tag is None:
+                        raise ValueError(f"Element {elem.tag} missing section_tag")
+                    if len(elem.node_tags) != 3:
+                        raise ValueError(
+                            f"ShellDKGT element {elem.tag} requires exactly 3 nodes, "
+                            f"got {len(elem.node_tags)}"
+                        )
+                    if ndm != 3:
+                        raise ValueError("ShellDKGT elements require ndm=3 (3D model)")
+                    ops.element('ShellDKGT', elem.tag, *elem.node_tags, elem.section_tag)
                 else:
-                    ops.geomTransf('Linear', geom_transf_tag)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
-            elif elem.element_type == ElementType.BEAM_COLUMN:
-                if elem.section_tag is None:
-                    raise ValueError(f"Element {elem.tag} missing section_tag")
-                if elem.section_tag not in self.sections:
                     raise ValueError(
-                        f"Element {elem.tag} references unknown section {elem.section_tag}"
+                        f"Element type {elem.element_type.value} not supported in builder"
                     )
 
-                section = self.sections[elem.section_tag]
-                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
-
-                if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['G'],
-                        section['J'],
-                        section['Iy'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
-                else:
-                    ops.geomTransf('Linear', geom_transf_tag)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
-            elif elem.element_type in (ElementType.SHELL, ElementType.COUPLING_BEAM):
-                # SHELL and COUPLING_BEAM elements are modeled as elastic beam-column
-                # elements with equivalent section properties (for core walls and
-                # deep coupling beams in preliminary analysis)
-                if elem.section_tag is None:
-                    raise ValueError(f"Element {elem.tag} missing section_tag")
-                if elem.section_tag not in self.sections:
-                    raise ValueError(
-                        f"Element {elem.tag} references unknown section {elem.section_tag}"
+            apply_diaphragms = bool(self.diaphragms)
+            if apply_diaphragms:
+                if ndm < 3:
+                    raise ValueError("Rigid diaphragms require ndm=3 (3D model)")
+                for diaphragm in self.diaphragms:
+                    ops.rigidDiaphragm(
+                        diaphragm.perp_dirn,
+                        diaphragm.master_node,
+                        *diaphragm.slave_nodes,
                     )
 
-                section = self.sections[elem.section_tag]
-                geom_transf_tag = elem.geometry.get('geom_transf_tag', elem.tag)
-                vecxz = elem.geometry.get('vecxz', (0.0, 0.0, 1.0))
-
-                if ndm == 3:
-                    ops.geomTransf('Linear', geom_transf_tag, *vecxz)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['G'],
-                        section['J'],
-                        section['Iy'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
-                else:
-                    ops.geomTransf('Linear', geom_transf_tag)
-                    ops.element(
-                        'elasticBeamColumn',
-                        elem.tag,
-                        *elem.node_tags,
-                        section['A'],
-                        section['E'],
-                        section['Iz'],
-                        geom_transf_tag,
-                    )
-            elif elem.element_type == ElementType.SHELL_MITC4:
-                # ShellMITC4 4-node quad shell element
-                if elem.section_tag is None:
-                    raise ValueError(f"Element {elem.tag} missing section_tag")
-                if len(elem.node_tags) != 4:
-                    raise ValueError(
-                        f"ShellMITC4 element {elem.tag} requires exactly 4 nodes, "
-                        f"got {len(elem.node_tags)}"
-                    )
-                if ndm != 3:
-                    raise ValueError("ShellMITC4 elements require ndm=3 (3D model)")
-                
-                # ShellMITC4 uses section tag directly, no geomTransf needed
-                ops.element('ShellMITC4', elem.tag, *elem.node_tags, elem.section_tag)
-            else:
-                raise ValueError(
-                    f"Element type {elem.element_type.value} not supported in builder"
-                )
-
-        # OpenSees SurfaceLoad works only with brick elements (SSPbrick, brickUP).
-        # For ShellMITC4, convert pressure to equivalent nodal loads.
         surface_nodal_loads = []
-        
         for surface_load in self.surface_loads:
             shell_elem_tag = surface_load.element_tag
-            
+
             if shell_elem_tag not in self.elements:
                 raise ValueError(
                     f"SurfaceLoad references non-existent element {shell_elem_tag}"
                 )
-            
+
             shell_elem = self.elements[shell_elem_tag]
-            
-            if shell_elem.element_type != ElementType.SHELL_MITC4:
+
+            if shell_elem.element_type not in (ElementType.SHELL_MITC4, ElementType.SHELL_DKGT):
                 raise ValueError(
-                    f"SurfaceLoad can only be applied to ShellMITC4 elements, "
+                    f"SurfaceLoad can only be applied to shell elements, "
                     f"got {shell_elem.element_type}"
                 )
-            
-            if len(shell_elem.node_tags) != 4:
+
+            node_count = len(shell_elem.node_tags)
+            if node_count not in (3, 4):
                 raise ValueError(
-                    f"SurfaceLoad requires 4 nodes, element {shell_elem_tag} has "
-                    f"{len(shell_elem.node_tags)}"
+                    f"SurfaceLoad requires 3 or 4 nodes, element {shell_elem_tag} has "
+                    f"{node_count}"
                 )
-            
-            n1, n2, n3, n4 = [self.nodes[tag] for tag in shell_elem.node_tags]
-            area = 0.5 * abs((n1.x - n3.x) * (n2.y - n4.y) - (n2.x - n4.x) * (n1.y - n3.y))
+
+            shell_nodes = [self.nodes[tag] for tag in shell_elem.node_tags]
+            area = self._compute_planar_polygon_area(shell_nodes)
             total_load = surface_load.pressure * area
-            force_per_node = -total_load / 4.0
-            
+            force_per_node = -total_load / float(node_count)
+
             for node_tag in shell_elem.node_tags:
                 surface_nodal_loads.append((
                     node_tag,
@@ -581,28 +598,21 @@ class FEMModel:
                     force_per_node
                 ))
 
-        # Apply rigid diaphragms for all load patterns.
-        # Centroid master nodes (90000+) have free in-plane DOFs (Ux, Uy, Rz)
-        # that are only constrained via rigidDiaphragm.  Skipping the constraint
-        # for gravity patterns would leave those DOFs orphaned → singular matrix.
-        apply_diaphragms = bool(self.diaphragms)
-
-        if apply_diaphragms:
-            if ndm < 3:
-                raise ValueError("Rigid diaphragms require ndm=3 (3D model)")
-            for diaphragm in self.diaphragms:
-                ops.rigidDiaphragm(
-                    diaphragm.perp_dirn,
-                    diaphragm.master_node,
-                    *diaphragm.slave_nodes,
-                )
-        
-        # Apply loads grouped by pattern
         patterns = {load.load_pattern for load in self.loads}
         patterns.update({u.load_pattern for u in self.uniform_loads})
         patterns.update({s.load_pattern for s in self.surface_loads})
-        
-        # Filter patterns if active_pattern is specified
+
+        if not rebuild_structure:
+            for pattern_id in sorted(patterns):
+                try:
+                    ops.remove('loadPattern', pattern_id)
+                except Exception:
+                    pass
+                try:
+                    ops.remove('timeSeries', pattern_id)
+                except Exception:
+                    pass
+
         if active_pattern is not None:
             patterns = {p for p in patterns if p == active_pattern}
 
@@ -610,12 +620,11 @@ class FEMModel:
         total_point_loads = 0
         total_uniform_loads = 0
         total_surface_loads = 0
-        
+
         for pattern_id in sorted(patterns):
             ops.timeSeries('Linear', pattern_id)
             ops.pattern('Plain', pattern_id, pattern_id)
 
-            # Point loads
             pattern_point_loads = 0
             for load in self.loads:
                 if load.load_pattern != pattern_id:
@@ -630,7 +639,6 @@ class FEMModel:
                 ops.load(load.node_tag, *load_vector)
                 pattern_point_loads += 1
 
-            # Uniform loads
             pattern_uniform_loads = 0
             for uniform_load in self.uniform_loads:
                 if uniform_load.load_pattern != pattern_id:
@@ -646,7 +654,7 @@ class FEMModel:
                     ops.eleLoad('-ele', uniform_load.element_tag,
                                 '-type', 'beamUniform', wy, wz)
                 pattern_uniform_loads += 1
-            
+
             nodal_load_dict = {}
             for node_tag, load_pattern, force_z in surface_nodal_loads:
                 if load_pattern != pattern_id:
@@ -654,20 +662,25 @@ class FEMModel:
                 if node_tag not in nodal_load_dict:
                     nodal_load_dict[node_tag] = 0.0
                 nodal_load_dict[node_tag] += force_z
-            
+
             for node_tag, force_z in nodal_load_dict.items():
                 load_vector = [0.0, 0.0, force_z, 0.0, 0.0, 0.0]
                 ops.load(node_tag, *load_vector[:ndf])
-            
+
             pattern_surface_loads = len(nodal_load_dict)
-            _logger.debug(f"Pattern {pattern_id}: {pattern_point_loads} point loads, "
-                         f"{pattern_uniform_loads} uniform loads, {pattern_surface_loads} surface load nodes")
+            _logger.debug(
+                f"Pattern {pattern_id}: {pattern_point_loads} point loads, "
+                f"{pattern_uniform_loads} uniform loads, {pattern_surface_loads} surface load nodes"
+            )
             total_point_loads += pattern_point_loads
             total_uniform_loads += pattern_uniform_loads
             total_surface_loads += pattern_surface_loads
 
-        _logger.info(f"Total loads applied: {total_point_loads} point, {total_uniform_loads} uniform, {total_surface_loads} surface nodes")
-        
+        _logger.info(
+            f"Total loads applied: {total_point_loads} point, {total_uniform_loads} "
+            f"uniform, {total_surface_loads} surface nodes"
+        )
+
         if total_point_loads + total_uniform_loads + total_surface_loads == 0:
             _logger.warning("WARNING: No loads were applied! Check load definitions and pattern IDs.")
 
@@ -814,28 +827,34 @@ class FEMModel:
         max_aspect_ratio = 5.0
         high_aspect_ratio_shells: List[Tuple[int, float]] = []
         for elem in self.elements.values():
-            if elem.element_type == ElementType.SHELL_MITC4:
-                if len(elem.node_tags) != 4:
-                    errors.append(f"Shell element {elem.tag} has {len(elem.node_tags)} nodes (expected 4)")
-                    continue
+            if elem.element_type not in (ElementType.SHELL_MITC4, ElementType.SHELL_DKGT):
+                continue
 
-                n1 = self.nodes[elem.node_tags[0]]
-                n2 = self.nodes[elem.node_tags[1]]
-                n3 = self.nodes[elem.node_tags[2]]
-                n4 = self.nodes[elem.node_tags[3]]
+            expected_nodes = 4 if elem.element_type == ElementType.SHELL_MITC4 else 3
+            if len(elem.node_tags) != expected_nodes:
+                errors.append(
+                    f"Shell element {elem.tag} has {len(elem.node_tags)} nodes "
+                    f"(expected {expected_nodes})"
+                )
+                continue
 
-                edge1 = np.sqrt((n2.x - n1.x)**2 + (n2.y - n1.y)**2 + (n2.z - n1.z)**2)
-                edge2 = np.sqrt((n3.x - n2.x)**2 + (n3.y - n2.y)**2 + (n3.z - n2.z)**2)
-                edge3 = np.sqrt((n4.x - n3.x)**2 + (n4.y - n3.y)**2 + (n4.z - n3.z)**2)
-                edge4 = np.sqrt((n1.x - n4.x)**2 + (n1.y - n4.y)**2 + (n1.z - n4.z)**2)
+            edge_lengths: List[float] = []
+            node_tags = elem.node_tags
+            for idx, node_tag in enumerate(node_tags):
+                next_tag = node_tags[(idx + 1) % len(node_tags)]
+                n1 = self.nodes[node_tag]
+                n2 = self.nodes[next_tag]
+                edge_lengths.append(
+                    float(np.sqrt((n2.x - n1.x)**2 + (n2.y - n1.y)**2 + (n2.z - n1.z)**2))
+                )
 
-                max_edge = max(edge1, edge2, edge3, edge4)
-                min_edge = min(edge1, edge2, edge3, edge4)
+            max_edge = max(edge_lengths)
+            min_edge = min(edge_lengths)
 
-                if min_edge > 0:
-                    aspect_ratio = max_edge / min_edge
-                    if aspect_ratio > max_aspect_ratio:
-                        high_aspect_ratio_shells.append((elem.tag, aspect_ratio))
+            if min_edge > 0:
+                aspect_ratio = max_edge / min_edge
+                if aspect_ratio > max_aspect_ratio:
+                    high_aspect_ratio_shells.append((elem.tag, aspect_ratio))
 
         if high_aspect_ratio_shells:
             worst_tag, worst_ar = max(high_aspect_ratio_shells, key=lambda item: item[1])

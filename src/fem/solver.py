@@ -99,7 +99,8 @@ class FEMSolver:
     def run_linear_static_analysis(self,
                                    load_pattern: int = 1,
                                    max_iterations: int = 100,
-                                   tolerance: float = 1e-6) -> AnalysisResult:
+                                   tolerance: float = 1e-6,
+                                   include_element_forces: bool = True) -> AnalysisResult:
         """Run linear static analysis.
         
         This performs a linear static analysis on the current OpenSeesPy model.
@@ -136,7 +137,13 @@ class FEMSolver:
         try:
             ops.constraints('Transformation')
             ops.numberer('RCM')
-            ops.system('BandGeneral')
+            system_candidates = ('UmfPack', 'SparseGeneral', 'BandGeneral')
+            for system_name in system_candidates:
+                try:
+                    ops.system(system_name)
+                    break
+                except Exception:
+                    continue
             ops.test('NormDispIncr', tolerance, max_iterations)
             ops.algorithm('Linear')
             ops.integrator('LoadControl', 1.0)  # Apply full load in one step
@@ -147,7 +154,7 @@ class FEMSolver:
             
             if result_code == 0:
                 # Analysis successful - extract results
-                results = self.extract_results()
+                results = self.extract_results(include_element_forces=include_element_forces)
                 results.success = True
                 results.converged = True
                 results.message = "Analysis completed successfully"
@@ -167,7 +174,7 @@ class FEMSolver:
                 message=f"Analysis error: {str(e)}"
             )
     
-    def extract_results(self) -> AnalysisResult:
+    def extract_results(self, include_element_forces: bool = True) -> AnalysisResult:
         """Extract analysis results from OpenSeesPy model.
         
         Returns:
@@ -196,76 +203,66 @@ class FEMSolver:
             if any(abs(r) > 1e-10 for r in reaction):
                 result.node_reactions[node_tag] = list(reaction)
         
-        # Extract element forces
-        elem_tags = ops.getEleTags()
-        _logger.info(f"Extracting forces for {len(elem_tags)} elements")
-        extracted_count = 0
-        zero_force_count = 0
-        
-        for elem_tag in elem_tags:
-            try:
-                # Get element forces (returns different values for different element types)
-                forces = ops.eleForce(elem_tag)
+        if include_element_forces:
+            elem_tags = ops.getEleTags()
+            _logger.info(f"Extracting forces for {len(elem_tags)} elements")
+            extracted_count = 0
+            zero_force_count = 0
 
-                # Debug: Log first few elements to verify force values
-                if extracted_count < 5:
-                    _logger.debug(f"Element {elem_tag}: forces={forces[:6] if len(forces) >= 6 else forces}")
+            for elem_tag in elem_tags:
+                try:
+                    forces = ops.eleForce(elem_tag)
 
-                # Check if all forces are essentially zero
-                if all(abs(f) < 1e-10 for f in forces):
-                    zero_force_count += 1
+                    if extracted_count < 5:
+                        _logger.debug(f"Element {elem_tag}: forces={forces[:6] if len(forces) >= 6 else forces}")
 
-                # For 3D beam-column elements (12 components):
-                # eleForce returns GLOBAL coordinates [Fx_i, Fy_i, Fz_i, Mx_i, My_i, Mz_i, ...]
-                # eleResponse 'localForce' returns LOCAL coordinates [N_i, Vy_i, Vz_i, T_i, My_i, Mz_i, ...]
-                # We need LOCAL forces so that Vy=gravity shear, Mz=major-axis moment (ETABS convention).
+                    if all(abs(f) < 1e-10 for f in forces):
+                        zero_force_count += 1
 
-                if len(forces) == 12:  # 3D beam element
-                    try:
-                        local_forces = ops.eleResponse(elem_tag, 'localForce')
-                        if local_forces and len(local_forces) == 12:
-                            forces = local_forces
-                    except Exception:
-                        pass  # Fall back to eleForce (global) if localForce unavailable
+                    if len(forces) == 12:
+                        try:
+                            local_forces = ops.eleResponse(elem_tag, 'localForce')
+                            if local_forces and len(local_forces) == 12:
+                                forces = local_forces
+                        except Exception:
+                            pass
 
-                    result.element_forces[elem_tag] = {
-                        'N_i': forces[0],      # Axial force at i
-                        'Vy_i': forces[1],     # Shear in local y at i
-                        'Vz_i': forces[2],     # Shear in local z at i
-                        'T_i': forces[3],      # Torque at i
-                        'My_i': forces[4],     # Moment about local y at i
-                        'Mz_i': forces[5],     # Moment about local z at i (major-axis)
-                        'N_j': forces[6],      # Axial force at j
-                        'Vy_j': forces[7],     # Shear in local y at j
-                        'Vz_j': forces[8],     # Shear in local z at j
-                        'T_j': forces[9],      # Torque at j
-                        'My_j': forces[10],    # Moment about local y at j
-                        'Mz_j': forces[11],    # Moment about local z at j (major-axis)
-                    }
-                    extracted_count += 1
-                elif len(forces) == 6:  # 2D beam element
-                    result.element_forces[elem_tag] = {
-                        'N_i': forces[0],      # Axial force at i
-                        'V_i': forces[1],      # Shear at i
-                        'M_i': forces[2],      # Moment at i
-                        'N_j': forces[3],      # Axial force at j
-                        'V_j': forces[4],      # Shear at j
-                        'M_j': forces[5],      # Moment at j
-                    }
-                    extracted_count += 1
-                else:
-                    # Store raw forces for other element types
-                    result.element_forces[elem_tag] = {
-                        f'force_{i}': f for i, f in enumerate(forces)
-                    }
-                    extracted_count += 1
-            except Exception as e:
-                _logger.debug(f"Could not extract forces for element {elem_tag}: {e}")
-                pass
-        
-        _logger.info(f"Extracted forces for {len(result.element_forces)} elements out of {len(elem_tags)} total")
-        if zero_force_count > 0:
-            _logger.warning(f"WARNING: {zero_force_count} elements have all-zero forces - check load application")
+                        result.element_forces[elem_tag] = {
+                            'N_i': forces[0],
+                            'Vy_i': forces[1],
+                            'Vz_i': forces[2],
+                            'T_i': forces[3],
+                            'My_i': forces[4],
+                            'Mz_i': forces[5],
+                            'N_j': forces[6],
+                            'Vy_j': forces[7],
+                            'Vz_j': forces[8],
+                            'T_j': forces[9],
+                            'My_j': forces[10],
+                            'Mz_j': forces[11],
+                        }
+                        extracted_count += 1
+                    elif len(forces) == 6:
+                        result.element_forces[elem_tag] = {
+                            'N_i': forces[0],
+                            'V_i': forces[1],
+                            'M_i': forces[2],
+                            'N_j': forces[3],
+                            'V_j': forces[4],
+                            'M_j': forces[5],
+                        }
+                        extracted_count += 1
+                    else:
+                        result.element_forces[elem_tag] = {
+                            f'force_{i}': f for i, f in enumerate(forces)
+                        }
+                        extracted_count += 1
+                except Exception as e:
+                    _logger.debug(f"Could not extract forces for element {elem_tag}: {e}")
+
+            _logger.info(f"Extracted forces for {len(result.element_forces)} elements out of {len(elem_tags)} total")
+            if zero_force_count > 0:
+                _logger.warning(f"WARNING: {zero_force_count} elements have all-zero forces - check load application")
         
         return result
     
@@ -317,11 +314,31 @@ class FEMSolver:
         if self._ops_available:
             self.ops.wipe()
 
+    def reset_analysis_state(self) -> None:
+        if not self._ops_available:
+            return
+
+        try:
+            self.ops.wipeAnalysis()
+        except Exception:
+            pass
+
+        try:
+            self.ops.setTime(0.0)
+        except Exception:
+            pass
+
+        try:
+            self.ops.revertToStart()
+        except Exception:
+            pass
+
 
 def analyze_model(
     model,
     load_pattern: int = 1,
-    load_cases: Optional[List[str]] = None
+    load_cases: Optional[List[str]] = None,
+    include_element_forces: bool = True,
 ) -> Dict[str, AnalysisResult]:
     """Build and analyze a FEMModel for multiple load cases.
     
@@ -367,9 +384,16 @@ def analyze_model(
     
     results: Dict[str, AnalysisResult] = {}
     
-    for lc in load_cases:
+    for index, lc in enumerate(load_cases):
         # Run analysis for each load case
-        result = _run_single_load_case(model, solver, lc, load_pattern)
+        result = _run_single_load_case(
+            model,
+            solver,
+            lc,
+            load_pattern,
+            include_element_forces=include_element_forces,
+            rebuild_structure=(index == 0),
+        )
         results[lc] = result
     
     return results
@@ -391,7 +415,9 @@ def _run_single_load_case(
     model,
     solver: FEMSolver,
     load_case: str,
-    default_pattern: int = 1
+    default_pattern: int = 1,
+    include_element_forces: bool = True,
+    rebuild_structure: bool = True,
 ) -> AnalysisResult:
     """Run analysis for a single load case.
     
@@ -405,19 +431,24 @@ def _run_single_load_case(
         AnalysisResult for this load case
     """
     try:
-        # Wipe previous model state and rebuild
-        solver.reset_model()
-        
         if load_case == "combined":
             # Build with all loads
-            model.build_openseespy_model()
+            model.build_openseespy_model(rebuild_structure=rebuild_structure)
         else:
             # Build with specific load pattern only
             pattern_id = LOAD_CASE_PATTERN_MAP.get(load_case, default_pattern)
-            model.build_openseespy_model(active_pattern=pattern_id)
+            model.build_openseespy_model(
+                active_pattern=pattern_id,
+                rebuild_structure=rebuild_structure,
+            )
+
+        solver.reset_analysis_state()
         
         # Run analysis
-        result = solver.run_linear_static_analysis(load_pattern=1)
+        result = solver.run_linear_static_analysis(
+            load_pattern=1,
+            include_element_forces=include_element_forces,
+        )
         result.message = f"{load_case}: {result.message}"
         return result
         

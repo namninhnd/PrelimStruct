@@ -94,7 +94,12 @@ def create_test_building(num_floors: int, include_wind: bool = False) -> Project
     return project
 
 
-def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[float, float, bool, str]:
+def benchmark_analysis(
+    num_floors: int,
+    include_wind: bool = False,
+    shell_mesh_type: str = "quad",
+    shell_mesh_density: str = "medium",
+) -> Tuple[float, float, bool, str]:
     """Benchmark FEM analysis for a building.
     
     Args:
@@ -118,6 +123,8 @@ def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[flo
         options = ModelBuilderOptions(
             apply_wind_loads=include_wind,
             apply_gravity_loads=True,
+            shell_mesh_type=shell_mesh_type,
+            shell_mesh_density=shell_mesh_density,
         )
         model = build_fem_model(project, options=options)
         
@@ -126,7 +133,11 @@ def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[flo
         if include_wind:
             run_load_cases.extend(["Wx", "Wy", "Wtz"])
 
-        results_dict = analyze_model(model, load_cases=run_load_cases)
+        results_dict = analyze_model(
+            model,
+            load_cases=run_load_cases,
+            include_element_forces=False,
+        )
         if include_wind:
             results_dict = with_synthesized_w1_w24_cases(results_dict)
 
@@ -163,7 +174,7 @@ def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[flo
         print(f"    - Peak memory: {peak_memory_mb:.2f} MB")
         print(f"    - Status: {message}")
         print(f"    - Nodes: {len(first_case_result.node_displacements)}")
-        print(f"    - Elements: {len(first_case_result.element_forces)}")
+        print(f"    - Elements: {len(model.elements)}")
         
         return wall_time, peak_memory_mb, success, message
         
@@ -181,6 +192,8 @@ def benchmark_analysis(num_floors: int, include_wind: bool = False) -> Tuple[flo
 def run_benchmarks(
     floor_counts: list[int],
     include_wind: bool = False,
+    shell_mesh_type: str = "quad",
+    shell_mesh_density: str = "medium",
 ) -> Dict[int, Dict[str, Any]]:
     """Run benchmarks for multiple building sizes.
     
@@ -193,7 +206,12 @@ def run_benchmarks(
     results = {}
     
     for num_floors in floor_counts:
-        wall_time, memory_mb, success, message = benchmark_analysis(num_floors, include_wind=include_wind)
+        wall_time, memory_mb, success, message = benchmark_analysis(
+            num_floors,
+            include_wind=include_wind,
+            shell_mesh_type=shell_mesh_type,
+            shell_mesh_density=shell_mesh_density,
+        )
         
         results[num_floors] = {
             'wall_time_s': wall_time,
@@ -275,6 +293,18 @@ def main():
         action='store_true',
         help='Include base wind load cases (Wx/Wy/Wtz) and W1-W24 synthesis check',
     )
+    parser.add_argument(
+        '--shell-mesh-type',
+        choices=['quad', 'tri'],
+        default='quad',
+        help='Shell mesh type for slab/core shells (default: quad)',
+    )
+    parser.add_argument(
+        '--shell-mesh-density',
+        choices=['coarse', 'medium', 'fine'],
+        default='medium',
+        help='Shell mesh density (default: medium)',
+    )
     
     args = parser.parse_args()
     
@@ -290,10 +320,16 @@ def main():
     print("PrelimStruct v3.5 Performance Benchmark")
     print(f"Testing: {floor_counts} floors")
     print(f"Mode: {'gravity+wind' if args.wind else 'gravity only'}")
+    print(f"Shell mesh: {args.shell_mesh_type}/{args.shell_mesh_density}")
     print(f"Target: <{args.timeout}s for 30-floor building\n")
     
     # Run benchmarks
-    results = run_benchmarks(floor_counts, include_wind=args.wind)
+    results = run_benchmarks(
+        floor_counts,
+        include_wind=args.wind,
+        shell_mesh_type=args.shell_mesh_type,
+        shell_mesh_density=args.shell_mesh_density,
+    )
     
     # Print summary
     print_summary(results, timeout=args.timeout)

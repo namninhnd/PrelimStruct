@@ -78,6 +78,8 @@ def test_analyze_model_multiple_load_cases(ops_monkeypatch) -> None:
     assert len(results) == 2
     assert "DL" in results
     assert "SDL" in results
+    assert ops_monkeypatch.wipe_calls == 1
+    assert any(item[0] == "loadPattern" for item in ops_monkeypatch.removed_patterns)
     for lc_name, result in results.items():
         assert isinstance(result, AnalysisResult)
         assert lc_name in result.message
@@ -114,9 +116,36 @@ def test_analyze_model_all_component_load_cases(ops_monkeypatch) -> None:
     results = analyze_model(model, load_cases=all_load_cases)
     
     assert len(results) == 6
+    assert ops_monkeypatch.wipe_calls == 1
+    assert ops_monkeypatch.analysis_wiped
     for lc in all_load_cases:
         assert lc in results
         assert results[lc].success
+
+
+def test_analyze_model_can_skip_element_forces(ops_monkeypatch) -> None:
+    reset_material_tags()
+    model = create_simple_frame_model(
+        bay_width=4.0,
+        bay_height=3.0,
+        n_bays=1,
+        n_stories=1,
+        concrete_grade=ConcreteGrade.C30,
+        beam_width=300,
+        beam_height=500,
+        column_width=400,
+        column_height=400,
+    )
+    model.add_load(Load(node_tag=4, load_values=[0, 0, -10000, 0, 0, 0], load_pattern=1))
+
+    ops_monkeypatch.displacements = {1: [0] * 6, 2: [0] * 6, 3: [0] * 6, 4: [0] * 6}
+    ops_monkeypatch._reaction_data = {1: [0, 0, 5000, 0, 0, 0], 2: [0, 0, 5000, 0, 0, 0]}
+    ops_monkeypatch.element_forces = {1: [1.0] * 12, 2: [2.0] * 12, 3: [3.0] * 12}
+
+    results = analyze_model(model, load_cases=["DL"], include_element_forces=False)
+
+    assert results["DL"].success
+    assert results["DL"].element_forces == {}
 
 
 def test_load_case_pattern_map() -> None:
