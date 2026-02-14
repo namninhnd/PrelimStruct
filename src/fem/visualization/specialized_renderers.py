@@ -37,7 +37,7 @@ def render_slab_mesh(
     Returns:
         Plotly trace for the slab panel, or None if not at elevation
     """
-    if not PLOTLY_AVAILABLE or len(element.node_tags) != 4:
+    if not PLOTLY_AVAILABLE or len(element.node_tags) < 3:
         return None
 
     # Get nodes for this element
@@ -49,7 +49,7 @@ def render_slab_mesh(
         elem_nodes.append(node)
 
     # Check if element is at target elevation
-    avg_z = sum(n.z for n in elem_nodes) / 4
+    avg_z = sum(n.z for n in elem_nodes) / float(len(elem_nodes))
     if abs(avg_z - target_z) >= tolerance:
         return None
 
@@ -87,7 +87,7 @@ def render_slab_grid_lines(
     Returns:
         Plotly trace for grid lines, or None if not at elevation
     """
-    if not PLOTLY_AVAILABLE or len(element.node_tags) != 4:
+    if not PLOTLY_AVAILABLE or len(element.node_tags) < 3:
         return None
 
     # Get nodes for this element
@@ -99,19 +99,16 @@ def render_slab_grid_lines(
         elem_nodes.append(node)
 
     # Check if element is at target elevation
-    avg_z = sum(n.z for n in elem_nodes) / 4
+    avg_z = sum(n.z for n in elem_nodes) / float(len(elem_nodes))
     if abs(avg_z - target_z) >= tolerance:
         return None
 
-    # Create grid lines (diagonals)
-    x_coords = [
-        elem_nodes[0].x, elem_nodes[2].x, None,
-        elem_nodes[1].x, elem_nodes[3].x, None
-    ]
-    y_coords = [
-        elem_nodes[0].y, elem_nodes[2].y, None,
-        elem_nodes[1].y, elem_nodes[3].y, None
-    ]
+    x_coords: List[Optional[float]] = []
+    y_coords: List[Optional[float]] = []
+    for idx, node in enumerate(elem_nodes):
+        nxt = elem_nodes[(idx + 1) % len(elem_nodes)]
+        x_coords.extend([node.x, nxt.x, None])
+        y_coords.extend([node.y, nxt.y, None])
 
     return go.Scatter(
         x=x_coords,

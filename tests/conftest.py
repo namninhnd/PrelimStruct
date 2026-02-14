@@ -46,11 +46,28 @@ class PatchedOps:
         self.integrator_args: List[Tuple[Any, ...]] = []
         self.analysis_args: List[Tuple[Any, ...]] = []
         self.wiped = False
+        self.wipe_calls = 0
+        self.removed_patterns: List[Tuple[str, int]] = []
+        self.analysis_wiped = False
+        self.current_time = 0.0
         self.reactions_called = False
 
     # Model level commands
     def wipe(self) -> None:
         self.wiped = True
+        self.wipe_calls += 1
+
+    def wipeAnalysis(self) -> None:
+        self.analysis_wiped = True
+
+    def setTime(self, time_value: float) -> None:
+        self.current_time = float(time_value)
+
+    def revertToStart(self) -> None:
+        self.current_time = 0.0
+
+    def remove(self, object_type: str, tag: int) -> None:
+        self.removed_patterns.append((object_type, int(tag)))
 
     def model(self, *args: Any) -> None:
         self.analysis_args.append(("model", args))

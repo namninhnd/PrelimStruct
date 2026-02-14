@@ -101,8 +101,7 @@ def classify_elements(model: ModelLike) -> Dict[str, List[int]]:
         if len(elem.node_tags) < 2:
             continue
 
-        # Shell elements (4-node quads)
-        if elem.element_type in (ElementType.SHELL, ElementType.SHELL_MITC4):
+        if elem.element_type in (ElementType.SHELL, ElementType.SHELL_MITC4, ElementType.SHELL_DKGT):
             if elem.section_tag == 5:
                 classification["slabs"].append(elem.tag)
             else:
@@ -323,17 +322,16 @@ def render_core_walls(
 
     for elem_tag in element_tags:
         elem = model.elements.get(elem_tag)
-        if elem is None or len(elem.node_tags) != 4:
+        if elem is None or len(elem.node_tags) < 3:
             continue
 
         nodes = [model.nodes.get(tag) for tag in elem.node_tags]
         if None in nodes:
             continue
 
-        # Check edges that lie on the target elevation
-        for i in range(4):
+        for i in range(len(nodes)):
             n1 = nodes[i]
-            n2 = nodes[(i + 1) % 4]
+            n2 = nodes[(i + 1) % len(nodes)]
 
             if (abs(n1.z - target_z) < tolerance and
                 abs(n2.z - target_z) < tolerance):

@@ -219,6 +219,8 @@ class ModelBuilderOptions:
     edge_clearance_m: float = 0.5
     slab_thickness: float = 0.15
     slab_elements_per_bay: int = 1  # Mesh density multiplier (higher = finer)
+    shell_mesh_type: str = "quad"
+    shell_mesh_density: str = "medium"
     # Column omission near core walls
     omit_columns_near_core: bool = True
     column_omission_threshold: float = 0.5  # meters (400mm wall + 500mm column + 100mm clearance)
@@ -228,6 +230,80 @@ class ModelBuilderOptions:
 # Floor-based node numbering: Level N uses N*FLOOR_NODE_BASE as base tag
 # Ground level (0) uses tags 1-999, Level 1 uses 1001-1999, etc.
 FLOOR_NODE_BASE = 1000
+SHELL_TRI_TAG_OFFSET = 300000
+
+
+def _normalize_shell_mesh_type(shell_mesh_type: str) -> str:
+    mesh_type = shell_mesh_type.strip().lower()
+    if mesh_type not in {"quad", "tri"}:
+        raise ValueError(f"Unsupported shell_mesh_type '{shell_mesh_type}'. Use 'quad' or 'tri'.")
+    return mesh_type
+
+
+def _normalize_shell_mesh_density(shell_mesh_density: str) -> str:
+    density = shell_mesh_density.strip().lower()
+    if density not in {"coarse", "medium", "fine"}:
+        raise ValueError(
+            f"Unsupported shell_mesh_density '{shell_mesh_density}'. "
+            "Use 'coarse', 'medium', or 'fine'."
+        )
+    return density
+
+
+def _scale_shell_mesh_divisions(base_divisions: int, shell_mesh_density: str) -> int:
+    density = _normalize_shell_mesh_density(shell_mesh_density)
+    if density == "coarse":
+        return max(1, math.ceil(base_divisions * 0.5))
+    if density == "fine":
+        return max(1, base_divisions * 2)
+    return max(1, base_divisions)
+
+
+def _wall_mesh_divisions_for_density(shell_mesh_density: str) -> Tuple[int, int]:
+    density = _normalize_shell_mesh_density(shell_mesh_density)
+    if density == "coarse":
+        return 1, 1
+    if density == "fine":
+        return 4, 3
+    return 2, 2
+
+
+def _shell_elements_from_quad(
+    *,
+    tag: int,
+    node_tags: Tuple[int, int, int, int],
+    material_tag: int,
+    section_tag: int,
+    shell_mesh_type: str,
+) -> List[Element]:
+    if shell_mesh_type == "quad":
+        return [
+            Element(
+                tag=tag,
+                element_type=ElementType.SHELL_MITC4,
+                node_tags=list(node_tags),
+                material_tag=material_tag,
+                section_tag=section_tag,
+            )
+        ]
+
+    n1, n2, n3, n4 = node_tags
+    return [
+        Element(
+            tag=tag,
+            element_type=ElementType.SHELL_DKGT,
+            node_tags=[n1, n2, n3],
+            material_tag=material_tag,
+            section_tag=section_tag,
+        ),
+        Element(
+            tag=tag + SHELL_TRI_TAG_OFFSET,
+            element_type=ElementType.SHELL_DKGT,
+            node_tags=[n1, n3, n4],
+            material_tag=material_tag,
+            section_tag=section_tag,
+        ),
+    ]
 
 
 @dataclass(frozen=True)
@@ -1419,6 +1495,8 @@ def build_fem_model(project: ProjectData,
                     options: Optional[ModelBuilderOptions] = None) -> FEMModel:
     """Build FEMModel from ProjectData geometry, results, and loads."""
     options = options or ModelBuilderOptions()
+    shell_mesh_type = _normalize_shell_mesh_type(options.shell_mesh_type)
+    shell_mesh_density = _normalize_shell_mesh_density(options.shell_mesh_density)
     geometry = project.geometry
 
     model = FEMModel()
@@ -1990,14 +2068,15 @@ def build_fem_model(project: ProjectData,
         wall_nodes_by_floor: Dict[int, Set[int]] = {}
         
         # Generate mesh for each wall panel
+        wall_elements_along_length, wall_elements_per_story = _wall_mesh_divisions_for_density(shell_mesh_density)
         for wall in wall_panels:
             mesh_result = wall_mesh_generator.generate_mesh(
                 wall=wall,
                 num_floors=geometry.floors,
                 story_height=geometry.story_height,
                 section_tag=wall_section_tag,
-                elements_along_length=2,   # 2 elements along wall length
-                elements_per_story=2,       # 2 elements per story height
+                elements_along_length=wall_elements_along_length,
+                elements_per_story=wall_elements_per_story,
                 registry=registry,
             )
             
@@ -2010,15 +2089,14 @@ def build_fem_model(project: ProjectData,
             
             # Add wall shell elements
             for shell_quad in mesh_result.elements:
-                model.add_element(
-                    Element(
-                        tag=shell_quad.tag,
-                        element_type=ElementType.SHELL_MITC4,
-                        node_tags=list(shell_quad.node_tags),
-                        material_tag=wall_material_tag,
-                        section_tag=shell_quad.section_tag,
-                    )
-                )
+                for shell_element in _shell_elements_from_quad(
+                    tag=shell_quad.tag,
+                    node_tags=shell_quad.node_tags,
+                    material_tag=wall_material_tag,
+                    section_tag=shell_quad.section_tag,
+                    shell_mesh_type=shell_mesh_type,
+                ):
+                    model.add_element(shell_element)
             
         logger.info(
             f"Generated shell mesh for {len(wall_panels)} wall panels using ShellMITC4 elements"
@@ -2280,6 +2358,9 @@ def build_fem_model(project: ProjectData,
                         elements_along_x *= refinement
                         elements_along_y *= refinement
 
+                        elements_along_x = _scale_shell_mesh_divisions(elements_along_x, shell_mesh_density)
+                        elements_along_y = _scale_shell_mesh_divisions(elements_along_y, shell_mesh_density)
+
                         mesh_result = slab_generator.generate_mesh(
                             slab=slab,
                             floor_level=level,
@@ -2310,16 +2391,15 @@ def build_fem_model(project: ProjectData,
                         
                         # Add slab shell elements and collect tags
                         for elem in mesh_result.elements:
-                            model.add_element(
-                                Element(
-                                    tag=elem.tag,
-                                    element_type=ElementType.SHELL_MITC4,
-                                    node_tags=list(elem.node_tags),
-                                    material_tag=beam_material_tag,
-                                    section_tag=elem.section_tag,
-                                )
-                            )
-                            slab_element_tags.append(elem.tag)
+                            for shell_element in _shell_elements_from_quad(
+                                tag=elem.tag,
+                                node_tags=elem.node_tags,
+                                material_tag=beam_material_tag,
+                                section_tag=elem.section_tag,
+                                shell_mesh_type=shell_mesh_type,
+                            ):
+                                model.add_element(shell_element)
+                                slab_element_tags.append(shell_element.tag)
                     
         
         # Emit one summarized slab mesh warning (if any high-AR panels were generated)

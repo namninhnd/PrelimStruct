@@ -14,12 +14,9 @@ References:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, List, Tuple, Dict, Optional
+from typing import Any, List, Tuple, Dict, Optional
 import math
 import logging
-
-if TYPE_CHECKING:
-    from src.fem.model_builder import NodeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +134,7 @@ class WallMeshGenerator:
         section_tag: int,
         elements_along_length: int = 1,
         elements_per_story: int = 2,
-        registry: Optional[NodeRegistry] = None,
+        registry: Optional[Any] = None,
     ) -> WallMeshResult:
         """Generate mesh for a wall panel.
         

@@ -6,7 +6,7 @@ providing a clean API for creating slab mesh with openings and surface loads.
 """
 
 import logging
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, cast
 
 from src.core.data_models import CoreWallGeometry, GeometryInput, ProjectData
 from src.core.constants import CONCRETE_DENSITY
@@ -17,6 +17,33 @@ if TYPE_CHECKING:
 from src.fem.slab_element import SlabMeshGenerator, SlabPanel, SlabOpening
 
 logger = logging.getLogger(__name__)
+SHELL_TRI_TAG_OFFSET = 300000
+
+
+def _normalize_shell_mesh_density(shell_mesh_density: str) -> str:
+    density = shell_mesh_density.strip().lower()
+    if density not in {"coarse", "medium", "fine"}:
+        raise ValueError(
+            f"Unsupported shell_mesh_density '{shell_mesh_density}'. "
+            "Use 'coarse', 'medium', or 'fine'."
+        )
+    return density
+
+
+def _scale_shell_mesh_divisions(base_divisions: int, shell_mesh_density: str) -> int:
+    density = _normalize_shell_mesh_density(shell_mesh_density)
+    if density == "coarse":
+        return max(1, (base_divisions + 1) // 2)
+    if density == "fine":
+        return max(1, base_divisions * 2)
+    return max(1, base_divisions)
+
+
+def _normalize_shell_mesh_type(shell_mesh_type: str) -> str:
+    mesh_type = shell_mesh_type.strip().lower()
+    if mesh_type not in {"quad", "tri"}:
+        raise ValueError(f"Unsupported shell_mesh_type '{shell_mesh_type}'. Use 'quad' or 'tri'.")
+    return mesh_type
 
 
 class SlabBuilder:
@@ -104,6 +131,7 @@ class SlabBuilder:
             base_node_tag=60000,
             base_element_tag=60000,
         )
+        shell_mesh_type = _normalize_shell_mesh_type(self.options.shell_mesh_type)
 
         # Create slab panels for each bay on each floor
         for level in range(1, self.geometry.floors + 1):
@@ -120,11 +148,15 @@ class SlabBuilder:
                     )
                     
                     for sp in sub_panels:
-                        sp_origin_x, sp_origin_y = sp["origin"]
-                        sp_width_x, sp_width_y = sp["dims"]
+                        origin = cast(Tuple[float, float], sp["origin"])
+                        dims = cast(Tuple[float, float], sp["dims"])
+                        suffix = str(sp["suffix"])
+
+                        sp_origin_x, sp_origin_y = origin
+                        sp_width_x, sp_width_y = dims
                         
                         slab = SlabPanel(
-                            slab_id=f"S{level}_{ix}_{iy}{sp['suffix']}",
+                            slab_id=f"S{level}_{ix}_{iy}{suffix}",
                             origin=(sp_origin_x, sp_origin_y),
                             width_x=sp_width_x,
                             width_y=sp_width_y,
@@ -137,8 +169,14 @@ class SlabBuilder:
                             slab=slab,
                             floor_level=level,
                             section_tag=self.slab_section_tag,
-                            elements_along_x=max(1, int(self.options.slab_elements_per_bay * (sp_width_x / self.geometry.bay_x))),
-                            elements_along_y=max(1, int(self.options.slab_elements_per_bay * (sp_width_y / self.geometry.bay_y))),
+                            elements_along_x=_scale_shell_mesh_divisions(
+                                max(1, int(self.options.slab_elements_per_bay * (sp_width_x / self.geometry.bay_x))),
+                                self.options.shell_mesh_density,
+                            ),
+                            elements_along_y=_scale_shell_mesh_divisions(
+                                max(1, int(self.options.slab_elements_per_bay * (sp_width_y / self.geometry.bay_y))),
+                                self.options.shell_mesh_density,
+                            ),
                             existing_nodes=existing_nodes,
                             openings=slab_openings
                         )
@@ -158,16 +196,38 @@ class SlabBuilder:
                         
                         # Add slab shell elements and collect tags
                         for elem in mesh_result.elements:
-                            self.model.add_element(
-                                Element(
-                                    tag=elem.tag,
-                                    element_type=ElementType.SHELL_MITC4,
-                                    node_tags=list(elem.node_tags),
-                                    material_tag=beam_material_tag,
-                                    section_tag=elem.section_tag,
-                                )
-                            )
-                            self.slab_element_tags.append(elem.tag)
+                            if shell_mesh_type == "quad":
+                                shell_elements = [
+                                    Element(
+                                        tag=elem.tag,
+                                        element_type=ElementType.SHELL_MITC4,
+                                        node_tags=list(elem.node_tags),
+                                        material_tag=beam_material_tag,
+                                        section_tag=elem.section_tag,
+                                    )
+                                ]
+                            else:
+                                n1, n2, n3, n4 = elem.node_tags
+                                shell_elements = [
+                                    Element(
+                                        tag=elem.tag,
+                                        element_type=ElementType.SHELL_DKGT,
+                                        node_tags=[n1, n2, n3],
+                                        material_tag=beam_material_tag,
+                                        section_tag=elem.section_tag,
+                                    ),
+                                    Element(
+                                        tag=elem.tag + SHELL_TRI_TAG_OFFSET,
+                                        element_type=ElementType.SHELL_DKGT,
+                                        node_tags=[n1, n3, n4],
+                                        material_tag=beam_material_tag,
+                                        section_tag=elem.section_tag,
+                                    ),
+                                ]
+
+                            for shell_element in shell_elements:
+                                self.model.add_element(shell_element)
+                                self.slab_element_tags.append(shell_element.tag)
         
         return self.slab_element_tags
 
@@ -177,7 +237,7 @@ class SlabBuilder:
         base_origin_y: float,
         ix: int,
         iy: int,
-    ) -> List[Dict]:
+    ) -> List[Dict[str, Any]]:
         """Create sub-panels for a bay based on secondary beam configuration.
         
         Args:
@@ -189,7 +249,7 @@ class SlabBuilder:
         Returns:
             List of sub-panel dictionaries with 'suffix', 'origin', and 'dims'
         """
-        sub_panels = []
+        sub_panels: List[Dict[str, Any]] = []
         
         if self.options.num_secondary_beams > 0:
             if self.options.secondary_beam_direction == "Y":
@@ -242,7 +302,7 @@ class SlabBuilder:
                 SurfaceLoad(
                     element_tag=elem_tag,
                     pressure=design_load * 1000.0,  # Convert kPa to N/m²
-                    load_pattern=self.options.gravity_load_pattern,
+                    load_pattern=self.options.dl_load_pattern,
                 )
             )
         

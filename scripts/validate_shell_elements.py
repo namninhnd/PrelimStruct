@@ -178,7 +178,7 @@ class ETABSValidationRunner:
                 "SLS_CHARACTERISTIC",
             ],
             "model_info": {
-                "element_type": "Shell-Thin (ShellMITC4 equivalent)",
+                "element_type": "Shell-Thin (ShellMITC4 / ShellDKGT equivalent)",
                 "mesh_size_m": 1.0,
                 "total_nodes": None,
                 "total_elements": None,

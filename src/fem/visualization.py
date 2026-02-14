@@ -140,7 +140,7 @@ def _hide_shell_elements_for_opsvis() -> List[int]:
     for tag in elem_tags:
         try:
             nodes = ops.eleNodes(tag)
-            if len(nodes) == 4:  # Shell elements (ShellMITC4)
+            if len(nodes) in (3, 4):
                 ops.remove('element', tag)
                 removed_tags.append(tag)
         except Exception:
@@ -714,8 +714,7 @@ def _classify_elements(model: ModelLike) -> Dict[str, List[int]]:
         if len(elem.node_tags) < 2:
             continue
 
-        # Shell elements (4-node quads) - classify as slabs or core walls
-        if elem.element_type in (ElementType.SHELL, ElementType.SHELL_MITC4):
+        if elem.element_type in (ElementType.SHELL, ElementType.SHELL_MITC4, ElementType.SHELL_DKGT):
             # Section tag 5 = slab, section tag 4 = core wall
             if elem.section_tag == 5:
                 classification["slabs"].append(elem.tag)
@@ -776,7 +775,7 @@ def _get_floor_elevations(model: ModelLike, tolerance: float = 0.01) -> List[flo
     # Wall shells span between floors (different z-values across nodes) and
     # must be excluded to avoid intermediate/duplicate floor entries.
     for elem in model.elements.values():
-        if elem.element_type in (ElementType.SHELL_MITC4, ElementType.SHELL):
+        if elem.element_type in (ElementType.SHELL_MITC4, ElementType.SHELL_DKGT, ElementType.SHELL):
             node_zs = [model.nodes[n].z for n in elem.node_tags if n in model.nodes]
             if node_zs:
                 z_spread = max(node_zs) - min(node_zs)
@@ -1822,16 +1821,15 @@ def create_plan_view(model: ModelLike,
         
         for elem_tag in classification["core_walls"]:
             elem = model.elements[elem_tag]
-            if len(elem.node_tags) != 4:
+            if len(elem.node_tags) < 3:
                 continue
                 
             nodes = [model.nodes[tag] for tag in elem.node_tags]
             
-            # Check edges (0-1, 1-2, 2-3, 3-0)
             # If an edge lies entirely on the target_z plane, draw it
-            for i in range(4):
+            for i in range(len(nodes)):
                 n1 = nodes[i]
-                n2 = nodes[(i + 1) % 4]
+                n2 = nodes[(i + 1) % len(nodes)]
                 
                 if (abs(n1.z - target_z) < tolerance and 
                     abs(n2.z - target_z) < tolerance):
@@ -2237,8 +2235,7 @@ def create_plan_view(model: ModelLike,
         for elem_tag in classification["slabs"]:
             elem = model.elements[elem_tag]
             
-            # Slab quads have 4 nodes
-            if len(elem.node_tags) != 4:
+            if len(elem.node_tags) < 3:
                 continue
             
             # Get all 4 nodes
@@ -2315,9 +2312,9 @@ def create_plan_view(model: ModelLike,
             
             # Add edges to mesh grid batch
             if config.show_slab_mesh_grid:
-                for i in range(4):
-                    mesh_x.extend([nodes[i].x, nodes[(i + 1) % 4].x, None])
-                    mesh_y.extend([nodes[i].y, nodes[(i + 1) % 4].y, None])
+                for i in range(len(nodes)):
+                    mesh_x.extend([nodes[i].x, nodes[(i + 1) % len(nodes)].x, None])
+                    mesh_y.extend([nodes[i].y, nodes[(i + 1) % len(nodes)].y, None])
         
         # Draw mesh grid lines (batched for performance)
         if config.show_slab_mesh_grid and mesh_x:
@@ -2866,11 +2863,11 @@ def create_elevation_view(model: ModelLike,
 
         for elem_tag in classification["core_walls"]:
             elem = model.elements[elem_tag]
-            if len(elem.node_tags) != 4:
+            if len(elem.node_tags) < 3:
                 continue
 
             nodes = [model.nodes[tag] for tag in elem.node_tags if tag in model.nodes]
-            if len(nodes) != 4:
+            if len(nodes) < 3:
                 continue
 
             if gridline_coord is not None:
@@ -3594,12 +3591,10 @@ def create_3d_view(model: ModelLike,
 
     for elem_tag in (classification["core_walls"] if config.show_walls else []):
         elem = model.elements[elem_tag]
-        if len(elem.node_tags) != 4:
+        if len(elem.node_tags) < 3:
             continue
             
         nodes = [model.nodes[tag] for tag in elem.node_tags]
-        # Draw quad outline (0-1-2-3-0)
-        # We can just draw the loop for each element
         
         # Collect coordinates
         wx = [n.x for n in nodes] + [nodes[0].x] + [None]
@@ -3641,8 +3636,11 @@ def create_3d_view(model: ModelLike,
 
             vertex_ids = list(wall_vertices.keys())
             v_indices = [vertex_ids.index(ntag) for ntag in elem.node_tags]
-            wall_faces.append((v_indices[0], v_indices[1], v_indices[2]))
-            wall_faces.append((v_indices[0], v_indices[2], v_indices[3]))
+            if len(v_indices) == 3:
+                wall_faces.append((v_indices[0], v_indices[1], v_indices[2]))
+            elif len(v_indices) == 4:
+                wall_faces.append((v_indices[0], v_indices[1], v_indices[2]))
+                wall_faces.append((v_indices[0], v_indices[2], v_indices[3]))
 
     if config.show_walls and wall_faces and not use_utilization:
         wall_vertex_list = list(wall_vertices.values())
@@ -3824,7 +3822,6 @@ def create_3d_view(model: ModelLike,
             name='Coupling Beams',
         ))
 
-    # Draw slab elements (SHELL_MITC4 quads as 3D mesh surfaces)
     if config.show_slabs and classification["slabs"]:
         # Collect all unique vertices and build face index list
         vertices: Dict[int, Tuple[float, float, float]] = {}
@@ -3833,8 +3830,7 @@ def create_3d_view(model: ModelLike,
         for elem_tag in classification["slabs"]:
             elem = model.elements[elem_tag]
             
-            # Slab quads have 4 nodes
-            if len(elem.node_tags) != 4:
+            if len(elem.node_tags) < 3:
                 continue
             
             # Get quad vertices
@@ -3844,14 +3840,12 @@ def create_3d_view(model: ModelLike,
                     node = model.nodes[ntag]
                     vertices[ntag] = get_coords(node)
             
-            # Create vertex index list for this quad
             v_indices = [list(vertices.keys()).index(ntag) for ntag in node_tags]
-            
-            # Triangulate quad: split into two triangles
-            # Triangle 1: v0, v1, v2
-            faces.append((v_indices[0], v_indices[1], v_indices[2]))
-            # Triangle 2: v0, v2, v3
-            faces.append((v_indices[0], v_indices[2], v_indices[3]))
+            if len(v_indices) == 3:
+                faces.append((v_indices[0], v_indices[1], v_indices[2]))
+            elif len(v_indices) == 4:
+                faces.append((v_indices[0], v_indices[1], v_indices[2]))
+                faces.append((v_indices[0], v_indices[2], v_indices[3]))
        #  Build separate  vertex lists for Mesh3d
         v_list = list(vertices.values())
         if v_list and faces:

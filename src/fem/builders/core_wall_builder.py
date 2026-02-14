@@ -20,6 +20,33 @@ if TYPE_CHECKING:
     from src.fem.model_builder import ModelBuilderOptions, NodeRegistry
 
 logger = logging.getLogger(__name__)
+SHELL_TRI_TAG_OFFSET = 300000
+
+
+def _normalize_shell_mesh_density(shell_mesh_density: str) -> str:
+    density = shell_mesh_density.strip().lower()
+    if density not in {"coarse", "medium", "fine"}:
+        raise ValueError(
+            f"Unsupported shell_mesh_density '{shell_mesh_density}'. "
+            "Use 'coarse', 'medium', or 'fine'."
+        )
+    return density
+
+
+def _wall_mesh_divisions_for_density(shell_mesh_density: str) -> Tuple[int, int]:
+    density = _normalize_shell_mesh_density(shell_mesh_density)
+    if density == "coarse":
+        return 1, 1
+    if density == "fine":
+        return 4, 3
+    return 2, 2
+
+
+def _normalize_shell_mesh_type(shell_mesh_type: str) -> str:
+    mesh_type = shell_mesh_type.strip().lower()
+    if mesh_type not in {"quad", "tri"}:
+        raise ValueError(f"Unsupported shell_mesh_type '{shell_mesh_type}'. Use 'quad' or 'tri'.")
+    return mesh_type
 
 
 class CoreWallBuilder:
@@ -113,14 +140,18 @@ class CoreWallBuilder:
         )
         
         # Generate mesh for each wall panel
+        wall_elements_along_length, wall_elements_per_story = _wall_mesh_divisions_for_density(
+            self.options.shell_mesh_density
+        )
+        shell_mesh_type = _normalize_shell_mesh_type(self.options.shell_mesh_type)
         for wall in wall_panels:
             mesh_result = wall_mesh_generator.generate_mesh(
                 wall=wall,
                 num_floors=self.geometry.floors,
                 story_height=self.geometry.story_height,
                 section_tag=self.wall_section_tag,
-                elements_along_length=2,
-                elements_per_story=2,
+                elements_along_length=wall_elements_along_length,
+                elements_per_story=wall_elements_per_story,
                 registry=registry,
             )
             
@@ -147,16 +178,38 @@ class CoreWallBuilder:
             
             # Add wall shell elements
             for shell_quad in mesh_result.elements:
-                self.model.add_element(
-                    Element(
-                        tag=shell_quad.tag,
-                        element_type=ElementType.SHELL_MITC4,
-                        node_tags=list(shell_quad.node_tags),
-                        material_tag=self.wall_material_tag,
-                        section_tag=shell_quad.section_tag,
-                    )
-                )
-                self.wall_elements.append(shell_quad.tag)
+                if shell_mesh_type == "quad":
+                    shell_elements = [
+                        Element(
+                            tag=shell_quad.tag,
+                            element_type=ElementType.SHELL_MITC4,
+                            node_tags=list(shell_quad.node_tags),
+                            material_tag=self.wall_material_tag,
+                            section_tag=shell_quad.section_tag,
+                        )
+                    ]
+                else:
+                    n1, n2, n3, n4 = shell_quad.node_tags
+                    shell_elements = [
+                        Element(
+                            tag=shell_quad.tag,
+                            element_type=ElementType.SHELL_DKGT,
+                            node_tags=[n1, n2, n3],
+                            material_tag=self.wall_material_tag,
+                            section_tag=shell_quad.section_tag,
+                        ),
+                        Element(
+                            tag=shell_quad.tag + SHELL_TRI_TAG_OFFSET,
+                            element_type=ElementType.SHELL_DKGT,
+                            node_tags=[n1, n3, n4],
+                            material_tag=self.wall_material_tag,
+                            section_tag=shell_quad.section_tag,
+                        ),
+                    ]
+
+                for shell_element in shell_elements:
+                    self.model.add_element(shell_element)
+                    self.wall_elements.append(shell_element.tag)
         
         logger.info(
             f"Generated shell mesh for {len(wall_panels)} wall panels using ShellMITC4 elements"

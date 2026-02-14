@@ -89,6 +89,8 @@ def _get_cache_key(project: ProjectData, options: ModelBuilderOptions) -> str:
         f"sec_num:{options.num_secondary_beams}",
         f"omit_cols:{sorted(list(options.suggested_omit_columns))}",
         f"trim:{options.trim_beams_at_core}",
+        f"shell_mesh_type:{options.shell_mesh_type}",
+        f"shell_mesh_density:{options.shell_mesh_density}",
     ]
     
     return "|".join(key_parts)
