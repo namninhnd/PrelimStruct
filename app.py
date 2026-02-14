@@ -58,6 +58,7 @@ from src.ui.wind_details import (
     build_wind_details_summary,
     has_complete_floor_wind_data,
 )
+from src.ui.utils import format_column_size_mm
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
@@ -2037,9 +2038,10 @@ def main():
 
     with tab3:
         if project.column_result:
+            column_size_label = format_column_size_mm(project)
             st.markdown(f"""
             **Column Design Summary**
-            - Size: **{project.column_result.dimension} x {project.column_result.dimension} mm**
+            - Size: **{column_size_label}**
             - Axial Load: {project.column_result.axial_load:.1f} kN
             - Design Moment: {project.column_result.moment:.1f} kNm
             - Slenderness: {project.column_result.slenderness:.1f} {'(Slender)' if project.column_result.is_slender else '(Short)'}

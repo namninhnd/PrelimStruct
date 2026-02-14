@@ -7,6 +7,29 @@ from src.core.constants import CARBON_FACTORS
 from src.fem.beam_trimmer import BeamGeometry
 
 
+def format_column_size_mm(project: ProjectData) -> str:
+    column_result = project.column_result
+    if column_result is None:
+        return "N/A"
+
+    width = int(column_result.width) if column_result.width > 0 else 0
+    depth = int(column_result.depth) if column_result.depth > 0 else 0
+    dimension = int(column_result.dimension) if column_result.dimension > 0 else 0
+
+    if width == 0 and depth == 0:
+        if dimension == 0:
+            return "N/A"
+        width = dimension
+        depth = dimension
+    else:
+        if width == 0:
+            width = dimension if dimension > 0 else depth
+        if depth == 0:
+            depth = dimension if dimension > 0 else width
+
+    return f"{width} x {depth} mm"
+
+
 def get_status_badge(status: str, utilization: float = 0.0) -> str:
     """Generate HTML status badge based on status and utilization."""
     if status == "FAIL" or utilization > 1.0:
