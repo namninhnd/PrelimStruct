@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .llm_service import AIService
-from .prompts import MODEL_BUILDER_SYSTEM_PROMPT
+from .prompts import MODEL_BUILDER_SYSTEM_PROMPT, PARAM_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -182,30 +182,38 @@ class ModelBuilderAssistant:
             "content": user_message
         })
 
-        # Detect intent
+        # PRIMARY: LLM extraction + response in one call
+        if self.ai_service:
+            llm_result = self._extract_with_llm(user_message)
+            extracted = llm_result["params"]
+            response = llm_result["response"] or ""
+            if llm_result.get("follow_up"):
+                response += " " + llm_result["follow_up"]
+        else:
+            # FALLBACK: regex extraction + local response
+            extracted = self.extract_parameters(user_message)
+            response = ""
+
+        # Detect intent (used for local response if needed)
         intent = self._detect_intent(user_message)
 
-        # Extract parameters from text
-        extracted = self.extract_parameters(user_message)
-
-        # Merge with existing parameters
+        # Merge extracted params into state
         for key, value in extracted.items():
             if value is not None:
                 setattr(self.parameters, key, value)
 
-        # Validate parameters
+        # Validate
         validation = self.validate_parameters(self.parameters.to_dict())
 
-        # Generate AI response if service available
-        response = ""
-        if self.ai_service:
-            response = self._generate_response(user_message, extracted, validation)
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": response
-            })
-        else:
+        # Generate local response if no AI response yet
+        if not response:
             response = self._generate_local_response(intent, extracted, validation)
+
+        # Store assistant response in history
+        self.conversation_history.append({
+            "role": "assistant",
+            "content": response
+        })
 
         return {
             "intent": intent.value,
@@ -493,57 +501,71 @@ class ModelBuilderAssistant:
         
         return Intent.UNKNOWN
     
-    def _generate_response(
-        self,
-        user_message: str,
-        extracted: Dict[str, Any],
-        validation: Dict[str, Any]
-    ) -> str:
-        """Generate AI response using LLM service.
+    def _extract_with_llm(self, user_message: str) -> Dict[str, Any]:
+        """Extract parameters and generate response via LLM JSON mode.
 
         Args:
-            user_message: Original user message
-            extracted: Extracted parameters
-            validation: Validation results
+            user_message: User's natural language message
 
         Returns:
-            AI-generated response string
+            Dict with keys: params (dict), response (str), follow_up (str|None)
+            Falls back to regex extraction on any failure.
         """
-        if not self.ai_service:
-            intent = self._detect_intent(user_message)
-            return self._generate_local_response(intent, extracted, validation)
+        import json
 
-        # Build context for AI
-        context = f"""
-Current extracted parameters:
-{self.parameters.to_dict()}
-
-Newly extracted from this message:
-{extracted}
-
-Missing required parameters:
-{self.parameters.get_missing_required()}
-
-Validation issues:
-{validation.get('issues', [])}
-"""
+        # Build context about current state
+        current = self.parameters.to_dict()
+        missing = self.parameters.get_missing_required()
+        context = (
+            f"\n\nCurrent state of extracted parameters: {current}"
+            f"\nMissing required parameters: {missing}"
+        )
 
         try:
-            response = self.ai_service.chat(
+            raw = self.ai_service.chat(
                 user_message=user_message,
-                system_prompt=MODEL_BUILDER_SYSTEM_PROMPT + "\n\nContext:\n" + context,
+                system_prompt=PARAM_EXTRACTION_PROMPT + context,
                 conversation_history=[
                     {"role": m["role"], "content": m["content"]}
-                    for m in self.conversation_history[:-1]
+                    for m in self.conversation_history[:-1]  # exclude current msg
                 ],
-                temperature=0.7,
+                temperature=0.3,
                 max_tokens=400,
+                json_mode=True,
             )
-            return response
+
+            # Parse JSON — strip markdown fences if present
+            text = raw.strip()
+            if text.startswith("```"):
+                text = text.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+
+            result = json.loads(text)
+
+            # Validate structure
+            params = result.get("params", {})
+            if not isinstance(params, dict):
+                raise ValueError("params is not a dict")
+
+            # Strip null values
+            params = {k: v for k, v in params.items() if v is not None}
+
+            return {
+                "params": params,
+                "response": result.get("response", ""),
+                "follow_up": result.get("follow_up"),
+            }
+
         except Exception as e:
-            logger.warning(f"AI response generation failed: {e}")
+            logger.warning(f"LLM extraction failed ({e}), falling back to regex")
+            extracted = self.extract_parameters(user_message)
             intent = self._detect_intent(user_message)
-            return self._generate_local_response(intent, extracted, validation)
+            # Use empty validation for fallback response generation as we'll validate later
+            response = self._generate_local_response(intent, extracted, {"valid": True, "issues": []})
+            return {
+                "params": extracted,
+                "response": response,
+                "follow_up": None,
+            }
     
     def _generate_local_response(
         self,

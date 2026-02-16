@@ -162,6 +162,7 @@ class AIService:
         conversation_history: Optional[list] = None,
         temperature: float = 0.7,
         max_tokens: int = 300,
+        json_mode: bool = False,
     ) -> str:
         """General chat interface for custom queries.
         
@@ -202,6 +203,7 @@ class AIService:
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
+                json_mode=json_mode,
             )
             
             # Log usage

@@ -48,7 +48,8 @@ htmlcov/
 .env.*.local
 
 # Agent / tool local state
-.claude/settings.local.json
+.claude/
+!.claude/CLAUDE.md
 .megamemory/
 .sisyphus/
 
@@ -69,6 +70,3 @@ nul
 *.csv
 *.xlsx
 *.bat
-
-# Claude Code skills (local only)
-.claude/skills/

@@ -10,6 +10,7 @@ Tests cover:
 """
 
 import pytest
+import json
 
 from src.ai.model_builder_assistant import (
     ModelBuilderAssistant,
@@ -501,3 +502,71 @@ class TestConfigurationApplication:
         config = assistant.to_project_config()
         assert config["geometry"]["num_bays_x"] == 5
         assert config["geometry"]["num_bays_y"] == 6
+
+
+class TestLLMExtraction:
+    """Tests for LLM-based parameter extraction."""
+
+    def test_llm_extraction_parses_json(self):
+        """LLM JSON response should be parsed into params."""
+        from unittest.mock import MagicMock
+        mock_service = MagicMock()
+        mock_service.chat.return_value = json.dumps({
+            "params": {"num_floors": 20, "building_type": "office", "num_bays_x": 3, "num_bays_y": 2},
+            "response": "A 20-storey office with a 3x2 bay grid.",
+            "follow_up": "You can also specify bay dimensions and concrete grade."
+        })
+        assistant = ModelBuilderAssistant(ai_service=mock_service)
+        result = assistant.process_message("20-storey office with 3 bays in X and 2 in Y")
+
+        assert result["extracted_params"]["num_floors"] == 20
+        assert result["extracted_params"]["building_type"] == "office"
+        assert result["extracted_params"]["num_bays_x"] == 3
+        assert result["extracted_params"]["num_bays_y"] == 2
+        assert "20-storey" in result["response"] or "20" in result["response"]
+
+    def test_llm_extraction_strips_nulls(self):
+        """Null values should be stripped from extracted params."""
+        from unittest.mock import MagicMock
+        mock_service = MagicMock()
+        mock_service.chat.return_value = json.dumps({
+            "params": {"num_floors": 30, "bay_x": None, "bay_y": None},
+            "response": "Got it, 30 floors.",
+            "follow_up": None
+        })
+        assistant = ModelBuilderAssistant(ai_service=mock_service)
+        result = assistant.process_message("30 storey building")
+
+        assert result["extracted_params"] == {"num_floors": 30}
+
+    def test_llm_fallback_on_parse_error(self):
+        """If LLM returns invalid JSON, should fall back to regex."""
+        from unittest.mock import MagicMock
+        mock_service = MagicMock()
+        mock_service.chat.return_value = "Sorry, I don't understand."  # Not JSON
+        assistant = ModelBuilderAssistant(ai_service=mock_service)
+        result = assistant.process_message("30 storey office building")
+
+        # Regex fallback should still extract floors + building type
+        assert result["extracted_params"]["num_floors"] == 30
+        assert result["extracted_params"]["building_type"] == "office"
+
+    def test_llm_fallback_on_api_error(self):
+        """If LLM call raises exception, should fall back to regex."""
+        from unittest.mock import MagicMock
+        mock_service = MagicMock()
+        mock_service.chat.side_effect = Exception("API timeout")
+        assistant = ModelBuilderAssistant(ai_service=mock_service)
+        result = assistant.process_message("25 storey residential tower")
+
+        assert result["extracted_params"]["num_floors"] == 25
+        assert result["extracted_params"]["building_type"] == "residential"
+
+    def test_no_ai_service_uses_regex(self):
+        """Without AI service, should use regex extraction."""
+        assistant = ModelBuilderAssistant()  # No AI service
+        result = assistant.process_message("30 storey office with 8m x 10m bays")
+
+        assert result["extracted_params"]["num_floors"] == 30
+        assert result["extracted_params"]["bay_x"] == 8.0
+        assert result["extracted_params"]["bay_y"] == 10.0
