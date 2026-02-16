@@ -51,6 +51,9 @@ jobs:
       
       - name: Run tests with coverage
         id: pytest
+        env:
+          LLM_PROVIDER: gemini
+          GEMINI_API_KEY: ${{ secrets.GeminiAPIKey }}
         run: |
           pytest tests/ -v \
             --cov=src \
