@@ -1,5 +1,5 @@
 """
-Helpers for summarizing FEM vs simplified design results.
+Helpers for summarizing FEM design results and comparisons.
 """
 
 from dataclasses import dataclass
@@ -12,7 +12,7 @@ from src.fem.solver import AnalysisResult
 
 @dataclass(frozen=True)
 class FEMComparisonRow:
-    """Row of FEM vs simplified comparison."""
+    """Row of FEM comparison (hand-calc baseline vs FEM)."""
     metric: str
     simplified_value: Optional[float]
     fem_value: Optional[float]
@@ -56,11 +56,11 @@ def get_top_drift(model: FEMModel,
     return max_disp * 1000.0
 
 
-def build_fem_vs_simplified_comparison(project: ProjectData,
-                                       model: FEMModel,
-                                       result: Optional[AnalysisResult],
-                                       direction: str = "X") -> List[FEMComparisonRow]:
-    """Build comparison rows between simplified and FEM results."""
+def build_fem_comparison(project: ProjectData,
+                         model: FEMModel,
+                         result: Optional[AnalysisResult],
+                         direction: str = "X") -> List[FEMComparisonRow]:
+    """Build comparison rows between hand-calc baseline and FEM results."""
     rows: List[FEMComparisonRow] = []
     wind = project.wind_result
 
@@ -89,7 +89,7 @@ def build_fem_vs_simplified_comparison(project: ProjectData,
         simplified_value=simplified_drift,
         fem_value=fem_drift,
         unit="mm",
-        note="Simplified drift vs FEM top displacement",
+        note="Hand-calc drift vs FEM top displacement",
     ))
 
     return rows
@@ -99,5 +99,5 @@ __all__ = [
     "FEMComparisonRow",
     "get_base_shear_from_reactions",
     "get_top_drift",
-    "build_fem_vs_simplified_comparison",
+    "build_fem_comparison",
 ]

@@ -64,6 +64,33 @@ SHEAR_STRESS_MAX_LIMIT = 7.0   # MPa absolute limit
 # Deflection Limits
 DRIFT_LIMIT = 1/500  # Building sway index limit
 
+# Rebar Bar Areas (mm² per bar) — HK standard sizes
+REBAR_AREAS = {
+    "T10": 78.5,
+    "T12": 113.1,
+    "T16": 201.1,
+    "T20": 314.2,
+    "T25": 490.9,
+    "T32": 804.2,
+    "T40": 1256.6,
+}
+
+# Link bar areas for shear reinforcement (mm² per leg)
+LINK_BAR_AREAS = {
+    "T8": 50.3,
+    "T10": 78.5,
+    "T12": 113.1,
+}
+
+# HK COP 2013 Cl 6.1.2.5(c) — Concrete shear stress vc
+# Simplified formula: vc = 0.79 * (100As/(bd))^(1/3) * (400/d)^(1/4) * (fcu/25)^(1/3) / gamma_m
+# gamma_m = 1.25 for shear
+GAMMA_M_SHEAR = 1.25
+
+# HK COP 2013 Cl 6.1.2.5 — Flexural design constants
+K_PRIME = 0.156  # Singly reinforced limit (no redistribution)
+COVER_MM = 40.0  # Default nominal cover (mm)
+
 # Carbon Emission Factors (kgCO2e per m³ of concrete)
 CARBON_FACTORS = {
     25: 280,

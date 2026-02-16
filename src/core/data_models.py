@@ -505,13 +505,21 @@ class MaterialInput:
 
 @dataclass
 class ReinforcementInput:
-    """Reinforcement ratio inputs (%)"""
-    min_rho_slab: float = 0.13
+    """Reinforcement ratio inputs (%).
+
+    Updated to HK Code 2013 practice-driven values (Phase 16):
+    - Slab/beam min raised from 0.13% to 0.3% per direction
+    - Column range changed from 2.0–6.0% to 0.8–4.0%
+    - Wall fields added (min 0.25% total vertical both faces)
+    """
+    min_rho_slab: float = 0.3
     max_rho_slab: float = 4.0
-    min_rho_beam: float = 0.13
+    min_rho_beam: float = 0.3
     max_rho_beam: float = 2.5
-    min_rho_column: float = 2.0
-    max_rho_column: float = 6.0
+    min_rho_column: float = 0.8
+    max_rho_column: float = 4.0
+    min_rho_wall: float = 0.25
+    max_rho_wall: float = 4.0
 
 
 @dataclass
@@ -778,7 +786,7 @@ class WindResult:
     lateral_system: str = "CORE_WALL"  # "CORE_WALL" or "MOMENT_FRAME"
     
     # Gate H: Traceability (wind code reference)
-    code_reference: str = "HK Wind Code 2019 - Simplified Analysis"
+    code_reference: str = "HK Wind Code 2019 - Wind Analysis"
     terrain_factor: float = 0.0      # Sz terrain coefficient
     force_coefficient: float = 0.0   # Cf aerodynamic coefficient
     design_pressure: float = 0.0     # kPa (reference_pressure * terrain_factor)

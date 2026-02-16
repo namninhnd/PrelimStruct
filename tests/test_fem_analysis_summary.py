@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from src.core.data_models import GeometryInput, LoadInput, LateralInput, ProjectData, WindResult
-from src.fem.analysis_summary import build_fem_vs_simplified_comparison, get_base_shear_from_reactions, get_top_drift
+from src.fem.analysis_summary import build_fem_comparison, get_base_shear_from_reactions, get_top_drift
 from src.fem.fem_engine import FEMModel, Node
 from src.fem.solver import AnalysisResult
 
@@ -44,7 +44,7 @@ def test_get_top_drift_returns_mm() -> None:
     assert drift == 12.0
 
 
-def test_build_fem_vs_simplified_comparison() -> None:
+def test_build_fem_comparison() -> None:
     project = _make_project()
     model = _make_model()
     result = AnalysisResult(
@@ -54,7 +54,7 @@ def test_build_fem_vs_simplified_comparison() -> None:
         node_reactions={1: [900000.0, 0.0, 0.0, 0.0, 0.0, 0.0]},
     )
 
-    rows = build_fem_vs_simplified_comparison(project, model, result, direction="X")
+    rows = build_fem_comparison(project, model, result, direction="X")
 
     assert rows[0].metric == "Base Shear"
     assert rows[0].simplified_value == 1200.0

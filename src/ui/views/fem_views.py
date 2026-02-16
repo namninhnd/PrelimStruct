@@ -15,6 +15,7 @@ from src.fem.model_builder import build_fem_model, ModelBuilderOptions
 from src.fem.fem_engine import FEMModel
 from src.fem.load_combinations import LoadCombinationLibrary
 from src.fem.combination_processor import combine_results, get_applicable_combinations
+from src.fem.design_check_summary import compute_design_checks_summary, ORDERED_TYPE_LABELS
 from src.fem.wind_case_synthesizer import with_synthesized_w1_w24_cases
 from src.fem.visualization import (
     create_plan_view,
@@ -1060,6 +1061,145 @@ def render_unified_fem_views(
             )
             current_floor = int(round(selected_z / project.geometry.story_height)) if selected_z else None
             column_forces_table.render(floor_filter=current_floor)
+
+    # --- 6d. Design Checks Panel (Gate J) ---
+    if has_results:
+        with st.expander("Design Checks (HK Code 2013)", expanded=False):
+            try:
+                selected_names = st.session_state.get("selected_combinations", set())
+                summary = compute_design_checks_summary(
+                    project=project,
+                    model=model,
+                    results_by_case=results_dict,
+                    selected_combination_names=sorted(selected_names),
+                    top_n=3,
+                )
+
+                if summary.warnings:
+                    for msg in summary.warnings:
+                        st.warning(msg)
+
+                any_rows = False
+
+                # --- Beam tables (Primary + Secondary) ---
+                for label in ("Primary Beam", "Secondary Beam"):
+                    rows = summary.top3_by_type.get(label, [])
+                    if not rows:
+                        continue
+                    any_rows = True
+                    st.markdown(f"**{label}s (Top-3 Governing)**")
+                    table_data = []
+                    for item in rows:
+                        score = float(item.get("score", 0.0))
+                        flex = item.get("flexural")
+                        shear_cap = item.get("shear_capacity")
+                        span = item.get("span_m", 0.0)
+                        row = {
+                            "Element": item.get("element_id"),
+                            "Combo": item.get("combo", ""),
+                            "M (kNm)": f"{flex.M / 1e3:.0f}" if flex and flex.M else "-",
+                            "As_req": f"{flex.As_req:.0f}" if flex else "-",
+                            "Rebar": flex.rebar_suggestion if flex else "-",
+                            "V (kN)": f"{shear_cap.V / 1e3:.0f}" if shear_cap else "-",
+                            "v/vc": f"{shear_cap.v / shear_cap.vc:.2f}" if shear_cap and shear_cap.vc > 0 else "-",
+                            "Links": shear_cap.link_suggestion if shear_cap else "-",
+                            "Score": f"{score:.2f}",
+                        }
+                        table_data.append(row)
+                    st.table(table_data)
+                    # Warnings
+                    for item in rows:
+                        warns = item.get("warnings", [])
+                        if warns:
+                            st.caption(f"  Elem {item.get('element_id')}: {'; '.join(warns)}")
+
+                # --- Slab strip tables ---
+                for label in ("Slab Strip X", "Slab Strip Y"):
+                    rows = summary.top3_by_type.get(label, [])
+                    if not rows:
+                        continue
+                    any_rows = True
+                    st.markdown(f"**{label} (Top-3 Governing)**")
+                    table_data = []
+                    for item in rows:
+                        score = float(item.get("score", 0.0))
+                        flex = item.get("flexural")
+                        span = item.get("span_m", 0.0)
+                        table_data.append({
+                            "Element": item.get("element_id"),
+                            "Combo": item.get("combo", ""),
+                            "Span (m)": f"{span:.2f}" if span else "-",
+                            "As_req": f"{flex.As_req:.0f}" if flex else "-",
+                            "Score": f"{score:.2f}",
+                        })
+                    st.table(table_data)
+
+                # --- Column table ---
+                rows = summary.top3_by_type.get("Column", [])
+                if rows:
+                    any_rows = True
+                    st.markdown("**Columns (Top-3 Governing)**")
+                    table_data = []
+                    for item in rows:
+                        score = float(item.get("score", 0.0))
+                        table_data.append({
+                            "Element": item.get("element_id"),
+                            "Combo": item.get("combo", ""),
+                            "Key Metric": item.get("key_metric", ""),
+                            "Score": f"{score:.2f}",
+                        })
+                    st.table(table_data)
+                    for item in rows:
+                        warns = item.get("warnings", [])
+                        if warns:
+                            st.caption(f"  Elem {item.get('element_id')}: {'; '.join(warns)}")
+
+                # --- Wall table ---
+                rows = summary.top3_by_type.get("Wall", [])
+                if rows:
+                    any_rows = True
+                    st.markdown("**Walls (Top-3 Governing)**")
+                    table_data = []
+                    for item in rows:
+                        score = float(item.get("score", 0.0))
+                        table_data.append({
+                            "Element": item.get("element_id"),
+                            "Combo": item.get("combo", ""),
+                            "Key Metric": item.get("key_metric", ""),
+                            "Score": f"{score:.2f}",
+                        })
+                    st.table(table_data)
+                    for item in rows:
+                        warns = item.get("warnings", [])
+                        if warns:
+                            st.caption(f"  Elem {item.get('element_id')}: {'; '.join(warns)}")
+
+                # --- Coupling Beam table ---
+                rows = summary.top3_by_type.get("Coupling Beam", [])
+                if rows:
+                    any_rows = True
+                    st.markdown("**Coupling Beams (Top-3 Governing)**")
+                    table_data = []
+                    for item in rows:
+                        score = float(item.get("score", 0.0))
+                        table_data.append({
+                            "Element": item.get("element_id"),
+                            "Combo": item.get("combo", ""),
+                            "Key Metric": item.get("key_metric", ""),
+                            "Score": f"{score:.2f}",
+                        })
+                    st.table(table_data)
+                    for item in rows:
+                        warns = item.get("warnings", [])
+                        if warns:
+                            st.caption(f"  Elem {item.get('element_id')}: {'; '.join(warns)}")
+
+                if not any_rows:
+                    st.info("No element forces available for design checks. Run analysis first.")
+            except ImportError:
+                st.info("Design checks module not available.")
+            except Exception as e:
+                st.warning(f"Design checks could not be computed: {e}")
 
     # --- 7. Model Statistics & Export ---
     

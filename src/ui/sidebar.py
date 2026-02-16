@@ -853,7 +853,7 @@ def _render_load_combinations() -> Dict[str, Any]:
     total_available = len(all_combinations)
     st.caption(f"**Total: {total_selected}/{total_available} combinations selected**")
     
-    # Active combination for simplified design (backwards compatibility)
+    # Active combination for FEM design checks
     active_combo_options = {}
     for c in all_combinations:
         if c.name in st.session_state.selected_combinations:
@@ -866,7 +866,7 @@ def _render_load_combinations() -> Dict[str, Any]:
             options=list(active_combo_options.values()),
             index=0,
             label_visibility="collapsed",
-            help="This combination is used for the simplified design calculations"
+            help="This combination is used for the FEM design checks"
         )
         # Find the LoadCombination enum for the selected label
         selected_load_comb = list(active_combo_options.keys())[

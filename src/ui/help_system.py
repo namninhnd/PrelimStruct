@@ -246,7 +246,7 @@ class HelpSystem:
             1. Check FEM analysis status
             2. Review member utilization ratios
             3. Identify critical locations
-            4. Compare FEM vs. Simplified methods
+            4. Review FEM design checks
             5. Export report or results data
             """
         }

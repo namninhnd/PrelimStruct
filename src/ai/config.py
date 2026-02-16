@@ -100,13 +100,13 @@ class AIConfig:
             cls._load_env_file(env_file)
 
         # Get provider type
-        provider_str = os.getenv("LLM_PROVIDER", "deepseek").lower()
+        provider_str = os.getenv("LLM_PROVIDER", "gemini").lower()
         try:
             provider_type = LLMProviderType(provider_str)
         except ValueError:
             raise ValueError(
                 f"Invalid LLM_PROVIDER: {provider_str}. "
-                f"Must be one of: deepseek, grok, openrouter"
+                f"Must be one of: gemini, deepseek, grok, openrouter"
             )
 
         # Get API key for the selected provider

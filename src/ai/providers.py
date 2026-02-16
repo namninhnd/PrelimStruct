@@ -33,10 +33,12 @@ class LLMProviderType(Enum):
     """Supported LLM provider types.
 
     Attributes:
-        DEEPSEEK: DeepSeek API (api.deepseek.com) - PRIMARY for Hong Kong
+        GEMINI: Google AI Studio Gemini API - PRIMARY (1M context, thinking)
+        DEEPSEEK: DeepSeek API (api.deepseek.com) - BACKUP for Hong Kong
         GROK: xAI Grok API (api.x.ai) - BACKUP with 2M context
         OPENROUTER: OpenRouter gateway (openrouter.ai) - Gateway to 300+ models
     """
+    GEMINI = "gemini"
     DEEPSEEK = "deepseek"
     GROK = "grok"
     OPENROUTER = "openrouter"
@@ -329,6 +331,23 @@ OPENROUTER_PRICING = {
         "input_per_million": 0.0,  # Dynamic pricing
         "output_per_million": 0.0,  # Retrieved from response
         "cache_hit_per_million": 0.0,
+    },
+}
+
+# Gemini API pricing (as of 2026-02)
+# https://ai.google.dev/pricing
+GEMINI_PRICING = {
+    "gemini-3-flash-preview": {
+        "input_per_million": 0.075,   # $0.075 per 1M input tokens
+        "output_per_million": 0.30,   # $0.30 per 1M output tokens
+        "cache_hit_per_million": 0.01875,  # 75% discount on cached
+        "thinking_per_million": 0.30, # Thinking tokens billed as output
+    },
+    "gemini-2.5-flash": {
+        "input_per_million": 0.15,
+        "output_per_million": 0.60,
+        "cache_hit_per_million": 0.0375,
+        "thinking_per_million": 0.60,
     },
 }
 
@@ -1474,26 +1493,246 @@ class OpenRouterProvider(LLMProvider):
         return len(text) // 4
 
 
+class GeminiProvider(LLMProvider):
+    """Google AI Studio Gemini provider using the native google-genai SDK.
+
+    PRIMARY provider for PrelimStruct with:
+    - 1M token context window
+    - Built-in thinking/reasoning (ThinkingConfig)
+    - Free tier available via Google AI Studio
+    - Native multimodal support
+
+    API Reference: https://ai.google.dev/gemini-api/docs
+
+    Usage:
+        provider = GeminiProvider(api_key="your-google-ai-studio-key")
+        response = provider.chat([LLMMessage(role="user", content="Hello")])
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        base_url: str = "",  # Not used by native SDK, kept for interface compat
+        default_model: str = "gemini-3-flash-preview",
+        timeout: float = 60.0,
+        max_retries: int = 3,
+        thinking_level: str = "low",
+    ):
+        """Initialize Gemini provider.
+
+        Args:
+            api_key: Google AI Studio API key
+            base_url: Unused (native SDK manages endpoints)
+            default_model: Default model (default: gemini-3-flash-preview)
+            timeout: Request timeout in seconds (default: 60)
+            max_retries: Maximum retry attempts (default: 3)
+            thinking_level: Thinking depth: minimal, low, medium, high (default: low)
+        """
+        super().__init__(api_key, base_url or "https://generativelanguage.googleapis.com", default_model, timeout)
+        self._max_retries = max_retries
+        self._thinking_level = thinking_level
+        self._client = None  # Lazy init
+
+    def _get_client(self):
+        """Lazy-initialize the google-genai client."""
+        if self._client is None:
+            try:
+                from google import genai
+                self._client = genai.Client(api_key=self._api_key)
+            except ImportError:
+                raise ImportError(
+                    "google-genai is required for GeminiProvider. "
+                    "Install with: pip install google-genai"
+                )
+        return self._client
+
+    @property
+    def provider_type(self) -> LLMProviderType:
+        return LLMProviderType.GEMINI
+
+    def chat(
+        self,
+        messages: List[LLMMessage],
+        model: Optional[str] = None,
+        temperature: float = 1.0,
+        max_tokens: Optional[int] = None,
+        json_mode: bool = False,
+        **kwargs: Any,
+    ) -> LLMResponse:
+        """Send a chat completion request via google-genai SDK.
+
+        Args:
+            messages: List of messages in the conversation
+            model: Model to use (default: gemini-3-flash-preview)
+            temperature: Sampling temperature (default: 1.0 for thinking models)
+            max_tokens: Maximum tokens to generate
+            json_mode: If True, enforce JSON output format
+            **kwargs: Additional parameters
+
+        Returns:
+            LLMResponse with completion content and metadata
+
+        Raises:
+            LLMProviderError: On API errors
+        """
+        from google.genai import types
+
+        client = self._get_client()
+        actual_model = model or self._default_model
+
+        # Separate system instruction from conversation messages
+        system_instruction = None
+        contents = []
+        for msg in messages:
+            if msg.role == "system":
+                system_instruction = msg.content
+            else:
+                role = "model" if msg.role == "assistant" else "user"
+                contents.append(types.Content(
+                    role=role,
+                    parts=[types.Part(text=msg.content)],
+                ))
+
+        # Build config
+        config_kwargs: Dict[str, Any] = {
+            "temperature": temperature,
+            "thinking_config": types.ThinkingConfig(
+                thinking_budget=kwargs.get("thinking_budget", -1),
+            ),
+        }
+        if system_instruction:
+            config_kwargs["system_instruction"] = system_instruction
+        if max_tokens is not None:
+            config_kwargs["max_output_tokens"] = max_tokens
+        if json_mode:
+            config_kwargs["response_mime_type"] = "application/json"
+
+        config = types.GenerateContentConfig(**config_kwargs)
+
+        # Make request with retry
+        last_error: Optional[Exception] = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                response = client.models.generate_content(
+                    model=actual_model,
+                    contents=contents,
+                    config=config,
+                )
+
+                # Extract text from response parts (skip thinking parts)
+                text_parts = []
+                thinking_text = None
+                for part in response.candidates[0].content.parts:
+                    if getattr(part, 'thought', False):
+                        thinking_text = part.text
+                    else:
+                        text_parts.append(part.text)
+
+                content = "\n".join(text_parts)
+
+                # Extract usage
+                usage_meta = getattr(response, 'usage_metadata', None)
+                usage = LLMUsage(
+                    prompt_tokens=getattr(usage_meta, 'prompt_token_count', 0) or 0,
+                    completion_tokens=getattr(usage_meta, 'candidates_token_count', 0) or 0,
+                    total_tokens=getattr(usage_meta, 'total_token_count', 0) or 0,
+                )
+
+                return LLMResponse(
+                    content=content,
+                    model=actual_model,
+                    provider=LLMProviderType.GEMINI,
+                    usage=usage,
+                    finish_reason=response.candidates[0].finish_reason.name if response.candidates else None,
+                    raw_response={"thinking": thinking_text} if thinking_text else None,
+                )
+
+            except ImportError:
+                raise
+            except Exception as e:
+                last_error = e
+                error_str = str(e).lower()
+                # Don't retry auth errors
+                if "api key" in error_str or "permission" in error_str or "403" in error_str or "401" in error_str:
+                    raise AuthenticationError(
+                        f"Gemini authentication failed: {e}",
+                        provider=LLMProviderType.GEMINI,
+                    )
+                # Retry on rate limit / server errors
+                if attempt < self._max_retries:
+                    import time as _time
+                    import random
+                    delay = (2 ** attempt) + random.uniform(0, 0.5)
+                    logger.warning(f"Gemini request error (attempt {attempt + 1}): {e}")
+                    _time.sleep(delay)
+                    continue
+
+        raise LLMProviderError(
+            f"Gemini request failed after {self._max_retries + 1} attempts: {last_error}",
+            provider=LLMProviderType.GEMINI,
+        )
+
+    def health_check(self) -> bool:
+        """Check if Gemini API is available."""
+        try:
+            response = self.chat(
+                messages=[LLMMessage(role="user", content="ping")],
+                max_tokens=5,
+                temperature=0,
+            )
+            return len(response.content) > 0
+        except Exception as e:
+            logger.warning(f"Gemini health check failed: {e}")
+            return False
+
+    def calculate_cost(
+        self,
+        usage: LLMUsage,
+        model: Optional[str] = None,
+        cache_hit_tokens: int = 0,
+    ) -> float:
+        """Calculate cost based on Gemini pricing."""
+        actual_model = model or self._default_model
+        pricing = GEMINI_PRICING.get(
+            actual_model,
+            GEMINI_PRICING.get("gemini-3-flash-preview", {"input_per_million": 0, "output_per_million": 0, "cache_hit_per_million": 0})
+        )
+
+        cache_miss_tokens = max(0, usage.prompt_tokens - cache_hit_tokens)
+        input_cost = (
+            (cache_miss_tokens / 1_000_000) * pricing["input_per_million"] +
+            (cache_hit_tokens / 1_000_000) * pricing["cache_hit_per_million"]
+        )
+        output_cost = (usage.completion_tokens / 1_000_000) * pricing["output_per_million"]
+        return input_cost + output_cost
+
+    def estimate_tokens(self, text: str) -> int:
+        """Estimate token count (~4 chars per token)."""
+        return len(text) // 4
+
+
 class LLMProviderFactory:
     """Factory for creating LLM provider instances.
 
-    This factory creates provider instances based on the provider type,
-    with sensible defaults for each provider.
-
     Default configurations:
-    - DeepSeek: api.deepseek.com, deepseek-chat model
-    - Grok: api.x.ai, grok-4-fast model
+    - Gemini: Google AI Studio, gemini-3-flash-preview (PRIMARY)
+    - DeepSeek: api.deepseek.com, deepseek-v3.2
+    - Grok: api.x.ai, grok-4-fast
     - OpenRouter: openrouter.ai, auto model selection
 
     Usage:
         provider = LLMProviderFactory.create(
-            provider_type=LLMProviderType.DEEPSEEK,
+            provider_type=LLMProviderType.GEMINI,
             api_key="your-api-key"
         )
     """
 
     # Provider configuration defaults
     _PROVIDER_CONFIGS: Dict[LLMProviderType, Dict[str, str]] = {
+        LLMProviderType.GEMINI: {
+            "base_url": "https://generativelanguage.googleapis.com",
+            "default_model": "gemini-3-flash-preview",
+        },
         LLMProviderType.DEEPSEEK: {
             "base_url": "https://api.deepseek.com/v1",
             "default_model": "deepseek-v3.2",
@@ -1504,7 +1743,7 @@ class LLMProviderFactory:
         },
         LLMProviderType.OPENROUTER: {
             "base_url": "https://openrouter.ai/api/v1",
-            "default_model": "auto",  # Auto-select best model
+            "default_model": "auto",
         },
     }
 
@@ -1538,13 +1777,19 @@ class LLMProviderFactory:
             raise ValueError(f"Unsupported provider type: {provider_type}")
 
         config = cls._PROVIDER_CONFIGS[provider_type]
-
-        # Use provided values or defaults
         actual_base_url = base_url or config["base_url"]
         actual_model = model or config["default_model"]
 
-        # Create the appropriate provider
-        if provider_type == LLMProviderType.DEEPSEEK:
+        if provider_type == LLMProviderType.GEMINI:
+            return GeminiProvider(
+                api_key=api_key,
+                base_url=actual_base_url,
+                default_model=actual_model,
+                timeout=timeout,
+                max_retries=kwargs.get("max_retries", 3),
+                thinking_level=kwargs.get("thinking_level", "low"),
+            )
+        elif provider_type == LLMProviderType.DEEPSEEK:
             return DeepSeekProvider(
                 api_key=api_key,
                 base_url=actual_base_url,

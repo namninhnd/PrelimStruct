@@ -181,9 +181,18 @@ class AIService:
         if system_prompt:
             messages.append(LLMMessage(role="system", content=system_prompt))
         
-        # Add conversation history
+        # Add conversation history (convert dicts to LLMMessage if needed)
         if conversation_history:
-            messages.extend(conversation_history)
+            for msg in conversation_history:
+                if isinstance(msg, LLMMessage):
+                    messages.append(msg)
+                elif isinstance(msg, dict):
+                    messages.append(LLMMessage(
+                        role=msg.get("role", "user"),
+                        content=msg.get("content", ""),
+                    ))
+                else:
+                    messages.append(msg)
         
         # Add user message
         messages.append(LLMMessage(role="user", content=user_message))

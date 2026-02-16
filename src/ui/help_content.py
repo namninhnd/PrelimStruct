@@ -317,7 +317,7 @@ HELP_TOPICS = [
 
         **Design Moments:**
         - Continuous slabs: -ve at supports, +ve at midspan
-        - FEM moments used (not simplified coefficients)
+        - FEM moments used (not tabular coefficients)
 
         **Output:**
         - Required steel area (mm²/m)
@@ -378,7 +378,7 @@ HELP_TOPICS = [
 
         **Biaxial Bending:**
         - Interaction surface (N-Mx-My)
-        - Simplified check: (Mx/Mux)^αn + (My/Muy)^αn ≤ 1.0
+        - Approximate check: (Mx/Mux)^αn + (My/Muy)^αn ≤ 1.0
 
         **Output:**
         - Required reinforcement (total As, mm²)
