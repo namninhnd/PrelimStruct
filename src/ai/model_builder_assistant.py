@@ -110,12 +110,12 @@ class ModelBuilderAssistant:
             r"(\d+(?:\.\d+)?)\s*m\s*(?:by|x|×)\s*(\d+(?:\.\d+)?)\s*m\s*(?:bay|grid|span)?",
             r"bay[s]?\s*(?:of|:)?\s*(\d+(?:\.\d+)?)\s*m?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*m?",
         ],
-        # "5 bays", "5x6 bays", "5 bays x 6 bays", "3 X bays and 2 Y bays"
+        # "5 bays", "5x6 bays", "5 bays x 6 bays", "3 bays in X-direction and 2 in Y"
         "num_bays": [
             r"(\d+)\s*[xX×]\s*(\d+)\s*bays?",
             r"(\d+)\s*bays?\s*(?:in\s*)?(?:x|×|by)\s*(\d+)\s*bays?",
             r"(\d+)\s*(?:x|X)\s*bays?\s*(?:and|,|&)\s*(\d+)\s*(?:y|Y)\s*bays?",
-            r"(\d+)\s*bays?\s*(?:in\s*)?x\s*(?:and|,|&)\s*(\d+)\s*bays?\s*(?:in\s*)?y",
+            r"(\d+)\s*bays?\s*(?:in\s*)?x[\w-]*\s*[,]?\s*(?:and|&)?\s*(\d+)\s*(?:bays?\s*)?(?:in\s*)?y",
         ],
         # "residential", "office", "commercial"
         "building_type": [

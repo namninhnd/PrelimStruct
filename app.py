@@ -1175,6 +1175,25 @@ def main():
                                 setattr(p.geometry, dst_attr, pending_extract[src_key])
                                 applied.append(f"{src_key}={pending_extract[src_key]}")
 
+                        # Apply building type preset (loads + materials)
+                        btype = pending_extract.get("building_type")
+                        if btype:
+                            from src.core.data_models import PRESETS
+                            preset = PRESETS.get(btype)
+                            if preset:
+                                p.loads = copy.deepcopy(preset["loads"])
+                                p.materials = copy.deepcopy(preset["materials"])
+                                applied.append(f"type={btype}")
+
+                        # Apply concrete grade override
+                        cgrade = pending_extract.get("concrete_grade")
+                        if cgrade:
+                            grade_val = int(cgrade.replace("C", ""))
+                            p.materials.fcu_slab = grade_val
+                            p.materials.fcu_beam = grade_val
+                            p.materials.fcu_column = grade_val
+                            applied.append(f"concrete={cgrade}")
+
                         st.session_state["ai_pending_extract"] = {}
                         if applied:
                             st.session_state.ai_chat_history.append(
