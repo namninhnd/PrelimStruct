@@ -46,3 +46,29 @@ htmlcov/
 .env
 .env.local
 .env.*.local
+
+# Agent / tool local state
+.claude/settings.local.json
+.megamemory/
+.sisyphus/
+
+# Reference repos (cloned for research, not project source)
+repos/
+tmp_refs/
+
+# Temporary test output & screenshots
+test_output*.txt
+test_install.log
+audit_screenshots/
+tests/audit_screenshots/
+test_screenshots/
+
+# Misc artifacts
+nul
+*.png
+*.csv
+*.xlsx
+*.bat
+
+# Claude Code skills (local only)
+.claude/skills/

@@ -8,6 +8,7 @@ import streamlit.components.v1 as components
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import numpy as np
+import logging
 from datetime import datetime
 from typing import Dict, Any, Tuple, Optional
 
@@ -62,6 +63,9 @@ from src.ui.utils import format_column_size_mm
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
+
+
+logger = logging.getLogger(__name__)
 
 
 # Page Configuration
@@ -1089,6 +1093,112 @@ def main():
 
     # ===== SIDEBAR =====
     with st.sidebar:
+        # --- AI Chat ---
+        with st.expander("💬 AI Assistant", expanded=False):
+            # Lazy-init assistant and chat history
+            if "ai_chat_history" not in st.session_state:
+                st.session_state.ai_chat_history = []
+            if "ai_assistant" not in st.session_state:
+                try:
+                    from src.ai.model_builder_assistant import ModelBuilderAssistant
+                    try:
+                        from src.ai.config import AIConfig
+                        from src.ai.llm_service import AIService
+                        import os
+                        env_path = os.path.join(os.path.dirname(__file__), ".env")
+                        config = AIConfig.from_env(env_file=env_path if os.path.exists(env_path) else None)
+                        service = AIService(config)
+                        st.session_state.ai_assistant = ModelBuilderAssistant(ai_service=service)
+                    except Exception as _init_err:
+                        logger.warning(f"AI service init failed ({_init_err}), using regex-only mode")
+                        st.session_state.ai_assistant = ModelBuilderAssistant()
+                        st.session_state.ai_init_local_mode = True
+                except ImportError:
+                    st.session_state.ai_assistant = None
+
+            assistant = st.session_state.ai_assistant
+            if assistant is None:
+                st.info("AI assistant not available.")
+            else:
+                if st.session_state.get("ai_init_local_mode"):
+                    st.caption("Running in local mode — set API key in .env for AI-enhanced responses")
+                # Show chat history
+                for msg in st.session_state.ai_chat_history:
+                    with st.chat_message(msg["role"], avatar="🧑‍💻" if msg["role"] == "user" else "🤖"):
+                        st.markdown(msg["content"])
+
+                # Simple chat input
+                user_msg = st.chat_input(
+                    "Describe your building, e.g. '20-storey office, 8m x 9m bays'",
+                    key="ai_chat_input",
+                )
+
+                if user_msg:
+                    # Show user message
+                    st.session_state.ai_chat_history.append(
+                        {"role": "user", "content": user_msg}
+                    )
+
+                    # Process message
+                    with st.spinner("Thinking..."):
+                        result = assistant.process_message(user_msg)
+                    extracted = result.get("extracted_params", {})
+                    response = result.get("response", "")
+
+                    st.session_state["ai_pending_extract"] = extracted
+
+                    reply = response or "Got it."
+                    if extracted:
+                        preview = assistant.get_config_preview()
+                        reply += f"\n\n### Preview\n{preview}\n\nClick **Apply Extracted Parameters** to update project inputs."
+
+                    st.session_state.ai_chat_history.append(
+                        {"role": "assistant", "content": reply}
+                    )
+                    st.rerun()
+
+                pending_extract = st.session_state.get("ai_pending_extract", {})
+                if pending_extract:
+                    if st.button("✅ Apply Extracted Parameters", key="ai_chat_apply", type="primary"):
+                        import copy
+
+                        st.session_state["ai_undo_project"] = copy.deepcopy(st.session_state.project)
+                        p = st.session_state.project
+                        applied = []
+                        geo_map = {
+                            "bay_x": "bay_x", "bay_y": "bay_y",
+                            "num_bays_x": "num_bays_x", "num_bays_y": "num_bays_y",
+                            "num_floors": "floors", "floor_height": "story_height",
+                        }
+                        for src_key, dst_attr in geo_map.items():
+                            if src_key in pending_extract and pending_extract[src_key] is not None:
+                                setattr(p.geometry, dst_attr, pending_extract[src_key])
+                                applied.append(f"{src_key}={pending_extract[src_key]}")
+
+                        st.session_state["ai_pending_extract"] = {}
+                        if applied:
+                            st.session_state.ai_chat_history.append(
+                                {"role": "assistant", "content": f"✅ Applied: {', '.join(applied)}"}
+                            )
+                        st.rerun()
+
+                # Undo button (only shown when there's something to undo)
+                if "ai_undo_project" in st.session_state:
+                    if st.button("↩️ Undo last change", key="ai_chat_undo", type="secondary"):
+                        st.session_state.project = st.session_state.ai_undo_project
+                        del st.session_state["ai_undo_project"]
+                        st.session_state.ai_chat_history.append(
+                            {"role": "assistant", "content": "↩️ Changes reverted."}
+                        )
+                        st.rerun()
+
+                if st.button("🧹 Reset AI chat", key="ai_chat_reset", type="secondary"):
+                    assistant.reset()
+                    st.session_state.ai_chat_history = []
+                    st.session_state["ai_pending_extract"] = {}
+                    st.rerun()
+
+        st.divider()
         st.markdown("### Project Settings")
         
         inputs_locked = _is_inputs_locked()
@@ -1748,12 +1858,57 @@ def main():
 
         override_column_size = max(override_column_width, override_column_depth)
 
-        st.caption(
-            f"Selected: Slab {override_slab_thickness} mm | "
-            f"Pri {override_pri_beam_width}x{override_pri_beam_depth} mm | "
-            f"Sec {override_sec_beam_width}x{override_sec_beam_depth} mm | "
-            f"Col {override_column_width}x{override_column_depth} mm"
-        )
+        # Coupling Beam (only when Core Wall is enabled)
+        coupling_beam_width = int(wall_thickness) if has_core else 500
+        coupling_beam_depth = 800
+        coupling_beam_span = 1500
+        if has_core and selected_core_wall_config:
+            st.caption("Coupling Beam")
+            cb_col1, cb_col2, cb_col3 = st.columns(3)
+            with cb_col1:
+                coupling_beam_width = st.number_input(
+                    "CB Width (mm)", min_value=200, max_value=1000,
+                    value=st.session_state.get("coupling_beam_width", int(wall_thickness)),
+                    step=50, key="cb_width_input",
+                    help="Coupling beam width (typically matches wall thickness)",
+                    disabled=inputs_locked,
+                )
+                st.session_state.coupling_beam_width = coupling_beam_width
+            with cb_col2:
+                coupling_beam_depth = st.number_input(
+                    "CB Depth (mm)", min_value=300, max_value=2000,
+                    value=st.session_state.get("coupling_beam_depth", 800),
+                    step=50, key="cb_depth_input",
+                    help="Coupling beam depth (typical: 600-1200mm)",
+                    disabled=inputs_locked,
+                )
+                st.session_state.coupling_beam_depth = coupling_beam_depth
+            with cb_col3:
+                cb_span_default = int((opening_width * 1000) if opening_width else 1500)
+                coupling_beam_span = st.number_input(
+                    "CB Span (mm)", min_value=500, max_value=5000,
+                    value=st.session_state.get("coupling_beam_span", cb_span_default),
+                    step=100, key="cb_span_input",
+                    help="Clear span between wall piers (= opening width)",
+                    disabled=inputs_locked,
+                )
+                st.session_state.coupling_beam_span = coupling_beam_span
+
+            cb_ld = coupling_beam_span / coupling_beam_depth if coupling_beam_depth > 0 else 0
+            if cb_ld < 2.0:
+                st.caption(f"L/d = {cb_ld:.1f} → Deep beam (diagonal reinforcement)")
+            else:
+                st.caption(f"L/d = {cb_ld:.1f} → Conventional beam")
+
+        summary_parts = [
+            f"Slab {override_slab_thickness} mm",
+            f"Pri {override_pri_beam_width}×{override_pri_beam_depth} mm",
+            f"Sec {override_sec_beam_width}×{override_sec_beam_depth} mm",
+            f"Col {override_column_width}×{override_column_depth} mm",
+        ]
+        if has_core and selected_core_wall_config:
+            summary_parts.append(f"CB {coupling_beam_width}×{coupling_beam_depth} mm")
+        st.caption("Selected: " + " | ".join(summary_parts))
 
         st.divider()
 
@@ -1870,7 +2025,7 @@ def main():
                 options=list(active_combo_options.values()),
                 index=0,
                 label_visibility="collapsed",
-                help="This combination is used for the simplified design calculations"
+                help="This combination is used for the FEM design checks"
             )
             # Find the LoadCombination enum for the selected label
             selected_load_comb = list(active_combo_options.keys())[
@@ -1939,6 +2094,11 @@ def main():
         secondary_along_x=secondary_along_x,
         num_secondary_beams=num_secondary_beams
     )
+
+    setattr(project, "coupling_beam_width_mm", st.session_state.get("coupling_beam_width", coupling_beam_width))
+    setattr(project, "coupling_beam_depth_mm", st.session_state.get("coupling_beam_depth", coupling_beam_depth))
+    setattr(project, "coupling_beam_span_mm", st.session_state.get("coupling_beam_span", coupling_beam_span))
+
     st.session_state.project = project
 
     # ===== MAIN CONTENT =====
@@ -1956,168 +2116,8 @@ def main():
     except Exception as exc:
         st.warning(f"FEM preview unavailable: {exc}")
 
-    # Detailed Results
-    st.markdown("### Detailed Results")
 
-    tab1, tab2, tab3, tab4 = st.tabs(["Slab", "Beams", "Columns", "Lateral"])
 
-    with tab1:
-        if project.slab_result:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"""
-                **Slab Design Summary**
-                - Type: Solid Slab (One-Way)
-                - Thickness: **{project.slab_result.thickness} mm**
-                - Design Moment: {project.slab_result.moment:.1f} kNm/m
-                - Reinforcement: {project.slab_result.reinforcement_area:.0f} mm²/m
-                - Self Weight: {project.slab_result.self_weight:.2f} kPa
-                """)
-            with col2:
-                st.markdown(f"""
-                **Checks**
-                - Deflection Ratio: {project.slab_result.deflection_ratio:.2f}
-                - Utilization: {project.slab_result.utilization:.2%}
-                - Status: {project.slab_result.status}
-                """)
-
-    with tab2:
-        if project.primary_beam_result:
-            # Determine beam direction labels based on configuration
-            if secondary_along_x:
-                pri_dir = "Y-direction"
-                sec_dir = "X-direction"
-                pri_span = project.geometry.bay_y
-                sec_span = project.geometry.bay_x
-            else:
-                pri_dir = "X-direction"
-                sec_dir = "Y-direction"
-                pri_span = project.geometry.bay_x
-                sec_span = project.geometry.bay_y
-
-            col1, col2 = st.columns(2)
-            with col1:
-                primary_status = "PASS" if project.primary_beam_result.utilization <= 1.0 else "FAIL"
-                primary_status_color = "#10B981" if primary_status == "PASS" else "#EF4444"
-                st.markdown(f"""
-                **Primary Beam ({pri_dir})**
-                - Size: **{project.primary_beam_result.width} x {project.primary_beam_result.depth} mm**
-                - Span: {pri_span:.1f} m
-                - Design Moment: {project.primary_beam_result.moment:.1f} kNm
-                - Design Shear: {project.primary_beam_result.shear:.1f} kN
-                - Shear Capacity: {project.primary_beam_result.shear_capacity:.1f} kN
-                - Shear Links: T10 @ {project.primary_beam_result.link_spacing} mm c/c
-
-                **Checks**
-                - Utilization: **{project.primary_beam_result.utilization:.1%}**
-                - Status: <span style="color: {primary_status_color}; font-weight: bold;">{primary_status}</span>
-                - Iterations: {project.primary_beam_result.iteration_count}
-                """, unsafe_allow_html=True)
-            with col2:
-                if project.secondary_beam_result:
-                    secondary_status = "PASS" if project.secondary_beam_result.utilization <= 1.0 else "FAIL"
-                    secondary_status_color = "#10B981" if secondary_status == "PASS" else "#EF4444"
-                    st.markdown(f"""
-                    **Secondary Beam ({sec_dir})**
-                    - Size: **{project.secondary_beam_result.width} x {project.secondary_beam_result.depth} mm**
-                    - Span: {sec_span:.1f} m
-                    - Design Moment: {project.secondary_beam_result.moment:.1f} kNm
-                    - Design Shear: {project.secondary_beam_result.shear:.1f} kN
-                    - Shear Capacity: {project.secondary_beam_result.shear_capacity:.1f} kN
-
-                    **Checks**
-                    - Utilization: **{project.secondary_beam_result.utilization:.1%}**
-                    - Status: <span style="color: {secondary_status_color}; font-weight: bold;">{secondary_status}</span>
-                    - Iterations: {project.secondary_beam_result.iteration_count}
-                    """, unsafe_allow_html=True)
-                else:
-                    st.info("No secondary beams defined")
-
-            if project.primary_beam_result.is_deep_beam or (project.secondary_beam_result and project.secondary_beam_result.is_deep_beam):
-                st.warning("Deep beam detected (L/d < 2.0). Strut-and-Tie Model required.")
-
-    with tab3:
-        if project.column_result:
-            column_size_label = format_column_size_mm(project)
-            st.markdown(f"""
-            **Column Design Summary**
-            - Size: **{column_size_label}**
-            - Axial Load: {project.column_result.axial_load:.1f} kN
-            - Design Moment: {project.column_result.moment:.1f} kNm
-            - Slenderness: {project.column_result.slenderness:.1f} {'(Slender)' if project.column_result.is_slender else '(Short)'}
-            - Utilization: {project.column_result.utilization:.2%}
-            """)
-
-            if project.column_result.has_lateral_loads:
-                st.markdown(f"""
-                **Lateral Load Effects (Moment Frame)**
-                - Lateral Shear: {project.column_result.lateral_shear:.1f} kN
-                - Lateral Moment: {project.column_result.lateral_moment:.1f} kNm
-                - Combined Utilization: {project.column_result.combined_utilization:.2%}
-                """)
-
-    with tab4:
-        if project.wind_result:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown(f"""
-                **Wind Load Analysis (HK Wind Code 2019)**
-                - Terrain: {selected_terrain_label}
-                - Building Height: {project.geometry.story_height * project.geometry.floors:.1f} m
-                - Reference Pressure: {project.wind_result.reference_pressure:.2f} kPa
-                - **Base Shear: {project.wind_result.base_shear:.1f} kN**
-                - **Overturning Moment: {project.wind_result.overturning_moment:.1f} kNm**
-                """)
-            with col2:
-                st.markdown(f"""
-                **Drift Check**
-                - Lateral System: {project.wind_result.lateral_system}
-                - Top Drift: {project.wind_result.drift_mm:.1f} mm
-                - Drift Index: {project.wind_result.drift_index:.6f}
-                - Limit: 1/500 = 0.002
-                - Status: {'PASS' if project.wind_result.drift_ok else 'FAIL'}
-                """)
-            
-            with st.expander("🔍 Wind Load Details (per floor)", expanded=False):
-                st.markdown(f"""
-                **Calculation Traceability**
-                
-                {project.wind_result.code_reference}
-                """)
-
-                if has_complete_floor_wind_data(project.wind_result):
-                    df = build_wind_details_dataframe(project.wind_result)
-                    summary = build_wind_details_summary(project.wind_result)
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-
-                    st.markdown(f"""
-                    **Summary:**
-                    - Total floors: {int(summary['total_floors'])}
-                    - Sum Wx: {summary['sum_wx']:.1f} kN
-                    - Sum Wy: {summary['sum_wy']:.1f} kN
-                    - Terrain factor (Sz): {summary['terrain_factor']:.2f}
-                    - Force coefficient (Cf): {summary['force_coefficient']:.2f}
-                    - Design pressure: {summary['design_pressure']:.2f} kPa
-                    """)
-                elif any(
-                    (
-                        project.wind_result.floor_elevations,
-                        project.wind_result.floor_wind_x,
-                        project.wind_result.floor_wind_y,
-                        project.wind_result.floor_torsion_z,
-                    )
-                ):
-                    st.warning("Per-floor wind load arrays are inconsistent. Recalculate wind loads.")
-                else:
-                    st.info("Per-floor wind loads not available (legacy calculation without floor count)")
-
-            if project.core_wall_result:
-                st.markdown(f"""
-                **Core Wall Check**
-                - Compression Utilization: {project.core_wall_result.compression_check:.2%}
-                - Shear Utilization: {project.core_wall_result.shear_check:.2%}
-                - Tension Piles Required: {'Yes' if project.core_wall_result.requires_tension_piles else 'No'}
-                """)
 
     # ===== REPORT GENERATION SECTION =====
     st.markdown("### Generate Report")
@@ -2154,6 +2154,10 @@ def main():
     # Generate Report Button
     if st.button("Generate HTML Report", type="primary", use_container_width=True):
         with st.spinner("Generating report..."):
+            setattr(project, "_fem_model", st.session_state.get("fem_model_cache"))
+            setattr(project, "_fem_results_by_case", st.session_state.get("fem_analysis_results_dict", {}))
+            setattr(project, "_selected_combinations", sorted(st.session_state.get("selected_combinations", set())))
+
             # Generate the report
             generator = ReportGenerator(project)
             ai_review = ai_review_text if ai_review_text.strip() else None

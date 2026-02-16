@@ -17,7 +17,7 @@ Usage:
     ai_service = AIService.from_env()
     assistant = ModelBuilderAssistant(ai_service)
     
-    result = await assistant.process_message("30 story building with 8m x 10m bays")
+    result = assistant.process_message("30 story building with 8m x 10m bays")
     print(result["extracted_params"])
 """
 
@@ -110,10 +110,12 @@ class ModelBuilderAssistant:
             r"(\d+(?:\.\d+)?)\s*m\s*(?:by|x|×)\s*(\d+(?:\.\d+)?)\s*m\s*(?:bay|grid|span)?",
             r"bay[s]?\s*(?:of|:)?\s*(\d+(?:\.\d+)?)\s*m?\s*[xX×]\s*(\d+(?:\.\d+)?)\s*m?",
         ],
-        # "5 bays", "5x6 bays", "5 bays x 6 bays"
+        # "5 bays", "5x6 bays", "5 bays x 6 bays", "3 X bays and 2 Y bays"
         "num_bays": [
             r"(\d+)\s*[xX×]\s*(\d+)\s*bays?",
             r"(\d+)\s*bays?\s*(?:in\s*)?(?:x|×|by)\s*(\d+)\s*bays?",
+            r"(\d+)\s*(?:x|X)\s*bays?\s*(?:and|,|&)\s*(\d+)\s*(?:y|Y)\s*bays?",
+            r"(\d+)\s*bays?\s*(?:in\s*)?x\s*(?:and|,|&)\s*(\d+)\s*bays?\s*(?:in\s*)?y",
         ],
         # "residential", "office", "commercial"
         "building_type": [
@@ -142,8 +144,8 @@ class ModelBuilderAssistant:
     LIMITS = {
         "num_floors": (1, 100),
         "floor_height": (2.5, 6.0),
-        "bay_x": (4.0, 1000.0),
-        "bay_y": (4.0, 1000.0),
+        "bay_x": (4.0, 15.0),
+        "bay_y": (4.0, 15.0),
         "num_bays_x": (1, 20),
         "num_bays_y": (1, 20),
     }
@@ -159,12 +161,12 @@ class ModelBuilderAssistant:
         self.parameters = BuildingParameters()
         self.conversation_history: List[Dict[str, str]] = []
     
-    async def process_message(self, user_message: str) -> Dict[str, Any]:
+    def process_message(self, user_message: str) -> Dict[str, Any]:
         """Process a user message and extract building parameters.
-        
+
         Args:
             user_message: Natural language input from user
-            
+
         Returns:
             Dictionary containing:
             - intent: Detected user intent
@@ -179,32 +181,32 @@ class ModelBuilderAssistant:
             "role": "user",
             "content": user_message
         })
-        
+
         # Detect intent
         intent = self._detect_intent(user_message)
-        
+
         # Extract parameters from text
         extracted = self.extract_parameters(user_message)
-        
+
         # Merge with existing parameters
         for key, value in extracted.items():
             if value is not None:
                 setattr(self.parameters, key, value)
-        
+
         # Validate parameters
         validation = self.validate_parameters(self.parameters.to_dict())
-        
+
         # Generate AI response if service available
         response = ""
         if self.ai_service:
-            response = await self._generate_response(user_message, extracted, validation)
+            response = self._generate_response(user_message, extracted, validation)
             self.conversation_history.append({
                 "role": "assistant",
                 "content": response
             })
         else:
-            response = self._generate_local_response(extracted, validation)
-        
+            response = self._generate_local_response(intent, extracted, validation)
+
         return {
             "intent": intent.value,
             "extracted_params": extracted,
@@ -491,25 +493,26 @@ class ModelBuilderAssistant:
         
         return Intent.UNKNOWN
     
-    async def _generate_response(
-        self, 
-        user_message: str, 
+    def _generate_response(
+        self,
+        user_message: str,
         extracted: Dict[str, Any],
         validation: Dict[str, Any]
     ) -> str:
         """Generate AI response using LLM service.
-        
+
         Args:
             user_message: Original user message
             extracted: Extracted parameters
             validation: Validation results
-            
+
         Returns:
             AI-generated response string
         """
         if not self.ai_service:
-            return self._generate_local_response(extracted, validation)
-        
+            intent = self._detect_intent(user_message)
+            return self._generate_local_response(intent, extracted, validation)
+
         # Build context for AI
         context = f"""
 Current extracted parameters:
@@ -524,53 +527,141 @@ Missing required parameters:
 Validation issues:
 {validation.get('issues', [])}
 """
-        
+
         try:
             response = self.ai_service.chat(
                 user_message=user_message,
                 system_prompt=MODEL_BUILDER_SYSTEM_PROMPT + "\n\nContext:\n" + context,
                 conversation_history=[
-                    {"role": m["role"], "content": m["content"]} 
+                    {"role": m["role"], "content": m["content"]}
                     for m in self.conversation_history[:-1]
                 ],
                 temperature=0.7,
-                max_tokens=200,
+                max_tokens=400,
             )
             return response
         except Exception as e:
             logger.warning(f"AI response generation failed: {e}")
-            return self._generate_local_response(extracted, validation)
+            intent = self._detect_intent(user_message)
+            return self._generate_local_response(intent, extracted, validation)
     
     def _generate_local_response(
-        self, 
+        self,
+        intent: Intent,
         extracted: Dict[str, Any],
         validation: Dict[str, Any]
     ) -> str:
-        """Generate a local response without AI.
-        
+        """Generate a conversational local response without AI.
+
         Args:
+            intent: Detected user intent
             extracted: Extracted parameters
             validation: Validation results
-            
+
         Returns:
             Generated response string
         """
-        parts = []
-        
-        if extracted:
-            param_str = ", ".join(f"{k}={v}" for k, v in extracted.items())
-            parts.append(f"Extracted: {param_str}")
-        
+        parts: List[str] = []
+
+        label_map = {
+            "num_floors": "floors", "floor_height": "floor height",
+            "bay_x": "bay X", "bay_y": "bay Y",
+            "num_bays_x": "bays in X", "num_bays_y": "bays in Y",
+            "building_type": "type", "concrete_grade": "concrete",
+        }
+
+        def _format_params(params: Dict[str, Any]) -> str:
+            readable = []
+            for k, v in params.items():
+                label = label_map.get(k, k)
+                if k in ("bay_x", "bay_y", "floor_height"):
+                    readable.append(f"{label} = {v}m")
+                else:
+                    readable.append(f"{label} = {v}")
+            return ", ".join(readable)
+
+        # Handle based on intent + whether params were extracted
+        if intent == Intent.CONFIRM_MODEL:
+            current = self.parameters.to_dict()
+            if current:
+                parts.append(
+                    "Looking good! Here's what we have so far: "
+                    + _format_params(current) + "."
+                )
+                missing = self.parameters.get_missing_required()
+                if missing:
+                    self.apply_defaults()
+                    parts.append("I've filled in defaults for the rest.")
+                parts.append(
+                    'Click **Apply Extracted Parameters** to update the model inputs.'
+                )
+            else:
+                parts.append(
+                    "Nothing to confirm yet. Try describing your building "
+                    "— e.g. \"30-storey office with 8m x 10m bays\"."
+                )
+            return " ".join(parts)
+
+        if intent == Intent.ASK_QUESTION and extracted:
+            # User asked a question but also provided params
+            parts.append("Good question! I've also picked up: " + _format_params(extracted) + ".")
+        elif extracted:
+            parts.append("Got it! I've set: " + _format_params(extracted) + ".")
+        elif intent == Intent.ASK_QUESTION:
+            parts.append(
+                "I can help with that. For now, try describing your building "
+                "and I'll extract the parameters — e.g. \"25-storey residential, "
+                "8m x 10m bays, C40 concrete\"."
+            )
+            return parts[0]
+        else:
+            parts.append(
+                "I didn't catch any specific parameters there. "
+                "You can say something like \"30-storey office with 9m x 12m bays\" "
+                "and I'll set things up for you."
+            )
+            return parts[0]
+
         if validation.get("issues"):
-            parts.append("Validation: " + "; ".join(validation["issues"]))
-        
+            parts.append("⚠️ " + "; ".join(validation["issues"]))
+
         missing = self.parameters.get_missing_required()
         if missing:
-            parts.append(f"Still need: {', '.join(missing)}")
+            friendly = [m.replace("_", " ") for m in missing]
+            parts.append(f"I'll use defaults for: {', '.join(friendly)}.")
+            self.apply_defaults()
         else:
-            parts.append("All required parameters set. Ready to create model.")
-        
-        return " | ".join(parts) if parts else "I didn't extract any parameters."
+            parts.append("All required parameters are set — ready to build!")
+
+        # Suggest next steps based on what's unspecified
+        suggestions = self._get_follow_up_suggestions(extracted)
+        if suggestions:
+            parts.append(suggestions)
+
+        return " ".join(parts)
+
+    def _get_follow_up_suggestions(self, just_extracted: Dict[str, Any]) -> str:
+        """Suggest what the user might want to specify next.
+
+        Args:
+            just_extracted: Parameters just extracted this turn
+
+        Returns:
+            Follow-up suggestion string, or empty string
+        """
+        suggestions: List[str] = []
+        p = self.parameters
+
+        if p.concrete_grade is None and "concrete_grade" not in just_extracted:
+            suggestions.append("concrete grade (e.g. C40, C50)")
+        if p.building_type is None and "building_type" not in just_extracted:
+            suggestions.append("building type (residential, office, etc.)")
+        if p.num_bays_x is None and "num_bays_x" not in just_extracted:
+            suggestions.append("number of bays (e.g. 3x4 bays)")
+
+        if suggestions:
+            return "You can also specify: " + ", ".join(suggestions) + "."
+        return ""
 
 
 # Convenience function for quick parameter extraction

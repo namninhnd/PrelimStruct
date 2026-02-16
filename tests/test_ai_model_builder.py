@@ -294,9 +294,11 @@ class TestLocalResponseGeneration:
         extracted = {"num_floors": 30, "bay_x": 8.0}
         validation = {"valid": True, "issues": []}
 
-        response = assistant._generate_local_response(extracted, validation)
+        response = assistant._generate_local_response(
+            Intent.DESCRIBE_BUILDING, extracted, validation
+        )
 
-        assert "Extracted" in response
+        assert "Got it" in response
         assert "30" in response
 
     def test_local_response_with_validation_issues(self):
@@ -305,10 +307,11 @@ class TestLocalResponseGeneration:
         extracted = {}
         validation = {"valid": False, "issues": ["floor_height too low"]}
 
-        response = assistant._generate_local_response(extracted, validation)
+        response = assistant._generate_local_response(
+            Intent.UNKNOWN, extracted, validation
+        )
 
-        assert "Validation" in response
-        assert "floor_height" in response
+        assert "floor_height" in response or "didn't catch" in response.lower()
 
     def test_local_response_shows_missing(self):
         """Test local response shows missing parameters."""
@@ -317,9 +320,38 @@ class TestLocalResponseGeneration:
         assistant.parameters.num_floors = 30
         validation = {"valid": True, "issues": []}
 
-        response = assistant._generate_local_response(extracted, validation)
+        response = assistant._generate_local_response(
+            Intent.DESCRIBE_BUILDING, extracted, validation
+        )
 
-        assert "Still need" in response or "Ready" not in response
+        assert "defaults" in response.lower() or "ready" in response.lower()
+
+    def test_local_response_confirm_intent(self):
+        """Test local response for confirmation intent."""
+        assistant = ModelBuilderAssistant()
+        assistant.parameters.num_floors = 30
+        assistant.parameters.bay_x = 8.0
+        extracted = {}
+        validation = {"valid": True, "issues": []}
+
+        response = assistant._generate_local_response(
+            Intent.CONFIRM_MODEL, extracted, validation
+        )
+
+        assert "Apply" in response or "look" in response.lower()
+
+    def test_local_response_question_with_params(self):
+        """Test that ASK_QUESTION + extracted params acknowledges both."""
+        assistant = ModelBuilderAssistant()
+        extracted = {"num_floors": 30, "building_type": "office"}
+        validation = {"valid": True, "issues": []}
+
+        response = assistant._generate_local_response(
+            Intent.ASK_QUESTION, extracted, validation
+        )
+
+        assert "30" in response
+        assert "picked up" in response.lower() or "set" in response.lower()
 
 
 class TestConfigurationMapping:
