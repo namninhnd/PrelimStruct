@@ -31,28 +31,33 @@ from src.core.load_tables import LIVE_LOAD_TABLE
 # from src.engines.column_engine import ColumnEngine
 # from src.engines.wind_engine import WindEngine, CoreWallEngine, DriftEngine
 
-# Import FEM modules
-from src.fem.core_wall_geometry import (
-    ISectionCoreWall,
-    TubeWithOpeningsCoreWall,
-)
-from src.fem.coupling_beam import CouplingBeamGenerator
-from src.fem.beam_trimmer import BeamTrimmer, BeamGeometry, BeamConnectionType
-from src.fem.fem_engine import FEMModel
-from src.fem.wind_calculator import calculate_hk_wind
-from src.fem.model_builder import (
-    build_fem_model, 
-    ModelBuilderOptions, 
-    get_column_omission_suggestions
-)
-from src.ui.views.fem_views import render_unified_fem_views, _is_inputs_locked, _unlock_inputs
-from src.fem.visualization import VisualizationConfig, get_model_statistics
-from src.fem.solver import analyze_model
-from src.fem.load_combinations import (
-    LoadCombinationLibrary,
-    LoadCombinationCategory,
-    LoadCombinationDefinition,
-)
+# Import FEM modules (may fail on cloud if openseespy native libs unavailable)
+try:
+    from src.fem.core_wall_geometry import (
+        ISectionCoreWall,
+        TubeWithOpeningsCoreWall,
+    )
+    from src.fem.coupling_beam import CouplingBeamGenerator
+    from src.fem.beam_trimmer import BeamTrimmer, BeamGeometry, BeamConnectionType
+    from src.fem.fem_engine import FEMModel
+    from src.fem.wind_calculator import calculate_hk_wind
+    from src.fem.model_builder import (
+        build_fem_model,
+        ModelBuilderOptions,
+        get_column_omission_suggestions
+    )
+    from src.ui.views.fem_views import render_unified_fem_views, _is_inputs_locked, _unlock_inputs
+    from src.fem.visualization import VisualizationConfig, get_model_statistics
+    from src.fem.solver import analyze_model
+    from src.fem.load_combinations import (
+        LoadCombinationLibrary,
+        LoadCombinationCategory,
+        LoadCombinationDefinition,
+    )
+    FEM_AVAILABLE = True
+except ImportError:
+    FEM_AVAILABLE = False
+    logging.warning("FEM modules unavailable — openseespy native libraries not found")
 from src.ui.components.core_wall_selector import render_core_wall_selector
 from src.ui.wind_details import (
     build_wind_details_dataframe,
@@ -1220,7 +1225,7 @@ def main():
         st.divider()
         st.markdown("### Project Settings")
         
-        inputs_locked = _is_inputs_locked()
+        inputs_locked = _is_inputs_locked() if FEM_AVAILABLE else False
         if inputs_locked:
             st.warning("🔒 **Inputs locked** - Analysis results active. Click 'Unlock to Modify' in FEM section to change inputs.")
 
@@ -2123,17 +2128,21 @@ def main():
     # ===== MAIN CONTENT =====
 
     # FEM Analysis & Preview
-    st.markdown("### FEM Analysis")
-    st.caption("Preview the FEM model and optionally overlay OpenSees analysis results.")
+    if FEM_AVAILABLE:
+        st.markdown("### FEM Analysis")
+        st.caption("Preview the FEM model and optionally overlay OpenSees analysis results.")
 
-    try:
-        render_unified_fem_views(
-            project=project,
-            analysis_result=st.session_state.get('fem_preview_analysis_result'),
-            config_overrides={}
-        )
-    except Exception as exc:
-        st.warning(f"FEM preview unavailable: {exc}")
+        try:
+            render_unified_fem_views(
+                project=project,
+                analysis_result=st.session_state.get('fem_preview_analysis_result'),
+                config_overrides={}
+            )
+        except Exception as exc:
+            st.warning(f"FEM preview unavailable: {exc}")
+    else:
+        st.markdown("### FEM Analysis")
+        st.info("FEM Analysis requires OpenSeesPy (available on local install only).")
 
 
 

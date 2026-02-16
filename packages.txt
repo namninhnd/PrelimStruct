@@ -1,0 +1,5 @@
+libgfortran5
+libgomp1
+libblas3
+liblapack3
+libopenmpi3
