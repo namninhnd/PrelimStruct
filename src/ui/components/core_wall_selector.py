@@ -76,7 +76,7 @@ def render_core_wall_selector(current_config: CoreWallConfig) -> CoreWallConfig:
                 
                 st.markdown(f'<div style="text-align: center; margin-bottom: 5px;">{svg}</div>', unsafe_allow_html=True)
                 
-                if st.button(label, key=f"core_select_{config.name}", use_container_width=True, 
+                if st.button(label, key=f"core_select_{config.name}", width="stretch", 
                              type="primary" if is_selected else "secondary"):
                     new_config = config
                     

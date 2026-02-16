@@ -1975,12 +1975,12 @@ def main():
                 # Select All / Select None buttons
                 btn_col1, btn_col2, btn_col3 = st.columns([1, 1, 2])
                 with btn_col1:
-                    if st.button("All", key=f"select_all_{category_key}", use_container_width=True):
+                    if st.button("All", key=f"select_all_{category_key}", width="stretch"):
                         for c in combos:
                             st.session_state.selected_combinations.add(c.name)
                         st.rerun()
                 with btn_col2:
-                    if st.button("None", key=f"select_none_{category_key}", use_container_width=True):
+                    if st.button("None", key=f"select_none_{category_key}", width="stretch"):
                         for c in combos:
                             st.session_state.selected_combinations.discard(c.name)
                         st.rerun()
@@ -2180,7 +2180,7 @@ def main():
     project.date = datetime.now().strftime("%Y-%m-%d")
 
     # Generate Report Button
-    if st.button("Generate HTML Report", type="primary", use_container_width=True):
+    if st.button("Generate HTML Report", type="primary", width="stretch"):
         with st.spinner("Generating report..."):
             setattr(project, "_fem_model", st.session_state.get("fem_model_cache"))
             setattr(project, "_fem_results_by_case", st.session_state.get("fem_analysis_results_dict", {}))
@@ -2197,7 +2197,7 @@ def main():
                 data=html_content,
                 file_name=f"{report_project_name.replace(' ', '_')}_Report.html",
                 mime="text/html",
-                use_container_width=True
+                width="stretch"
             )
 
             st.success("Report generated successfully! Click the download button above to save.")

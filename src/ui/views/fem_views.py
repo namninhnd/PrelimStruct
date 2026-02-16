@@ -283,7 +283,7 @@ def render_unified_fem_views(
             if has_complete_floor_wind_data(wind_result):
                 df = build_wind_details_dataframe(wind_result)
                 summary = build_wind_details_summary(wind_result)
-                st.dataframe(df, use_container_width=True, hide_index=True)
+                st.dataframe(df, width="stretch", hide_index=True)
                 st.caption(
                     (
                         f"Floors: {int(summary['total_floors'])} | "

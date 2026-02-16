@@ -287,7 +287,7 @@ class BeamForcesTable:
             'T (kNm)': '{:.1f}',
         })
         
-        st.dataframe(styled_df, use_container_width=True, hide_index=True)
+        st.dataframe(styled_df, width="stretch", hide_index=True)
         
         st.caption(f"📊 {len(display_df)} rows")
         

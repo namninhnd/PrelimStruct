@@ -18,11 +18,9 @@ pytest-cov>=4.1.0
 # Report Generation
 jinja2>=3.1.0
 
-# FEM Analysis (v3.0)
+# FEM Analysis (v3.0) — may fail on cloud; app degrades gracefully
 openseespy>=3.5.0
 concreteproperties>=0.5.0
-
-# Visualization
 opsvis>=1.3.4
 vfo>=0.0.19
 
