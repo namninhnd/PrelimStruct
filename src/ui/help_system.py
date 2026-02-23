@@ -8,8 +8,6 @@ similar to Agentation but built natively for Streamlit.
 import streamlit as st
 from typing import Optional, Dict, List, Literal
 from dataclasses import dataclass
-from src.ui.theme import GEMINI_TOKENS
-
 
 @dataclass
 class HelpTopic:
@@ -50,20 +48,18 @@ class HelpSystem:
 
     def render_floating_help_button(self):
         """Render floating help button (bottom-right corner)."""
-        colors = GEMINI_TOKENS["colors"]
-
-        # Custom CSS for floating button
-        st.markdown(f"""
+        # CSS uses variables so the dark-mode media query in theme.py applies automatically
+        st.markdown("""
         <style>
-            .help-float-container {{
+            .help-float-container {
                 position: fixed;
                 bottom: 24px;
                 right: 24px;
                 z-index: 9999;
-            }}
-            .help-float-button {{
-                background: {colors["accent_blue"]};
-                color: {colors["bg_base"]};
+            }
+            .help-float-button {
+                background: var(--primary-blue);
+                color: var(--neutral-50);
                 border: none;
                 border-radius: 50%;
                 width: 56px;
@@ -75,12 +71,12 @@ class HelpSystem:
                 align-items: center;
                 justify-content: center;
                 transition: all 0.3s ease;
-            }}
-            .help-float-button:hover {{
-                background: {colors["accent_purple"]};
+            }
+            .help-float-button:hover {
+                background: var(--primary-blue-dark);
                 box-shadow: 0 6px 16px rgba(0,0,0,0.3);
                 transform: scale(1.05);
-            }}
+            }
         </style>
         """, unsafe_allow_html=True)
 
@@ -100,14 +96,23 @@ class HelpSystem:
         if not st.session_state.get("help_panel_open", False):
             return
 
-        colors = GEMINI_TOKENS["colors"]
-
         with st.sidebar:
-            st.markdown(f"""
-            <div style="background:{colors['bg_elevated']};padding:16px;border-radius:8px;margin-bottom:16px;">
-                <h2 style="color:{colors['accent_blue']};margin:0;font-size:20px;">
-                    📚 Help & Documentation
-                </h2>
+            st.markdown("""
+            <style>
+                .help-panel-header {
+                    background: var(--neutral-200);
+                    padding: 16px;
+                    border-radius: 8px;
+                    margin-bottom: 16px;
+                }
+                .help-panel-header h2 {
+                    color: var(--primary-blue);
+                    margin: 0;
+                    font-size: 20px;
+                }
+            </style>
+            <div class="help-panel-header">
+                <h2>📚 Help & Documentation</h2>
             </div>
             """, unsafe_allow_html=True)
 
@@ -154,41 +159,42 @@ class HelpSystem:
         Returns:
             HTML string with tooltip
         """
-        colors = GEMINI_TOKENS["colors"]
-
         tooltip_html = f"""
-        <span class="tooltip-container" style="position:relative;display:inline-block;">
-            <span style="color:{colors['accent_blue']};cursor:help;border-bottom:1px dotted {colors['accent_blue']};">
-                {term} {icon}
-            </span>
-            <span class="tooltip-text" style="
-                visibility:hidden;
-                width:250px;
-                background-color:{colors['bg_elevated']};
-                color:{colors['text_primary']};
-                text-align:left;
-                border-radius:6px;
-                padding:8px;
-                position:absolute;
-                z-index:1000;
-                bottom:125%;
-                left:50%;
-                margin-left:-125px;
-                opacity:0;
-                transition:opacity 0.3s;
-                box-shadow:0 4px 12px rgba(0,0,0,0.2);
-                font-size:13px;
-                line-height:1.4;
-            ">
-                {definition}
-            </span>
-        </span>
         <style>
+            .tooltip-container {{ position: relative; display: inline-block; }}
+            .tooltip-anchor {{
+                color: var(--primary-blue);
+                cursor: help;
+                border-bottom: 1px dotted var(--primary-blue);
+            }}
+            .tooltip-text {{
+                visibility: hidden;
+                width: 250px;
+                background-color: var(--neutral-200);
+                color: var(--neutral-800);
+                text-align: left;
+                border-radius: 6px;
+                padding: 8px;
+                position: absolute;
+                z-index: 1000;
+                bottom: 125%;
+                left: 50%;
+                margin-left: -125px;
+                opacity: 0;
+                transition: opacity 0.3s;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                font-size: 13px;
+                line-height: 1.4;
+            }}
             .tooltip-container:hover .tooltip-text {{
                 visibility: visible;
                 opacity: 1;
             }}
         </style>
+        <span class="tooltip-container">
+            <span class="tooltip-anchor">{term} {icon}</span>
+            <span class="tooltip-text">{definition}</span>
+        </span>
         """
         return tooltip_html
 
@@ -265,8 +271,6 @@ class HelpSystem:
             tooltip: Optional explanation
             hk_clause: Optional HK Code clause reference
         """
-        colors = GEMINI_TOKENS["colors"]
-
         # Build label with tooltip if provided
         if tooltip:
             label_html = self.render_tooltip(label, tooltip)
@@ -275,7 +279,7 @@ class HelpSystem:
 
         # Add HK Code reference if provided
         if hk_clause:
-            label_html += f' <span style="color:{colors["text_secondary"]};font-size:11px;">({hk_clause})</span>'
+            label_html += f' <span style="color:var(--neutral-500);font-size:11px;">({hk_clause})</span>'
 
         # Render metric
         st.markdown(f"{label_html}: **{value}**", unsafe_allow_html=True)

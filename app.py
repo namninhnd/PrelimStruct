@@ -68,6 +68,7 @@ from src.ui.utils import format_column_size_mm
 
 # Import report generator
 from src.report.report_generator import ReportGenerator
+from src.ui.theme import get_dark_overrides_css
 
 
 logger = logging.getLogger(__name__)
@@ -325,8 +326,7 @@ st.markdown("""
             font-size: 14px;
         }
     }
-</style>
-""", unsafe_allow_html=True)
+""" + get_dark_overrides_css() + "</style>", unsafe_allow_html=True)
 
 
 def get_status_badge(status: str, utilization: float = 0.0) -> str:

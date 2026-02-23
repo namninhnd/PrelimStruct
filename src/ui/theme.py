@@ -179,6 +179,110 @@ def get_streamlit_css() -> str:
     footer {{visibility: hidden;}}
     """
 
+def get_dark_overrides_css() -> str:
+    """Return a CSS @media block that overrides :root variables and Streamlit chrome
+    when the browser/OS is set to dark mode (prefers-color-scheme: dark)."""
+    c = GEMINI_TOKENS["colors"]
+    return f"""
+@media (prefers-color-scheme: dark) {{
+    :root {{
+        --primary-blue: {c["accent_blue"]};
+        --primary-blue-dark: {c["accent_purple"]};
+        --accent-orange: {c["warning"]};
+        --accent-orange-hover: #e6be50;
+        --neutral-50: {c["bg_base"]};
+        --neutral-100: {c["bg_surface"]};
+        --neutral-200: {c["bg_elevated"]};
+        --neutral-300: #3d3e3f;
+        --neutral-400: #5a5b5c;
+        --neutral-500: {c["text_secondary"]};
+        --neutral-800: {c["text_primary"]};
+        --neutral-900: #ffffff;
+    }}
+
+    /* Streamlit page background and base text */
+    .stApp, html, body {{
+        background-color: {c["bg_base"]} !important;
+        color: {c["text_primary"]} !important;
+    }}
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background-color: {c["bg_surface"]} !important;
+        border-right-color: {c["border_subtle"]} !important;
+    }}
+    [data-testid="stHeader"] {{
+        background-color: {c["bg_base"]} !important;
+    }}
+
+    /* Tables and DataFrames */
+    .stDataFrame, .stTable {{
+        background-color: {c["bg_elevated"]} !important;
+    }}
+
+    /* Input fields */
+    .stTextInput > div > div > input,
+    .stNumberInput > div > div > input {{
+        background-color: {c["bg_elevated"]} !important;
+        color: {c["text_primary"]} !important;
+        border-color: {c["border_subtle"]} !important;
+    }}
+    .stSelectbox > div > div {{
+        background-color: {c["bg_elevated"]} !important;
+        color: {c["text_primary"]} !important;
+    }}
+
+    /* Metric card — override hardcoded white background */
+    .metric-card {{
+        background: {c["bg_elevated"]};
+        border-color: {c["border_subtle"]};
+        box-shadow: none;
+    }}
+
+    /* Buttons — dark text on lighter accent background */
+    div.stButton > button {{
+        background-color: {c["accent_blue"]};
+        color: {c["bg_base"]};
+        border-color: {c["border_subtle"]};
+    }}
+    div.stButton > button:hover {{
+        background-color: {c["accent_purple"]};
+        color: {c["bg_base"]};
+    }}
+
+    /* Status badges */
+    .status-pass    {{ background-color: {c["success"]};       color: #000; }}
+    .status-fail    {{ background-color: {c["error"]};         color: #000; }}
+    .status-warning {{ background-color: {c["warning"]};       color: #000; }}
+    .status-pending {{ background-color: {c["text_secondary"]}; color: #000; }}
+
+    /* Mobile warning banner */
+    .mobile-warning {{
+        background: #2d2400;
+        border-color: {c["warning"]};
+        color: {c["warning"]};
+    }}
+
+    /* Help system components */
+    .help-float-button {{
+        background: {c["accent_blue"]} !important;
+        color: {c["bg_base"]} !important;
+    }}
+    .help-float-button:hover {{
+        background: {c["accent_purple"]} !important;
+    }}
+    .help-panel-header {{
+        background: {c["bg_elevated"]};
+        color: {c["accent_blue"]};
+    }}
+    .tooltip-text {{
+        background-color: {c["bg_elevated"]} !important;
+        color: {c["text_primary"]} !important;
+    }}
+}}
+"""
+
+
 def apply_theme() -> None:
     """Inject theme CSS into Streamlit app."""
     import streamlit as st
