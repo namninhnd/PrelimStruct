@@ -224,8 +224,19 @@ def test_build_fem_model_wind_loads_apply_to_diaphragms() -> None:
 
 
 def test_compute_wtz_torsional_moments_option_b_formulas() -> None:
-    floor_shears_x = _compute_floor_shears(base_shear_kn=1000.0, story_height=3.0, floors=3)
-    floor_shears_y = _compute_floor_shears(base_shear_kn=400.0, story_height=3.0, floors=3)
+    wind_result = WindResult(base_shear_x=1000.0, base_shear_y=400.0)
+    floor_shears_x = _compute_floor_shears(
+        wind_result=wind_result,
+        direction="X",
+        story_height=3.0,
+        floors=3,
+    )
+    floor_shears_y = _compute_floor_shears(
+        wind_result=wind_result,
+        direction="Y",
+        story_height=3.0,
+        floors=3,
+    )
 
     moments, basis = _compute_wtz_torsional_moments(
         floor_shears_x=floor_shears_x,

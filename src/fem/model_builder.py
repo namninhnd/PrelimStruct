@@ -29,6 +29,7 @@ from src.core.data_models import (
     CoreWallGeometry,
     CoreWallSectionProperties,
     TubeOpeningPlacement,
+    WindResult,
 )
 
 from src.fem.beam_trimmer import BeamConnectionType
@@ -1005,12 +1006,46 @@ def _extract_column_dims(project: ProjectData) -> Tuple[float, float]:
     return width, depth
 
 
-def _compute_floor_shears(base_shear_kn: float,
+def _compute_floor_shears(wind_result: WindResult,
+                          direction: str,
                           story_height: float,
                           floors: int) -> Dict[float, float]:
-    """Distribute base shear to floors using a triangular profile."""
+    """Compute floor shears from WindResult with triangular fallback.
+
+    Priority:
+    1) If per-floor forces exist in ``wind_result.floor_wind_x/y``, use them directly.
+    2) Otherwise distribute base shear with triangular profile (legacy/manual mode).
+    """
     if floors <= 0:
         return {}
+
+    direction_upper = direction.upper()
+    if direction_upper not in {"X", "Y"}:
+        raise ValueError(f"Unsupported wind direction '{direction}'. Expected 'X' or 'Y'.")
+
+    floor_forces = (
+        wind_result.floor_wind_x
+        if direction_upper == "X"
+        else wind_result.floor_wind_y
+    )
+    elevations = wind_result.floor_elevations
+    if floor_forces and elevations and len(floor_forces) == len(elevations):
+        floor_pairs = list(zip(elevations, floor_forces))[:floors]
+        return {float(z): float(force_kn) * 1000.0 for z, force_kn in floor_pairs}
+
+    if direction_upper == "X":
+        base_shear_kn = (
+            wind_result.base_shear_x
+            if wind_result.base_shear_x > 0.0
+            else wind_result.base_shear
+        )
+    else:
+        base_shear_kn = (
+            wind_result.base_shear_y
+            if wind_result.base_shear_y > 0.0
+            else wind_result.base_shear
+        )
+
     heights = [story_height * level for level in range(1, floors + 1)]
     height_sum = sum(heights) if heights else 1.0
     base_shear_n = base_shear_kn * 1000.0
@@ -2444,14 +2479,18 @@ def build_fem_model(project: ProjectData,
                 UserWarning
             )
         else:
-            if wind_result.base_shear_x > 0.0 or wind_result.base_shear_y > 0.0:
-                base_shear_x = wind_result.base_shear_x
-                base_shear_y = wind_result.base_shear_y
-            else:
-                base_shear_x = wind_result.base_shear
-                base_shear_y = wind_result.base_shear
-            floor_shears_x = _compute_floor_shears(base_shear_x, geometry.story_height, geometry.floors)
-            floor_shears_y = _compute_floor_shears(base_shear_y, geometry.story_height, geometry.floors)
+            floor_shears_x = _compute_floor_shears(
+                wind_result=wind_result,
+                direction="X",
+                story_height=geometry.story_height,
+                floors=geometry.floors,
+            )
+            floor_shears_y = _compute_floor_shears(
+                wind_result=wind_result,
+                direction="Y",
+                story_height=geometry.story_height,
+                floors=geometry.floors,
+            )
 
             building_width = project.lateral.building_width
             if building_width <= 0.0:

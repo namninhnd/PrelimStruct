@@ -271,10 +271,7 @@ def render_unified_fem_views(
                 f"Base Shear Vy: {wind_result.base_shear_y:.1f} kN"
             )
             st.write(
-                f"Reference Pressure q0: {wind_result.reference_pressure:.2f} kPa"
-            )
-            st.write(
-                f"Design Pressure: {wind_result.design_pressure:.2f} kPa"
+                f"Overturning Moment: {wind_result.overturning_moment:.1f} kNm"
             )
 
             st.markdown("**Calculation Traceability**")
@@ -289,7 +286,6 @@ def render_unified_fem_views(
                         f"Floors: {int(summary['total_floors'])} | "
                         f"Sum Wx: {summary['sum_wx']:.1f} kN | "
                         f"Sum Wy: {summary['sum_wy']:.1f} kN | "
-                        f"Sz: {summary['terrain_factor']:.2f} | "
                         f"Cf: {summary['force_coefficient']:.2f}"
                     )
                 )

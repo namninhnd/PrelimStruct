@@ -316,7 +316,7 @@ def _render_lateral_system(project: ProjectData, inputs_locked: bool) -> Dict[st
     Returns:
         Dict with keys for terrain, core wall config, dimensions, and position
     """
-    st.markdown("##### Lateral System")
+    st.subheader("Lateral System")
     
     terrain_options = {
         TerrainCategory.OPEN_SEA: "A: Open Sea",
@@ -403,14 +403,7 @@ def _render_lateral_system(project: ProjectData, inputs_locked: bool) -> Dict[st
         else:
             project_wind_result = None
     else:
-        reference_pressure = st.number_input(
-            "Reference Pressure q0 (kPa)",
-            min_value=0.0,
-            value=float(default_reference_pressure),
-            step=0.1,
-            key="sidebar_module_wind_reference_pressure_calc",
-            disabled=inputs_locked,
-        )
+        # HK COP 2019 Calculator mode
         force_coefficient = st.number_input(
             "Force Coefficient Cf",
             min_value=0.0,
@@ -420,13 +413,38 @@ def _render_lateral_system(project: ProjectData, inputs_locked: bool) -> Dict[st
             disabled=inputs_locked,
         )
 
+        col_st, col_sd = st.columns(2)
+        with col_st:
+            topography_factor = st.number_input(
+                "Topography Sₜ",
+                min_value=0.5,
+                max_value=2.0,
+                value=1.0,
+                step=0.05,
+                key="sidebar_module_wind_topography_factor",
+                disabled=inputs_locked,
+                help="Topography factor S_t (HK COP 2019 Section 6). Default 1.0 for flat terrain.",
+            )
+        with col_sd:
+            directionality_factor = st.number_input(
+                "Directionality Sθ",
+                min_value=0.5,
+                max_value=1.0,
+                value=1.0,
+                step=0.05,
+                key="sidebar_module_wind_directionality_factor",
+                disabled=inputs_locked,
+                help="Wind directionality factor S_θ. Default 1.0 (conservative, all directions).",
+            )
+
         project_wind_result = calculate_hk_wind(
             total_height=project.geometry.floors * project.geometry.story_height,
             building_width_x=width_x,
             building_width_y=width_y,
             terrain=selected_terrain,
-            reference_pressure=reference_pressure,
             force_coefficient=force_coefficient,
+            topography_factor=topography_factor,
+            directionality_factor=directionality_factor,
             num_floors=project.geometry.floors,
             story_height=project.geometry.story_height,
         )
