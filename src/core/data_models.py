@@ -768,34 +768,41 @@ class CoreWallResult(DesignResult):
 
 @dataclass
 class WindResult:
-    """Wind load calculation results
-    
-    Gate H Extension (Phase 13A):
-    Added traceability and per-floor wind loads for read-only detail expansion.
-    Fields enable UI to show calculation breakdown without editable inputs.
+    """Wind load calculation results per HK COP 2019 Wind Effects.
+
+    Phase 13A: Per-floor wind loads for read-only detail expansion.
+    HK COP 2019 Update: Height-dependent Q_o,z (Eq 3-2) and S_q,z (Eq 5-2/5-3).
     """
-    # Legacy aggregate fields (backward compatibility)
-    base_shear: float = 0.0          # kN (legacy aggregate for backward compatibility)
+    # Aggregate fields
+    base_shear: float = 0.0          # kN (max of X, Y for backward compat)
     base_shear_x: float = 0.0        # kN (wind in X direction)
     base_shear_y: float = 0.0        # kN (wind in Y direction)
     overturning_moment: float = 0.0  # kNm
-    reference_pressure: float = 0.0  # kPa
+    reference_pressure: float = 0.0  # kPa (legacy — kept for manual mode)
     drift_mm: float = 0.0            # mm (lateral drift at top)
     drift_index: float = 0.0         # Drift ratio (Δ/H)
     drift_ok: bool = True
     lateral_system: str = "CORE_WALL"  # "CORE_WALL" or "MOMENT_FRAME"
-    
-    # Gate H: Traceability (wind code reference)
-    code_reference: str = "HK Wind Code 2019 - Wind Analysis"
-    terrain_factor: float = 0.0      # Sz terrain coefficient
+
+    # Traceability (wind code reference)
+    code_reference: str = "HK COP Wind Effects 2019"
+    terrain_factor: float = 0.0      # Sz terrain coefficient (legacy)
     force_coefficient: float = 0.0   # Cf aerodynamic coefficient
-    design_pressure: float = 0.0     # kPa (reference_pressure * terrain_factor)
-    
-    # Gate H: Per-floor wind loads (empty lists if not calculated)
+    design_pressure: float = 0.0     # kPa (legacy — single pressure)
+
+    # HK COP 2019: Adjustment factors
+    topography_factor: float = 1.0   # S_t (Clause 6, default 1.0)
+    directionality_factor: float = 1.0  # S_θ (default 1.0)
+
+    # Per-floor wind loads (empty lists if not calculated)
     floor_elevations: List[float] = field(default_factory=list)  # m (from base)
     floor_wind_x: List[float] = field(default_factory=list)      # kN per floor (X direction)
     floor_wind_y: List[float] = field(default_factory=list)      # kN per floor (Y direction)
     floor_torsion_z: List[float] = field(default_factory=list)   # kNm per floor (torsional)
+
+    # HK COP 2019: Per-floor traceability (Eq 3-2 and Eq 5-2/5-3)
+    floor_Qoz: List[float] = field(default_factory=list)   # kPa — Q_o,z at each floor
+    floor_Sqz: List[float] = field(default_factory=list)    # dimensionless — S_q,z at each floor
 
 
 @dataclass

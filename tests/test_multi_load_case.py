@@ -153,8 +153,14 @@ def test_load_case_pattern_map() -> None:
     assert LOAD_CASE_PATTERN_MAP["SDL"] == 2
     assert LOAD_CASE_PATTERN_MAP["LL"] == 3
     assert LOAD_CASE_PATTERN_MAP["Wx"] == 4
+    assert LOAD_CASE_PATTERN_MAP["Wx+"] == 4
+    assert LOAD_CASE_PATTERN_MAP["Wx-"] == 4
     assert LOAD_CASE_PATTERN_MAP["Wy"] == 6
+    assert LOAD_CASE_PATTERN_MAP["Wy+"] == 6
+    assert LOAD_CASE_PATTERN_MAP["Wy-"] == 6
     assert LOAD_CASE_PATTERN_MAP["Wtz"] == 8
+    assert LOAD_CASE_PATTERN_MAP["Wtz+"] == 8
+    assert LOAD_CASE_PATTERN_MAP["Wtz-"] == 8
     assert LOAD_CASE_PATTERN_MAP["combined"] == 0
 
 

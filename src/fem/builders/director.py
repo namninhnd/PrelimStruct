@@ -391,23 +391,18 @@ class FEMModelDirector:
                     UserWarning
                 )
             else:
-                if wind_result.base_shear_x > 0.0 or wind_result.base_shear_y > 0.0:
-                    base_shear_x = wind_result.base_shear_x
-                    base_shear_y = wind_result.base_shear_y
-                else:
-                    base_shear_x = wind_result.base_shear
-                    base_shear_y = wind_result.base_shear
-
                 floor_shears_x = _compute_floor_shears(
-                    base_shear_x,
-                    self.project.geometry.story_height,
-                    self.project.geometry.floors
+                    wind_result=wind_result,
+                    direction="X",
+                    story_height=self.project.geometry.story_height,
+                    floors=self.project.geometry.floors,
                 )
 
                 floor_shears_y = _compute_floor_shears(
-                    base_shear_y,
-                    self.project.geometry.story_height,
-                    self.project.geometry.floors
+                    wind_result=wind_result,
+                    direction="Y",
+                    story_height=self.project.geometry.story_height,
+                    floors=self.project.geometry.floors,
                 )
 
                 building_width = self.project.lateral.building_width

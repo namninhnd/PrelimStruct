@@ -48,8 +48,9 @@ def test_lock_and_fem_wind_cleanup_behavior():
         r'key="sidebar_wind_base_shear_x"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_wind_base_shear_y"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_wind_reference_pressure_manual"[\s\S]*?disabled=inputs_locked',
-        r'key="sidebar_wind_reference_pressure_calc"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_wind_force_coefficient"[\s\S]*?disabled=inputs_locked',
+        r'key="sidebar_wind_topography_factor"[\s\S]*?disabled=inputs_locked',
+        r'key="sidebar_wind_directionality_factor"[\s\S]*?disabled=inputs_locked',
     ]
     for pattern in app_patterns:
         assert re.search(pattern, app_text)
@@ -59,8 +60,9 @@ def test_lock_and_fem_wind_cleanup_behavior():
         r'key="sidebar_module_wind_base_shear_x"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_module_wind_base_shear_y"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_module_wind_reference_pressure_manual"[\s\S]*?disabled=inputs_locked',
-        r'key="sidebar_module_wind_reference_pressure_calc"[\s\S]*?disabled=inputs_locked',
         r'key="sidebar_module_wind_force_coefficient"[\s\S]*?disabled=inputs_locked',
+        r'key="sidebar_module_wind_topography_factor"[\s\S]*?disabled=inputs_locked',
+        r'key="sidebar_module_wind_directionality_factor"[\s\S]*?disabled=inputs_locked',
     ]
     for pattern in sidebar_patterns:
         assert re.search(pattern, sidebar_text)
