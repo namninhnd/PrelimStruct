@@ -10,9 +10,6 @@ from typing import List, Tuple, Optional
 import math
 
 from src.core.data_models import CoreWallConfig, CoreWallGeometry, CoreWallSectionProperties, TubeOpeningPlacement
-from src.fem.slab_element import SlabOpening
-
-
 def resolve_i_section_plan_dimensions(
     geometry: CoreWallGeometry,
     *,

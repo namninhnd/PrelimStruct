@@ -16,7 +16,7 @@ Reference: https://opensees.berkeley.edu/wiki/index.php?title=Getting_Started_wi
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Optional, Set
+from typing import Dict, List, Tuple, Optional, Set, TYPE_CHECKING
 import logging
 import math
 
@@ -41,8 +41,10 @@ from src.fem.core_wall_geometry import (
 from src.fem.coupling_beam import CouplingBeamGenerator
 from src.fem.fem_engine import FEMModel, RigidDiaphragm, Load, Node, Element, ElementType, UniformLoad
 from src.fem.materials import ConcreteProperties, get_elastic_beam_section, get_elastic_membrane_plate_section, get_plane_stress_material, get_plate_fiber_section
-from src.fem.slab_element import SlabPanel, SlabMeshGenerator, SlabOpening
 from src.fem.wall_element import WallPanel, WallMeshGenerator
+
+if TYPE_CHECKING:
+    from src.fem.slab_element import SlabOpening
 
 
 def _group_nodes_by_elevation(model: FEMModel, tolerance: float = 1e-6) -> Dict[float, List[int]]:
@@ -493,7 +495,9 @@ def _get_core_opening_for_slab(
     core_geometry: CoreWallGeometry,
     offset_x: float,
     offset_y: float,
-) -> Optional[SlabOpening]:
+) -> Optional["SlabOpening"]:
+    from src.fem.slab_element import SlabOpening
+
     config = core_geometry.config
     
     if config == CoreWallConfig.TUBE_WITH_OPENINGS:
@@ -1744,8 +1748,12 @@ def build_fem_model(project: ProjectData,
     core_trim_polygon_global: Optional[List[Tuple[float, float]]] = None
     core_boundary_points: List[Tuple[float, float]] = []
 
-    # Warn if beam trimming is requested but core geometry is missing
-    if options.trim_beams_at_core and not project.lateral.core_geometry:
+    # Warn only when a core wall is configured but detailed geometry is missing.
+    if (
+        options.trim_beams_at_core
+        and project.lateral.core_wall_config is not None
+        and not project.lateral.core_geometry
+    ):
         logger.warning(
             "Beam trimming at core wall requested but core_geometry is None. "
             "Beams will not be trimmed. Set core_geometry in LateralInput to enable trimming."
@@ -2097,8 +2105,8 @@ def build_fem_model(project: ProjectData,
         
         # Create wall mesh generator
         wall_mesh_generator = WallMeshGenerator(
-            base_node_tag=50000,    # Use 50000-59999 range for wall nodes
-            base_element_tag=50000,  # Use 50000-59999 range for wall elements
+            base_node_tag=50000,
+            base_element_tag=max(50000, max(model.elements.keys(), default=0) + 1),
         )
         wall_nodes_by_floor: Dict[int, Set[int]] = {}
         
@@ -2170,7 +2178,8 @@ def build_fem_model(project: ProjectData,
                 coupling_self_weight = CONCRETE_DENSITY * coupling_width_m * coupling_depth_m
                 coupling_w_total = coupling_self_weight * 1000.0  # N/m
                 
-                coupling_element_tag = 70000  # Use 70000+ range for coupling beams
+                next_available_element_tag = max(model.elements.keys(), default=0) + 1
+                coupling_element_tag = max(70000, next_available_element_tag)
                 coupling_beams_created = 0
                 
                 # Generate coupling beams at each floor level
@@ -2278,6 +2287,8 @@ def build_fem_model(project: ProjectData,
     slab_element_tags: List[int] = []  # Collect slab element tags for surface loads
     
     if options.include_slabs:
+        from src.fem.slab_element import SlabPanel, SlabMeshGenerator
+
         slab_concrete = ConcreteProperties(fcu=project.materials.fcu_beam)
         slab_section = get_elastic_membrane_plate_section(
             slab_concrete,
@@ -2293,7 +2304,7 @@ def build_fem_model(project: ProjectData,
         
         slab_generator = SlabMeshGenerator(
             base_node_tag=60000,
-            base_element_tag=60000,
+            base_element_tag=max(60000, max(model.elements.keys(), default=0) + 1),
         )
         
         slab_openings: List[SlabOpening] = []

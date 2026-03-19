@@ -17,6 +17,19 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _point_in_polygon(point: Tuple[float, float], polygon: List[Tuple[float, float]]) -> bool:
+    x, y = point
+    inside = False
+    j = len(polygon) - 1
+    for i in range(len(polygon)):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
 @dataclass
 class SlabPanel:
     """Single slab panel definition.
@@ -302,7 +315,6 @@ class SlabMeshGenerator:
                 skip_element = False
                 for opening in openings:
                     if opening.polygon_vertices is not None:
-                        from src.fem.model_builder import _point_in_polygon
                         if _point_in_polygon((elem_center_x, elem_center_y), opening.polygon_vertices):
                             skip_element = True
                             skipped_for_openings += 1

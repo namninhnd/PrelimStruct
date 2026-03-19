@@ -267,6 +267,61 @@ def test_runtime_coupling_beam_locations_follow_opening_placement(
     assert observed_y_levels == expected_y_levels
 
 
+def test_large_i_section_model_avoids_coupling_beam_tag_collision():
+    project = ProjectData(
+        geometry=GeometryInput(
+            bay_x=8.0,
+            bay_y=8.0,
+            floors=20,
+            story_height=3.6,
+            num_bays_x=4,
+            num_bays_y=4,
+        ),
+        loads=LoadInput(live_load_class="2", live_load_sub="2.5", dead_load=2.0),
+        materials=MaterialInput(fcu_slab=35, fcu_beam=40, fcu_column=45),
+        lateral=LateralInput(
+            building_width=32.0,
+            building_depth=32.0,
+            core_wall_config=CoreWallConfig.I_SECTION,
+            wall_thickness=500.0,
+            core_geometry=CoreWallGeometry(
+                config=CoreWallConfig.I_SECTION,
+                wall_thickness=500.0,
+                length_x=6000.0,
+                length_y=6000.0,
+                flange_width=3000.0,
+                web_length=6000.0,
+            ),
+        ),
+    )
+
+    model = build_fem_model(
+        project,
+        ModelBuilderOptions(
+            include_core_wall=True,
+            include_slabs=True,
+            apply_wind_loads=False,
+            num_secondary_beams=2,
+            secondary_beam_direction="Y",
+        ),
+    )
+
+    coupling_tags = sorted(
+        element.tag
+        for element in model.elements.values()
+        if element.geometry and "parent_coupling_beam_id" in element.geometry
+    )
+    slab_tags = [
+        element.tag
+        for element in model.elements.values()
+        if element.element_type == ElementType.SHELL_MITC4 and element.section_tag == 5
+    ]
+
+    assert coupling_tags, "Expected coupling beams in large I-section model"
+    assert slab_tags, "Expected slab shell elements in large I-section model"
+    assert min(slab_tags) > max(coupling_tags)
+
+
 def test_tube_both_opening_wall_mesh_stays_within_core_bounds():
     project = ProjectData(
         geometry=GeometryInput(
